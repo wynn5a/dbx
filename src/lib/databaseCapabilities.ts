@@ -117,6 +117,7 @@ export const TREE_SCHEMA_TYPES = new Set<DatabaseType>([
   "gaussdb",
   "jdbc",
   "trino",
+  "h2",
 ]);
 
 export const PG_LIKE_STRUCTURE_TYPES = new Set<DatabaseType>(["postgres", "redshift", "gaussdb"]);
