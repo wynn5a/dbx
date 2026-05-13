@@ -219,6 +219,7 @@ const detailCell = ref<{ rowIndex: number; col: number } | null>(null);
 const showCellDetail = ref(false);
 const transposeRowIndex = ref<number | null>(null);
 const showTranspose = ref(false);
+const transposePanelWidth = ref(320);
 const sortCol = ref<string | null>(null);
 const sortColIndex = ref<number | null>(null);
 const sortDir = ref<"asc" | "desc">("asc");
@@ -1726,6 +1727,21 @@ function transposeNav(delta: number) {
   }
 }
 
+function onTransposeResizeStart(e: MouseEvent) {
+  e.preventDefault();
+  const startX = e.clientX;
+  const startWidth = transposePanelWidth.value;
+  const onMove = (ev: MouseEvent) => {
+    transposePanelWidth.value = Math.max(200, startWidth - (ev.clientX - startX));
+  };
+  const onUp = () => {
+    document.removeEventListener("mousemove", onMove);
+    document.removeEventListener("mouseup", onUp);
+  };
+  document.addEventListener("mousemove", onMove);
+  document.addEventListener("mouseup", onUp);
+}
+
 watch(
   () => props.result,
   () => {
@@ -2681,8 +2697,13 @@ defineExpose({
             <!-- Transpose Panel -->
             <div
               v-if="showTranspose && transposeData"
-              class="relative w-80 shrink-0 border-l flex flex-col bg-background min-w-0"
+              class="relative shrink-0 border-l flex flex-col bg-background min-w-0"
+              :style="{ width: transposePanelWidth + 'px' }"
             >
+              <div
+                class="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize z-20 hover:bg-primary/30 active:bg-primary/50"
+                @mousedown="onTransposeResizeStart"
+              />
               <div class="h-9 flex items-center gap-2 px-3 border-b shrink-0 bg-muted/20">
                 <Rows3 class="w-3.5 h-3.5 text-muted-foreground" />
                 <span class="text-xs font-medium">{{ t("grid.transpose") }}</span>
