@@ -1,5 +1,8 @@
 import type { ConnectionConfig } from "./connections.js";
 import { createServer, connect as netConnect, type Server, type Socket } from "node:net";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { homedir, platform } from "node:os";
 
 export interface TableInfo {
   name: string;
@@ -225,6 +228,91 @@ function isMysqlType(dbType: string): boolean {
   return dbType === "mysql" || dbType === "doris" || dbType === "starrocks";
 }
 
+function isDirectType(dbType: string): boolean {
+  switch (dbType) {
+    case "postgres":
+    case "redshift":
+    case "mysql":
+    case "doris":
+    case "starrocks":
+      return true;
+    default:
+      return false;
+  }
+}
+
+interface BridgeQueryResult {
+  columns: string[];
+  rows: unknown[][];
+  affected_rows: number;
+  execution_time_ms: number;
+  truncated: boolean;
+}
+
+interface BridgeTableInfo {
+  name: string;
+  table_type: string;
+  comment: string | null;
+}
+
+interface BridgeColumnInfo {
+  name: string;
+  data_type: string;
+  is_nullable: boolean;
+  column_default: string | null;
+  is_primary_key: boolean;
+  comment: string | null;
+}
+
+function bridgeAppDataDir(): string {
+  const home = homedir();
+  switch (platform()) {
+    case "darwin":
+      return join(home, "Library", "Application Support", "com.dbx.app");
+    case "win32":
+      return join(process.env.APPDATA || join(home, "AppData", "Roaming"), "com.dbx.app");
+    default:
+      return join(home, ".config", "com.dbx.app");
+  }
+}
+
+async function bridgeDataRequest<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  let bridgeUrl: string;
+  try {
+    const portFile = join(bridgeAppDataDir(), "mcp-bridge-port");
+    const port = (await readFile(portFile, "utf-8")).trim();
+    bridgeUrl = `http://127.0.0.1:${port}`;
+  } catch {
+    throw new Error("DBX desktop app is not running. This database type requires DBX to be running for query execution.");
+  }
+  const res = await fetch(`${bridgeUrl}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => "");
+    let errorMsg: string;
+    try {
+      const parsed = JSON.parse(errBody);
+      errorMsg = parsed.error || errBody;
+    } catch {
+      errorMsg = errBody;
+    }
+    throw new Error(errorMsg || `Bridge request failed: ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+function convertBridgeQueryResult(result: BridgeQueryResult): QueryResult {
+  const rows = result.rows.slice(0, MAX_ROWS).map((row) => {
+    const obj: Record<string, unknown> = {};
+    result.columns.forEach((col, i) => { obj[col] = row[i]; });
+    return obj;
+  });
+  return { columns: result.columns, rows, row_count: rows.length };
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Query timed out after ${ms}ms`)), ms);
@@ -272,10 +360,26 @@ async function query(config: ConnectionConfig, sql: string, params?: unknown[]):
 }
 
 export async function executeQuery(config: ConnectionConfig, sql: string): Promise<QueryResult> {
-  return query(config, sql);
+  if (isDirectType(config.db_type)) {
+    return query(config, sql);
+  }
+  const result = await bridgeDataRequest<BridgeQueryResult>("/data/execute-query", {
+    connection_name: config.name,
+    database: config.database || "",
+    sql,
+  });
+  return convertBridgeQueryResult(result);
 }
 
 export async function listTables(config: ConnectionConfig, schema?: string): Promise<TableInfo[]> {
+  if (!isDirectType(config.db_type)) {
+    const tables = await bridgeDataRequest<BridgeTableInfo[]>("/data/list-tables", {
+      connection_name: config.name,
+      database: config.database || "",
+      schema: schema || "",
+    });
+    return tables.map((t) => ({ name: t.name, type: t.table_type || "TABLE" }));
+  }
   let result: QueryResult;
   if (isMysqlType(config.db_type)) {
     result = await query(config, `SELECT TABLE_NAME AS name, TABLE_TYPE AS type FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY TABLE_NAME`);
@@ -290,6 +394,22 @@ export async function listTables(config: ConnectionConfig, schema?: string): Pro
 }
 
 export async function describeTable(config: ConnectionConfig, table: string, schema?: string): Promise<ColumnInfo[]> {
+  if (!isDirectType(config.db_type)) {
+    const columns = await bridgeDataRequest<BridgeColumnInfo[]>("/data/describe-table", {
+      connection_name: config.name,
+      database: config.database || "",
+      schema: schema || "",
+      table,
+    });
+    return columns.map((c) => ({
+      name: c.name,
+      data_type: c.data_type,
+      is_nullable: c.is_nullable,
+      column_default: c.column_default,
+      is_primary_key: c.is_primary_key,
+      comment: c.comment,
+    }));
+  }
   let result: QueryResult;
   if (isMysqlType(config.db_type)) {
     result = await query(

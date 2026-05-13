@@ -61,7 +61,7 @@ function mdTable(headers: string[], rows: string[][]): string {
 
 const server = new McpServer({
   name: "dbx",
-  version: "0.2.1",
+  version: "0.3.0",
 });
 
 server.tool(
@@ -144,7 +144,7 @@ server.tool(
   "Add a new database connection to DBX",
   {
     name: z.string().describe("Connection name"),
-    db_type: z.string().describe("Database type: postgres, mysql, sqlite, redis, duckdb, clickhouse, sqlserver, mongodb, oracle, elasticsearch"),
+    db_type: z.string().describe("Database type: postgres, mysql, sqlite, redis, duckdb, clickhouse, sqlserver, mongodb, oracle, elasticsearch, doris, starrocks, redshift, dameng, kingbase, vastbase, goldendb, gaussdb, h2, snowflake, trino, hive, db2, informix, neo4j, cassandra, bigquery, kylin, sundb, jdbc"),
     host: z.string().describe("Database host"),
     port: z.number().describe("Database port"),
     username: z.string().default("").describe("Username"),
