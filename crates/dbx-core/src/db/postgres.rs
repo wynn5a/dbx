@@ -201,11 +201,15 @@ pub async fn list_databases(pool: &PgPool) -> Result<Vec<DatabaseInfo>, String> 
 
 pub async fn list_tables(pool: &PgPool, schema: &str) -> Result<Vec<TableInfo>, String> {
     let rows: Vec<PgRow> = sqlx::query(
-        "SELECT t.table_name, t.table_type, obj_description(c.oid) AS table_comment \
-         FROM information_schema.tables t \
-         LEFT JOIN pg_catalog.pg_class c ON c.relname = t.table_name \
-         LEFT JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace AND n.nspname = t.table_schema \
-         WHERE t.table_schema = $1 ORDER BY t.table_name",
+        "SELECT c.relname AS table_name, \
+         CASE c.relkind WHEN 'r' THEN 'BASE TABLE' WHEN 'v' THEN 'VIEW' \
+           WHEN 'm' THEN 'MATERIALIZED VIEW' WHEN 'f' THEN 'FOREIGN TABLE' \
+           WHEN 'p' THEN 'BASE TABLE' END AS table_type, \
+         obj_description(c.oid) AS table_comment \
+         FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = $1 AND c.relkind IN ('r','v','m','f','p') \
+         ORDER BY c.relname",
     )
     .bind(schema)
     .fetch_all(pool)
@@ -224,11 +228,11 @@ pub async fn list_tables(pool: &PgPool, schema: &str) -> Result<Vec<TableInfo>, 
 
 pub async fn list_schemas(pool: &PgPool) -> Result<Vec<String>, String> {
     let rows: Vec<PgRow> = sqlx::query(
-        "SELECT schema_name FROM information_schema.schemata \
-         WHERE schema_name NOT IN ('information_schema', 'pg_catalog', 'pg_toast') \
-         AND schema_name NOT LIKE 'pg_toast_temp_%' \
-         AND schema_name NOT LIKE 'pg_temp_%' \
-         ORDER BY schema_name",
+        "SELECT n.nspname AS schema_name FROM pg_catalog.pg_namespace n \
+         WHERE n.nspname NOT IN ('information_schema', 'pg_catalog', 'pg_toast') \
+         AND n.nspname NOT LIKE 'pg_toast_temp_%' \
+         AND n.nspname NOT LIKE 'pg_temp_%' \
+         ORDER BY n.nspname",
     )
     .fetch_all(pool)
     .await

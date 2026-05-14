@@ -171,20 +171,27 @@ impl AppState {
                 let con = db::duckdb_driver::connect_path(&expand_tilde(&db_config.host))?;
                 PoolKind::DuckDb(con)
             }
-            DatabaseType::MongoDb => match db::mongo_driver::connect(&url).await {
-                Ok(client) => {
-                    db::mongo_driver::test_connection(&client).await?;
-                    PoolKind::MongoDb(client)
-                }
-                Err(e) if e.contains("wire version") => {
-                    log::info!("Native MongoDB driver failed ({e}), falling back to agent driver");
+            DatabaseType::MongoDb => {
+                let native_err = match db::mongo_driver::connect(&url).await {
+                    Ok(client) => match db::mongo_driver::test_connection(&client).await {
+                        Ok(()) => {
+                            self.connections.write().await.insert(pool_key.clone(), PoolKind::MongoDb(client));
+                            return Ok(pool_key);
+                        }
+                        Err(e) => e,
+                    },
+                    Err(e) => e,
+                };
+                if native_err.contains("wire version") {
+                    log::info!("Native MongoDB driver failed ({native_err}), falling back to agent driver");
                     let connect_params = serde_json::json!({ "connection": agent_connect_params(&db_config, &host, port, db_config.effective_database().unwrap_or("")) });
                     let mut client = self.agent_manager.spawn(&DatabaseType::MongoDb, None).await?;
                     client.call::<serde_json::Value>("connect", connect_params).await?;
                     PoolKind::Agent(Arc::new(tokio::sync::Mutex::new(client)))
+                } else {
+                    return Err(native_err);
                 }
-                Err(e) => return Err(e),
-            },
+            }
             DatabaseType::ClickHouse => {
                 let username = if db_config.username.is_empty() { None } else { Some(db_config.username.clone()) };
                 let password = if db_config.password.is_empty() { None } else { Some(db_config.password.clone()) };
