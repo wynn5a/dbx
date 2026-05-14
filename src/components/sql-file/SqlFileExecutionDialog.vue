@@ -434,7 +434,7 @@ watch(open, (value) => {
                   </div>
                   <SelectValue v-else :placeholder="t('sqlFile.selectConnection')" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper">
                   <SelectItem v-for="c in sqlConnections" :key="c.id" :value="c.id">
                     <div class="flex items-center gap-1.5">
                       <DatabaseIcon :db-type="c.driver_profile || c.db_type" class="w-3.5 h-3.5" />
