@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
-import { Clock, Copy, Database, RotateCcw, Search, Trash2, X } from "lucide-vue-next";
+import { Clock, Copy, Database, RotateCcw, Search, Sparkles, Trash2, X } from "lucide-vue-next";
 import { RecycleScroller } from "vue-virtual-scroller";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -10,6 +10,7 @@ import { useHistoryStore } from "@/stores/historyStore";
 import { useToast } from "@/composables/useToast";
 import { shouldClearHistory, shouldDeleteHistoryEntry } from "@/lib/historyActions";
 import { resolveHistoryActivityKind } from "@/lib/historyActivityKind";
+import { canRollbackHistoryEntry } from "@/lib/historyAiAnalysis";
 import { HISTORY_ROW_HEIGHT, HISTORY_SCROLL_BUFFER, shouldVirtualizeHistory } from "@/lib/historyVirtualList";
 import type { HistoryEntry } from "@/lib/api";
 import * as api from "@/lib/api";
@@ -20,6 +21,7 @@ const store = useHistoryStore();
 
 const emit = defineEmits<{
   restore: [sql: string, entry: HistoryEntry];
+  analyzeAi: [entry: HistoryEntry];
   close: [];
 }>();
 
@@ -119,6 +121,10 @@ function detailsRows(entry: HistoryEntry) {
     [t("history.detail.time"), formatFullTime(entry.executed_at)],
     [t("history.detail.duration"), `${entry.execution_time_ms}ms`],
     [t("history.detail.affectedRows"), entry.affected_rows ?? "-"],
+    [
+      t("history.detail.rollback"),
+      canRollbackHistoryEntry(entry) ? t("history.rollbackAvailable") : t("history.rollbackUnavailable"),
+    ],
     [t("history.detail.status"), entry.success ? t("history.success") : t("history.failed")],
   ];
   if (entry.error) rows.push([t("history.detail.error"), entry.error]);
@@ -126,18 +132,20 @@ function detailsRows(entry: HistoryEntry) {
 }
 
 async function rollback(entry: HistoryEntry) {
-  if (!entry.connection_id || !entry.database || !entry.rollback_sql || isRollingBack.value) return;
+  if (!canRollbackHistoryEntry(entry) || isRollingBack.value) return;
   if (!window.confirm(t("history.rollbackConfirm"))) return;
 
+  const connectionId = entry.connection_id!;
+  const rollbackSql = entry.rollback_sql!;
   isRollingBack.value = true;
   const start = Date.now();
   try {
-    const result = await api.executeScript(entry.connection_id, entry.database, entry.rollback_sql);
+    const result = await api.executeScript(connectionId, entry.database, rollbackSql);
     await store.add({
-      connection_id: entry.connection_id,
+      connection_id: connectionId,
       connection_name: entry.connection_name,
       database: entry.database,
-      sql: entry.rollback_sql,
+      sql: rollbackSql,
       execution_time_ms: Date.now() - start,
       success: true,
       activity_kind: "data_change",
@@ -241,8 +249,12 @@ onMounted(() => store.load());
             <ContextMenuContent class="w-44">
               <ContextMenuItem @click="selectedEntry = entry">{{ t("history.viewDetails") }}</ContextMenuItem>
               <ContextMenuItem @click="restore(entry)">{{ t("history.restore") }}</ContextMenuItem>
+              <ContextMenuItem @click="emit('analyzeAi', entry)">
+                <Sparkles class="h-3.5 w-3.5" />
+                {{ t("history.analyzeWithAi") }}
+              </ContextMenuItem>
               <ContextMenuItem @click="copyText(entry.sql)">{{ t("history.copy") }}</ContextMenuItem>
-              <ContextMenuItem v-if="entry.rollback_sql" @click="rollback(entry)">{{
+              <ContextMenuItem v-if="canRollbackHistoryEntry(entry)" @click="rollback(entry)">{{
                 t("history.rollback")
               }}</ContextMenuItem>
               <ContextMenuItem class="text-destructive" @click="confirmDeleteEntry(entry.id)">{{
@@ -296,10 +308,14 @@ onMounted(() => store.load());
           </div>
         </div>
         <DialogFooter>
+          <Button variant="outline" @click="selectedEntry && emit('analyzeAi', selectedEntry)">
+            <Sparkles class="h-4 w-4" />
+            {{ t("history.analyzeWithAi") }}
+          </Button>
           <Button variant="outline" @click="selectedEntry && restore(selectedEntry)">{{ t("history.restore") }}</Button>
           <Button
-            v-if="selectedEntry?.rollback_sql"
-            :disabled="isRollingBack || !selectedEntry.connection_id"
+            v-if="selectedEntry && canRollbackHistoryEntry(selectedEntry)"
+            :disabled="isRollingBack"
             @click="rollback(selectedEntry)"
           >
             <RotateCcw class="h-4 w-4" />

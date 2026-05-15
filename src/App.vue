@@ -46,6 +46,7 @@ import {
 import { isPreviewTab } from "@/lib/tabPresentation";
 import { supportsSqlFileExecution } from "@/lib/databaseCapabilities";
 import { classifyAiSqlExecution } from "@/lib/aiSqlExecutionPolicy";
+import { buildHistoryAiAnalysisPrompt } from "@/lib/historyAiAnalysis";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -189,6 +190,34 @@ function fixWithAi(errorMessage: string) {
     localStorage.setItem("dbx-ai-panel-open", "true");
   }
   nextTick(() => aiAssistantRef.value?.triggerAction("fix", errorMessage));
+}
+
+function openAiPanel() {
+  if (!showAiPanel.value) {
+    showAiPanel.value = true;
+    localStorage.setItem("dbx-ai-panel-open", "true");
+  }
+}
+
+function analyzeHistoryWithAi(entry: HistoryEntry) {
+  const connectionId = entry.connection_id || activeTab.value?.connectionId;
+  if (!connectionId) {
+    toast(t("history.aiAnalyzeNoConnection"), 5000);
+    return;
+  }
+
+  const config = connectionStore.getConfig(connectionId);
+  if (!config) {
+    toast(t("history.aiAnalyzeNoConnection"), 5000);
+    return;
+  }
+
+  openAiPanel();
+  const database = entry.database || activeTab.value?.database || resolveDefaultDatabase(config, []);
+  const title = t("history.aiAnalysisTab");
+  const tabId = queryStore.createTab(connectionId, database || "", title, "query");
+  queryStore.updateSql(tabId, entry.sql);
+  nextTick(() => aiAssistantRef.value?.triggerAction("explain", buildHistoryAiAnalysisPrompt(entry)));
 }
 
 function formatActiveSql() {
@@ -780,7 +809,11 @@ onUnmounted(() => {
             :style="{ width: historyWidth + 'px' }"
           >
             <div class="panel-resize-handle panel-resize-handle--left" @mousedown="startHistoryResize" />
-            <QueryHistory @restore="restoreHistorySql" @close="showHistory = false" />
+            <QueryHistory
+              @restore="restoreHistorySql"
+              @analyze-ai="analyzeHistoryWithAi"
+              @close="showHistory = false"
+            />
           </div>
         </div>
 
