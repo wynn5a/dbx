@@ -35,19 +35,13 @@ jobs:
         run: npx vue-tsc --noEmit --project apps/desktop/tsconfig.json
 
       - name: Frontend tests
-        run: pnpm test:coverage
+        run: pnpm test
 
       - name: Node package tests
         run: pnpm test:packages
 
       - name: Node package publish dry run
         run: pnpm publish:dry-run
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          files: coverage/lcov.info
-          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
