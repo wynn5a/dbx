@@ -66,6 +66,7 @@ export interface ConnectionConfig {
   proxy_password?: string;
   ssl?: boolean;
   sysdba?: boolean;
+  oracle_connection_type?: "service_name" | "sid";
   connection_string?: string;
   jdbc_driver_class?: string;
   jdbc_driver_paths?: string[];

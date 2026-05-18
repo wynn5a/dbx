@@ -57,6 +57,8 @@ pub struct ConnectionConfig {
     pub ssl: bool,
     #[serde(default)]
     pub sysdba: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oracle_connection_type: Option<String>,
     #[serde(default)]
     pub connection_string: Option<String>,
     /// Typed configuration for external tabular sources.
@@ -611,6 +613,7 @@ mod tests {
             proxy_password: String::new(),
             ssl: false,
             sysdba: false,
+            oracle_connection_type: None,
             connection_string: None,
             external_config: None,
             jdbc_driver_class: None,

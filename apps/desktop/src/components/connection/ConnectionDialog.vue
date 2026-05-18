@@ -77,6 +77,7 @@ const defaultForm = (): Omit<ConnectionConfig, "id"> => ({
   proxy_username: "",
   proxy_password: "",
   ssl: false,
+  oracle_connection_type: "service_name",
   connection_string: undefined,
   jdbc_driver_class: undefined,
   jdbc_driver_paths: [],
@@ -297,6 +298,7 @@ watch(
         proxy_username: config.proxy_username || "",
         proxy_password: config.proxy_password || "",
         ssl: config.ssl || false,
+        oracle_connection_type: config.oracle_connection_type || "service_name",
         connection_string: config.connection_string,
         jdbc_driver_class: config.jdbc_driver_class,
         jdbc_driver_paths: config.jdbc_driver_paths || [],
@@ -546,6 +548,11 @@ function connectionConfigForSubmit(id: string): ConnectionConfig {
   config.proxy_port = Number.isFinite(proxyPort) && proxyPort > 0 ? proxyPort : 1080;
   if (config.db_type === "mongodb" && !mongoUseUrl.value) {
     config.connection_string = undefined;
+  }
+  if (config.db_type !== "oracle") {
+    config.oracle_connection_type = undefined;
+  } else {
+    config.oracle_connection_type = config.oracle_connection_type || "service_name";
   }
   if (config.db_type === "jdbc") {
     config.host = "";
@@ -1187,6 +1194,40 @@ function openExternalUrl(url: string) {
                   <div class="grid grid-cols-4 items-center gap-4">
                     <Label class="text-right">{{ databaseLabel }}</Label>
                     <Input v-model="form.database" class="col-span-3" :placeholder="databasePlaceholder" />
+                  </div>
+
+                  <div v-if="form.db_type === 'oracle'" class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right text-xs">连接方式</Label>
+                    <div
+                      class="col-span-3 grid h-8 grid-cols-2 overflow-hidden rounded-md border border-input bg-muted/30 p-0.5"
+                    >
+                      <button
+                        type="button"
+                        class="h-7 rounded-sm px-3 text-sm transition-colors"
+                        :class="
+                          form.oracle_connection_type !== 'sid'
+                            ? 'bg-background text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        "
+                        :aria-pressed="form.oracle_connection_type !== 'sid'"
+                        @click="form.oracle_connection_type = 'service_name'"
+                      >
+                        服务名
+                      </button>
+                      <button
+                        type="button"
+                        class="h-7 rounded-sm px-3 text-sm transition-colors"
+                        :class="
+                          form.oracle_connection_type === 'sid'
+                            ? 'bg-background text-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        "
+                        :aria-pressed="form.oracle_connection_type === 'sid'"
+                        @click="form.oracle_connection_type = 'sid'"
+                      >
+                        SID
+                      </button>
+                    </div>
                   </div>
 
                   <div v-if="shouldShowAgentDriverInstallHint" class="grid grid-cols-4 items-center gap-4">

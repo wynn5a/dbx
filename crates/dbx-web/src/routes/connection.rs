@@ -161,6 +161,7 @@ mod tests {
             proxy_password: String::new(),
             ssl: false,
             sysdba: false,
+            oracle_connection_type: None,
             connection_string: None,
             external_config: None,
             jdbc_driver_class: None,

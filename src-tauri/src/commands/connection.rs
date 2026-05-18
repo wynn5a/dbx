@@ -53,6 +53,7 @@ mod tests {
             proxy_password: String::new(),
             ssl: false,
             sysdba: false,
+            oracle_connection_type: None,
             connection_string: Some(
                 "mongodb://mongouser:secret@172.22.4.42:27017/RestCloud_V45PUB_Gateway?authSource=admin".to_string(),
             ),

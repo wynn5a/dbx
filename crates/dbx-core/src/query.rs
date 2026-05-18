@@ -1041,6 +1041,7 @@ mod tests {
             proxy_password: String::new(),
             ssl: false,
             sysdba: false,
+            oracle_connection_type: None,
             connection_string: Some("jdbc:h2:mem:test".to_string()),
             external_config: None,
             jdbc_driver_class: None,

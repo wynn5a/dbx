@@ -440,6 +440,8 @@ pub fn redacted_connection_url_for_endpoint(config: &ConnectionConfig, host: &st
 pub fn agent_connect_params(config: &ConnectionConfig, host: &str, port: u16, database: &str) -> serde_json::Value {
     let connection_string = if config.db_type == DatabaseType::MongoDb {
         config.connection_url_with_host(host, port)
+    } else if config.db_type == DatabaseType::Oracle {
+        oracle_jdbc_connection_string(config, host, port, database)
     } else {
         config.connection_string.as_deref().unwrap_or("").to_string()
     };
@@ -453,6 +455,19 @@ pub fn agent_connect_params(config: &ConnectionConfig, host: &str, port: u16, da
         "url_params": config.url_params.as_deref().unwrap_or(""),
         "connection_string": connection_string,
     })
+}
+
+fn oracle_jdbc_connection_string(config: &ConnectionConfig, host: &str, port: u16, database: &str) -> String {
+    let database = database.trim();
+    if database.is_empty() {
+        return config.connection_string.as_deref().unwrap_or("").to_string();
+    }
+
+    if config.oracle_connection_type.as_deref() == Some("sid") {
+        format!("jdbc:oracle:thin:@{host}:{port}:{database}")
+    } else {
+        format!("jdbc:oracle:thin:@//{host}:{port}/{database}")
+    }
 }
 
 pub async fn probe_connection_endpoint(config: &ConnectionConfig, host: &str, port: u16) -> Result<(), String> {
@@ -521,6 +536,7 @@ mod tests {
             proxy_password: String::new(),
             ssl: false,
             sysdba: false,
+            oracle_connection_type: None,
             connection_string: None,
             external_config: None,
             jdbc_driver_class: None,
@@ -558,6 +574,32 @@ mod tests {
         let params = agent_connect_params(&config, "172.22.4.42", 27017, "RestCloud_V45PUB_Gateway");
 
         assert_eq!(params["connection_string"], "mongodb://mongouser:secret@172.22.4.42:27017/RestCloud%5FV45PUB%5FGateway?authSource=admin&authMechanism=SCRAM-SHA-1");
+    }
+
+    #[test]
+    fn agent_connect_params_build_oracle_service_connection_string() {
+        let mut config = mysql_config(Some("ORCLPDB1"));
+        config.db_type = DatabaseType::Oracle;
+        config.host = "oracle.example.com".to_string();
+        config.port = 1521;
+        config.username = "system".to_string();
+        config.password = "oracle".to_string();
+
+        let params = agent_connect_params(&config, "oracle.example.com", 1521, "ORCLPDB1");
+
+        assert_eq!(params["database"], "ORCLPDB1");
+        assert_eq!(params["connection_string"], "jdbc:oracle:thin:@//oracle.example.com:1521/ORCLPDB1");
+    }
+
+    #[test]
+    fn agent_connect_params_build_oracle_sid_connection_string() {
+        let mut config = mysql_config(Some("ORCL"));
+        config.db_type = DatabaseType::Oracle;
+        config.oracle_connection_type = Some("sid".to_string());
+
+        let params = agent_connect_params(&config, "127.0.0.1", 11521, "ORCL");
+
+        assert_eq!(params["connection_string"], "jdbc:oracle:thin:@127.0.0.1:11521:ORCL");
     }
 
     async fn test_app_state() -> (AppState, std::path::PathBuf) {
