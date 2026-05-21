@@ -408,6 +408,99 @@ function buildDropIndexSql(
   return `DROP INDEX ${quoteIdent(databaseType, indexName)};`;
 }
 
+function indexListChanged(next: string[], previous: string[] | null | undefined): boolean {
+  const nextClean = next.map(clean).filter(Boolean);
+  const previousClean = (previous ?? []).map(clean).filter(Boolean);
+  return nextClean.length !== previousClean.length || nextClean.some((value, i) => value !== previousClean[i]);
+}
+
+function originalIndexType(index: EditableStructureIndex): string {
+  return clean(index.original?.index_type).toUpperCase();
+}
+
+function normalizedIndexType(index: EditableStructureIndex): string {
+  return clean(index.indexType).toUpperCase();
+}
+
+function hasExistingIndexChange(index: EditableStructureIndex): boolean {
+  const original = index.original;
+  if (!original) return false;
+  return (
+    clean(index.name) !== clean(original.name) ||
+    indexListChanged(index.columns, original.columns) ||
+    index.isUnique !== original.is_unique ||
+    normalizedIndexType(index) !== originalIndexType(index) ||
+    indexListChanged(index.includedColumns, original.included_columns) ||
+    clean(index.filter) !== clean(original.filter) ||
+    clean(index.comment) !== clean(original.comment)
+  );
+}
+
+function mysqlIndexParts(indexType: string): { prefix: string; usingClause: string } {
+  const upper = indexType.toUpperCase();
+  if (upper === "FULLTEXT" || upper === "SPATIAL") return { prefix: `${upper} `, usingClause: "" };
+  if (upper === "RTREE") return { prefix: "SPATIAL ", usingClause: "" };
+  if (upper === "BTREE" || upper === "HASH") return { prefix: "", usingClause: ` USING ${upper}` };
+  return { prefix: "", usingClause: "" };
+}
+
+function buildCreateIndexStatements(
+  databaseType: StructureSqlFlavor,
+  table: string,
+  index: EditableStructureIndex,
+  warnings: string[],
+): string[] {
+  const capabilities = getTableStructureCapabilities(databaseType as DatabaseType | undefined);
+  const name = clean(index.name);
+  const columns = index.columns.map(clean).filter(Boolean);
+  if (!name || columns.length === 0) return [];
+
+  const unique = index.isUnique ? "UNIQUE " : "";
+  const cols = columns.map((column) => quoteIdent(databaseType, column)).join(", ");
+  const idxType = normalizedIndexType(index);
+  let typePrefix = "";
+  let usingClause = "";
+
+  if (idxType && capabilities.indexType) {
+    if (databaseType === "postgres") {
+      usingClause = ` USING ${idxType}`;
+    } else if (databaseType === "sqlserver") {
+      typePrefix = `${idxType} `;
+    } else if (databaseType === "mysql") {
+      const mysqlParts = mysqlIndexParts(idxType);
+      typePrefix = mysqlParts.prefix;
+      usingClause = mysqlParts.usingClause;
+    } else if (isOracleLike(databaseType) && idxType === "BITMAP") {
+      typePrefix = "BITMAP ";
+    }
+  }
+
+  const incCols = index.includedColumns.map(clean).filter(Boolean);
+  const includeClause =
+    incCols.length > 0 && capabilities.indexInclude && (databaseType === "postgres" || databaseType === "sqlserver")
+      ? ` INCLUDE (${incCols.map((c) => quoteIdent(databaseType, c)).join(", ")})`
+      : "";
+  const filter = clean(index.filter);
+  const supportsWhere =
+    capabilities.indexFilter &&
+    (databaseType === "postgres" || databaseType === "sqlserver" || databaseType === "sqlite");
+  const whereClause = filter && supportsWhere ? ` WHERE ${filter}` : "";
+  const createSql =
+    databaseType === "postgres"
+      ? `CREATE ${unique}${typePrefix}INDEX ${quoteIdent(databaseType, name)} ON ${table}${usingClause} (${cols})${includeClause}${whereClause};`
+      : `CREATE ${unique}${typePrefix}INDEX ${quoteIdent(databaseType, name)}${usingClause} ON ${table} (${cols})${includeClause}${whereClause};`;
+  const statements = [createSql];
+
+  const comment = clean(index.comment);
+  if (comment && capabilities.indexComment && databaseType === "postgres") {
+    statements.push(`COMMENT ON INDEX ${quoteIdent(databaseType, name)} IS ${quoteString(comment)};`);
+  } else if (comment && capabilities.indexComment && databaseType !== "postgres") {
+    warnings.push(`Index comments are not supported for ${databaseType ?? "this database"} from this editor.`);
+  }
+
+  return statements;
+}
+
 function buildIndexSql(options: BuildTableStructureChangeSqlOptions, warnings: string[]): string[] {
   const databaseType = options.databaseType;
   const capabilities = getTableStructureCapabilities(databaseType);
@@ -431,35 +524,26 @@ function buildIndexSql(options: BuildTableStructureChangeSqlOptions, warnings: s
       continue;
     }
 
-    if (index.original) continue;
-    const name = clean(index.name);
-    const columns = index.columns.map(clean).filter(Boolean);
-    if (!name || columns.length === 0) continue;
+    if (index.original) {
+      if (!hasExistingIndexChange(index)) continue;
+      if (!capabilities.rebuildIndex || !capabilities.dropIndex || !capabilities.createIndex) {
+        warnings.push(`Editing existing indexes is not supported for ${databaseLabel} from this editor.`);
+        continue;
+      }
+      if (index.original.is_primary) {
+        warnings.push(`Primary index "${index.original.name}" cannot be edited from this editor.`);
+        continue;
+      }
+      statements.push(buildDropIndexSql(dialect, table, options.schema, index.original.name));
+      statements.push(...buildCreateIndexStatements(dialect, table, index, warnings));
+      continue;
+    }
+
     if (!capabilities.createIndex) {
       warnings.push(`Creating indexes is not supported for ${databaseLabel} from this editor.`);
       continue;
     }
-    const unique = index.isUnique ? "UNIQUE " : "";
-    const cols = columns.map((column) => quoteIdent(dialect, column)).join(", ");
-    const idxType = clean(index.indexType);
-    const usingClause = idxType && capabilities.indexType && dialect === "postgres" ? ` USING ${idxType}` : "";
-    const typePrefix = idxType && capabilities.indexType && dialect === "sqlserver" ? `${idxType} ` : "";
-    const incCols = index.includedColumns.map(clean).filter(Boolean);
-    const includeClause =
-      incCols.length > 0 && capabilities.indexInclude && (dialect === "postgres" || dialect === "sqlserver")
-        ? ` INCLUDE (${incCols.map((c) => quoteIdent(dialect, c)).join(", ")})`
-        : "";
-    const filter = clean(index.filter);
-    const supportsWhere =
-      capabilities.indexFilter && (dialect === "postgres" || dialect === "sqlserver" || dialect === "sqlite");
-    const whereClause = filter && supportsWhere ? ` WHERE ${filter}` : "";
-    statements.push(
-      `CREATE ${unique}${typePrefix}INDEX ${quoteIdent(dialect, name)} ON ${table}${usingClause} (${cols})${includeClause}${whereClause};`,
-    );
-    const comment = clean(index.comment);
-    if (comment && capabilities.indexComment && dialect === "postgres") {
-      statements.push(`COMMENT ON INDEX ${quoteIdent(dialect, name)} IS ${quoteString(comment)};`);
-    }
+    statements.push(...buildCreateIndexStatements(dialect, table, index, warnings));
   }
 
   return statements;
@@ -478,7 +562,9 @@ function validateDraft(options: BuildTableStructureChangeSqlOptions): string[] {
     if (key) names.add(key);
   }
 
-  for (const index of options.indexes.filter((idx) => !idx.markedForDrop && !idx.original)) {
+  for (const index of options.indexes.filter(
+    (idx) => !idx.markedForDrop && (!idx.original || hasExistingIndexChange(idx)),
+  )) {
     if (!clean(index.name)) warnings.push("Index name cannot be empty.");
     if (index.columns.map(clean).filter(Boolean).length === 0) {
       warnings.push(`Index "${index.name || "(new)"}" needs at least one column.`);
@@ -564,21 +650,11 @@ export function buildCreateTableSql(options: BuildTableStructureChangeSqlOptions
   }
 
   for (const index of options.indexes.filter((idx) => !idx.markedForDrop && !idx.isPrimary)) {
-    const name = clean(index.name);
-    const columns = index.columns.map(clean).filter(Boolean);
-    if (!name || columns.length === 0) continue;
     if (!capabilities.createIndex) {
       warnings.push(`Creating indexes is not supported for ${databaseType ?? "this database"} from this editor.`);
       continue;
     }
-    const unique = index.isUnique ? "UNIQUE " : "";
-    const cols = columns.map((c) => quoteIdent(dialect, c)).join(", ");
-    const idxType = clean(index.indexType);
-    const usingClause = idxType && capabilities.indexType && dialect === "postgres" ? ` USING ${idxType}` : "";
-    const typePrefix = idxType && capabilities.indexType && dialect === "sqlserver" ? `${idxType} ` : "";
-    statements.push(
-      `CREATE ${unique}${typePrefix}INDEX ${quoteIdent(dialect, name)} ON ${table}${usingClause} (${cols});`,
-    );
+    statements.push(...buildCreateIndexStatements(dialect, table, index, warnings));
   }
 
   return { statements, warnings };

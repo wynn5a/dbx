@@ -119,19 +119,17 @@ test("builds PostgreSQL rename, type, default, comment, and index statements", (
         },
       }),
     ],
-    indexes: [
-      index({ id: "new", name: "idx_accounts_status", columns: ["account_status"] }),
-    ],
+    indexes: [index({ id: "new", name: "idx_accounts_status", columns: ["account_status"] })],
   });
 
   assert.deepEqual(result.warnings, []);
   assert.deepEqual(result.statements, [
-    "ALTER TABLE \"public\".\"accounts\" RENAME COLUMN \"status\" TO \"account_status\";",
-    "ALTER TABLE \"public\".\"accounts\" ALTER COLUMN \"account_status\" TYPE text;",
-    "ALTER TABLE \"public\".\"accounts\" ALTER COLUMN \"account_status\" SET NOT NULL;",
-    "ALTER TABLE \"public\".\"accounts\" ALTER COLUMN \"account_status\" SET DEFAULT 'active';",
-    "COMMENT ON COLUMN \"public\".\"accounts\".\"account_status\" IS 'Current status';",
-    "CREATE INDEX \"idx_accounts_status\" ON \"public\".\"accounts\" (\"account_status\");",
+    'ALTER TABLE "public"."accounts" RENAME COLUMN "status" TO "account_status";',
+    'ALTER TABLE "public"."accounts" ALTER COLUMN "account_status" TYPE text;',
+    'ALTER TABLE "public"."accounts" ALTER COLUMN "account_status" SET NOT NULL;',
+    'ALTER TABLE "public"."accounts" ALTER COLUMN "account_status" SET DEFAULT \'active\';',
+    'COMMENT ON COLUMN "public"."accounts"."account_status" IS \'Current status\';',
+    'CREATE INDEX "idx_accounts_status" ON "public"."accounts" ("account_status");',
   ]);
 });
 
@@ -159,11 +157,9 @@ test("warns when SQLite cannot safely alter existing column attributes", () => {
     indexes: [],
   });
 
-  assert.deepEqual(result.statements, [
-    "ALTER TABLE \"notes\" ADD COLUMN \"body\" text;",
-  ]);
+  assert.deepEqual(result.statements, ['ALTER TABLE "notes" ADD COLUMN "body" text;']);
   assert.deepEqual(result.warnings, [
-    "SQLite cannot safely alter existing column \"title\" without rebuilding the table.",
+    'SQLite cannot safely alter existing column "title" without rebuilding the table.',
   ]);
 });
 
@@ -172,12 +168,8 @@ test("quotes SQL Server table, column, and index names with brackets", () => {
     databaseType: "sqlserver",
     schema: "dbo",
     tableName: "users",
-    columns: [
-      column({ id: "email", name: "email", dataType: "nvarchar(255)", isNullable: false }),
-    ],
-    indexes: [
-      index({ id: "idx", name: "idx_users_email", columns: ["email"] }),
-    ],
+    columns: [column({ id: "email", name: "email", dataType: "nvarchar(255)", isNullable: false })],
+    indexes: [index({ id: "idx", name: "idx_users_email", columns: ["email"] })],
   });
 
   assert.deepEqual(result.warnings, []);
@@ -244,9 +236,7 @@ test("PostgreSQL index with USING clause (index type)", () => {
   });
 
   assert.deepEqual(result.warnings, []);
-  assert.deepEqual(result.statements, [
-    'CREATE INDEX "idx_docs_body" ON "public"."docs" USING GIN ("body");',
-  ]);
+  assert.deepEqual(result.statements, ['CREATE INDEX "idx_docs_body" ON "public"."docs" USING GIN ("body");']);
 });
 
 test("PostgreSQL index with WHERE filter", () => {
@@ -361,9 +351,7 @@ test("SQL Server index with type prefix", () => {
   });
 
   assert.deepEqual(result.warnings, []);
-  assert.deepEqual(result.statements, [
-    "CREATE CLUSTERED INDEX [idx_logs_message] ON [dbo].[logs] ([message]);",
-  ]);
+  assert.deepEqual(result.statements, ["CREATE CLUSTERED INDEX [idx_logs_message] ON [dbo].[logs] ([message]);"]);
 });
 
 test("SQL Server index with INCLUDE clause", () => {
@@ -411,7 +399,7 @@ test("SQL Server index with type + include combined", () => {
   ]);
 });
 
-test("MySQL index omits USING, type prefix, INCLUDE, and WHERE (unsupported)", () => {
+test("MySQL index uses BTREE/HASH with USING and still omits unsupported INCLUDE and WHERE", () => {
   const result = buildTableStructureChangeSql({
     databaseType: "mysql",
     tableName: "orders",
@@ -430,8 +418,101 @@ test("MySQL index omits USING, type prefix, INCLUDE, and WHERE (unsupported)", (
   });
 
   assert.deepEqual(result.warnings, []);
+  assert.deepEqual(result.statements, ["CREATE INDEX `idx_orders_status` USING BTREE ON `orders` (`status`);"]);
+});
+
+test("MySQL fulltext and spatial index types are emitted as index prefixes", () => {
+  const result = buildTableStructureChangeSql({
+    databaseType: "mysql",
+    tableName: "docs",
+    columns: [],
+    indexes: [
+      index({
+        id: "fulltext",
+        name: "idx_docs_body",
+        columns: ["body"],
+        indexType: "FULLTEXT",
+      }),
+      index({
+        id: "spatial",
+        name: "idx_docs_location",
+        columns: ["location"],
+        indexType: "SPATIAL",
+      }),
+      index({
+        id: "rtree",
+        name: "idx_docs_shape",
+        columns: ["shape"],
+        indexType: "RTREE",
+      }),
+    ],
+  });
+
+  assert.deepEqual(result.warnings, []);
   assert.deepEqual(result.statements, [
-    "CREATE INDEX `idx_orders_status` ON `orders` (`status`);",
+    "CREATE FULLTEXT INDEX `idx_docs_body` ON `docs` (`body`);",
+    "CREATE SPATIAL INDEX `idx_docs_location` ON `docs` (`location`);",
+    "CREATE SPATIAL INDEX `idx_docs_shape` ON `docs` (`shape`);",
+  ]);
+});
+
+test("changed existing indexes are rebuilt with drop and create when supported", () => {
+  const result = buildTableStructureChangeSql({
+    databaseType: "postgres",
+    schema: "public",
+    tableName: "users",
+    columns: [],
+    indexes: [
+      index({
+        id: "existing",
+        name: "uniq_users_email",
+        columns: ["email"],
+        isUnique: true,
+        indexType: "BTREE",
+        original: {
+          name: "idx_users_name",
+          columns: ["name"],
+          is_unique: false,
+          is_primary: false,
+          index_type: "BTREE",
+        },
+      }),
+    ],
+  });
+
+  assert.deepEqual(result.warnings, []);
+  assert.deepEqual(result.statements, [
+    'DROP INDEX "public"."idx_users_name";',
+    'CREATE UNIQUE INDEX "uniq_users_email" ON "public"."users" USING BTREE ("email");',
+  ]);
+});
+
+test("changed existing MySQL indexes are rebuilt with MySQL index type syntax", () => {
+  const result = buildTableStructureChangeSql({
+    databaseType: "mysql",
+    tableName: "docs",
+    columns: [],
+    indexes: [
+      index({
+        id: "existing",
+        name: "idx_docs_body",
+        columns: ["body"],
+        indexType: "FULLTEXT",
+        original: {
+          name: "idx_docs_title",
+          columns: ["title"],
+          is_unique: false,
+          is_primary: false,
+          index_type: "BTREE",
+        },
+      }),
+    ],
+  });
+
+  assert.deepEqual(result.warnings, []);
+  assert.deepEqual(result.statements, [
+    "DROP INDEX `idx_docs_title` ON `docs`;",
+    "CREATE FULLTEXT INDEX `idx_docs_body` ON `docs` (`body`);",
   ]);
 });
 
@@ -462,15 +543,10 @@ test("index with empty name and columns produces warnings and no statements", ()
     schema: "public",
     tableName: "users",
     columns: [],
-    indexes: [
-      index({ id: "empty", name: "", columns: [] }),
-    ],
+    indexes: [index({ id: "empty", name: "", columns: [] })],
   });
 
-  assert.deepEqual(result.warnings, [
-    'Index name cannot be empty.',
-    'Index "(new)" needs at least one column.',
-  ]);
+  assert.deepEqual(result.warnings, ["Index name cannot be empty.", 'Index "(new)" needs at least one column.']);
   assert.deepEqual(result.statements, []);
 });
 
@@ -654,7 +730,7 @@ test("Redshift skips unsupported index operations while keeping column DDL", () 
   });
 
   assert.deepEqual(result.statements, ['ALTER TABLE "public"."events" ADD COLUMN "email" varchar(255);']);
-  assert.deepEqual(result.warnings, ['Creating indexes is not supported for redshift from this editor.']);
+  assert.deepEqual(result.warnings, ["Creating indexes is not supported for redshift from this editor."]);
 });
 
 test("builds ClickHouse column DDL and skips indexes", () => {
@@ -701,7 +777,7 @@ test("builds ClickHouse column DDL and skips indexes", () => {
     'ALTER TABLE "events" RENAME COLUMN "kind" TO "event_kind";',
     'ALTER TABLE "events" MODIFY COLUMN "event_kind" LowCardinality(String) DEFAULT \'view\';',
   ]);
-  assert.deepEqual(result.warnings, ['Creating indexes is not supported for clickhouse from this editor.']);
+  assert.deepEqual(result.warnings, ["Creating indexes is not supported for clickhouse from this editor."]);
 });
 
 test("builds ClickHouse nullable and comment column changes", () => {

@@ -24,6 +24,7 @@ export interface TableStructureCapabilities {
   comment: boolean;
   createIndex: boolean;
   dropIndex: boolean;
+  rebuildIndex: boolean;
   indexType: boolean;
   indexInclude: boolean;
   indexFilter: boolean;
@@ -43,6 +44,7 @@ const unsupportedCapabilities: TableStructureCapabilities = {
   comment: false,
   createIndex: false,
   dropIndex: false,
+  rebuildIndex: false,
   indexType: false,
   indexInclude: false,
   indexFilter: false,
@@ -66,6 +68,7 @@ const mysqlCapabilities = capabilities({
   comment: true,
   createIndex: true,
   dropIndex: true,
+  rebuildIndex: true,
   indexType: true,
 });
 
@@ -82,6 +85,7 @@ const postgresCapabilities = capabilities({
   comment: true,
   createIndex: true,
   dropIndex: true,
+  rebuildIndex: true,
   indexType: true,
   indexInclude: true,
   indexFilter: true,
@@ -92,6 +96,7 @@ const redshiftCapabilities = capabilities({
   ...postgresCapabilities,
   createIndex: false,
   dropIndex: false,
+  rebuildIndex: false,
   indexType: false,
   indexInclude: false,
   indexFilter: false,
@@ -106,6 +111,7 @@ const sqliteCapabilities = capabilities({
   renameColumn: true,
   createIndex: true,
   dropIndex: true,
+  rebuildIndex: true,
   indexFilter: true,
 });
 
@@ -117,6 +123,7 @@ const duckdbCapabilities = capabilities({
   renameColumn: true,
   createIndex: true,
   dropIndex: true,
+  rebuildIndex: true,
 });
 
 const sqlserverCapabilities = capabilities({
@@ -126,6 +133,7 @@ const sqlserverCapabilities = capabilities({
   dropColumn: true,
   createIndex: true,
   dropIndex: true,
+  rebuildIndex: true,
   indexType: true,
   indexInclude: true,
   indexFilter: true,
@@ -144,6 +152,7 @@ const oracleCapabilities = capabilities({
   comment: true,
   createIndex: true,
   dropIndex: true,
+  rebuildIndex: true,
   indexType: true,
 });
 
@@ -160,6 +169,7 @@ const h2Capabilities = capabilities({
   comment: true,
   createIndex: true,
   dropIndex: true,
+  rebuildIndex: true,
 });
 
 const clickhouseCapabilities = capabilities({

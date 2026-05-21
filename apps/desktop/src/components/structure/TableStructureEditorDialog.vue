@@ -308,11 +308,21 @@ function toggleDropIndex(index: EditableStructureIndex) {
 }
 
 function canEditIndexDraft(index: EditableStructureIndex): boolean {
-  return !index.original && !index.markedForDrop && structureCapabilities.value.createIndex;
+  if (index.markedForDrop || index.isPrimary) return false;
+  if (!index.original) return structureCapabilities.value.createIndex;
+  return (
+    structureCapabilities.value.rebuildIndex &&
+    structureCapabilities.value.createIndex &&
+    structureCapabilities.value.dropIndex
+  );
 }
 
 function canEditIndexFilter(index: EditableStructureIndex): boolean {
   return canEditIndexDraft(index) && structureCapabilities.value.indexFilter;
+}
+
+function canEditIndexComment(index: EditableStructureIndex): boolean {
+  return canEditIndexDraft(index) && structureCapabilities.value.indexComment;
 }
 
 function canDropIndex(index: EditableStructureIndex): boolean {
@@ -640,11 +650,8 @@ watch(
                         </label>
                       </td>
                       <td class="border-b border-r px-2 py-1.5">
-                        <span v-if="index.original" class="text-muted-foreground">{{
-                          index.indexType || "BTREE"
-                        }}</span>
                         <Select
-                          v-else-if="indexTypeOptions.length > 0"
+                          v-if="indexTypeOptions.length > 0"
                           :model-value="index.indexType || 'BTREE'"
                           :disabled="!canEditIndexDraft(index)"
                           @update:model-value="(v: any) => (index.indexType = String(v ?? ''))"
@@ -661,7 +668,7 @@ watch(
                           v-model="index.indexType"
                           class="h-7 font-mono text-xs"
                           placeholder="BTREE"
-                          :disabled="!canEditIndexDraft(index)"
+                          :disabled="!canEditIndexDraft(index) || !structureCapabilities.indexType"
                         />
                       </td>
                       <td class="overflow-hidden border-b border-r px-2 py-1.5">
@@ -712,13 +719,7 @@ watch(
                         />
                       </td>
                       <td class="border-b border-r px-2 py-1.5">
-                        <span v-if="index.original" class="text-muted-foreground text-xs">{{ index.comment }}</span>
-                        <Input
-                          v-else
-                          v-model="index.comment"
-                          class="h-7 text-xs"
-                          :disabled="!canEditIndexDraft(index) || !structureCapabilities.indexComment"
-                        />
+                        <Input v-model="index.comment" class="h-7 text-xs" :disabled="!canEditIndexComment(index)" />
                       </td>
                       <td class="border-b px-2 py-1.5">
                         <Badge v-if="index.isPrimary" variant="outline">{{ t("structureEditor.primary") }}</Badge>
