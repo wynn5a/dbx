@@ -209,6 +209,13 @@ fn mysql_error_should_retry_without_ssl(error: &str) -> bool {
         || error.contains("server closed session")
 }
 
+fn mysql_error_should_retry_with_text_protocol(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    (lower.contains("1105") && lower.contains("hy000"))
+        || lower.contains("prepared statement protocol")
+        || lower.contains("this command is not supported in the prepared statement protocol yet")
+}
+
 fn ssl_fallback_url(url: &str) -> Option<String> {
     if url.contains("ssl-mode=preferred") {
         Some(url.replace("ssl-mode=preferred", "ssl-mode=disabled"))
@@ -299,7 +306,7 @@ fn list_objects_sql(database: &str) -> String {
          WHERE TABLE_SCHEMA = {db} \
          UNION ALL \
          SELECT ROUTINE_NAME AS object_name, ROUTINE_TYPE AS object_type, NULL AS object_comment, \
-           CREATED AS created_at, LAST_ALTERED AS updated_at, \
+           NULL AS created_at, NULL AS updated_at, \
            CASE WHEN ROUTINE_TYPE = 'PROCEDURE' THEN 2 ELSE 3 END AS sort_order \
          FROM information_schema.ROUTINES \
          WHERE ROUTINE_SCHEMA = {db} AND ROUTINE_TYPE IN ('PROCEDURE', 'FUNCTION') \
@@ -380,6 +387,90 @@ fn query_result_row_limit(max_rows: Option<usize>) -> usize {
     max_rows.unwrap_or(crate::query::MAX_ROWS).max(1)
 }
 
+async fn execute_result_set_with_text_protocol(
+    pool: &MySqlPool,
+    sql: &str,
+    row_limit: usize,
+    start: Instant,
+) -> Result<QueryResult, String> {
+    let mut stream = sqlx::raw_sql(sql).fetch(&*pool);
+    let mut columns: Vec<String> = vec![];
+    let mut column_types: Vec<String> = vec![];
+    let mut result_rows: Vec<Vec<serde_json::Value>> = Vec::new();
+
+    while let Some(row) = stream.next().await {
+        let row: MySqlRow = row.map_err(|e| e.to_string())?;
+        if columns.is_empty() {
+            columns = row.columns().iter().map(|c| c.name().to_string()).collect();
+            column_types = row.columns().iter().map(|c| c.type_info().name().to_string()).collect();
+        }
+        result_rows.push(
+            (0..row.len())
+                .map(|i| mysql_value_to_json(&row, i, column_types.get(i).map(String::as_str).unwrap_or("")))
+                .collect(),
+        );
+        if result_rows.len() > row_limit {
+            break;
+        }
+    }
+
+    let truncated = result_rows.len() > row_limit;
+    if truncated {
+        result_rows.truncate(row_limit);
+    }
+
+    Ok(QueryResult {
+        columns,
+        rows: result_rows,
+        affected_rows: 0,
+        execution_time_ms: start.elapsed().as_millis(),
+        truncated,
+        session_id: None,
+        has_more: false,
+    })
+}
+
+async fn execute_result_set_with_prepared_protocol(
+    pool: &MySqlPool,
+    sql: &str,
+    row_limit: usize,
+    start: Instant,
+) -> Result<QueryResult, String> {
+    let desc = pool.describe(sql).await.map_err(|e| e.to_string())?;
+    let columns: Vec<String> = desc.columns().iter().map(|c| c.name().to_string()).collect();
+    let column_types: Vec<String> = desc.columns().iter().map(|c| c.type_info().name().to_string()).collect();
+
+    let mut stream = sqlx::query(sql).fetch(&*pool);
+    let mut result_rows: Vec<Vec<serde_json::Value>> = Vec::new();
+
+    while let Some(row) = stream.next().await {
+        let row = row.map_err(|e| e.to_string())?;
+        result_rows.push(
+            (0..row.len())
+                .map(|i| mysql_value_to_json(&row, i, column_types.get(i).map(String::as_str).unwrap_or("")))
+                .collect(),
+        );
+        if result_rows.len() > row_limit {
+            break;
+        }
+    }
+
+    let truncated = result_rows.len() > row_limit;
+    if truncated {
+        result_rows.truncate(row_limit);
+    }
+
+    Ok(QueryResult {
+        columns,
+        rows: result_rows,
+        affected_rows: 0,
+        execution_time_ms: start.elapsed().as_millis(),
+        truncated,
+        session_id: None,
+        has_more: false,
+    })
+}
+
 pub async fn execute_query(pool: &MySqlPool, sql: &str, bare: bool) -> Result<QueryResult, String> {
     execute_query_with_max_rows(pool, sql, bare, None).await
 }
@@ -395,75 +486,15 @@ pub async fn execute_query_with_max_rows(
 
     if is_result_set_query(sql) {
         if bare || requires_text_protocol_query(sql) {
-            let mut stream = sqlx::raw_sql(sql).fetch(&*pool);
-            let mut columns: Vec<String> = vec![];
-            let mut column_types: Vec<String> = vec![];
-            let mut result_rows: Vec<Vec<serde_json::Value>> = Vec::new();
-
-            while let Some(row) = stream.next().await {
-                let row: MySqlRow = row.map_err(|e| e.to_string())?;
-                if columns.is_empty() {
-                    columns = row.columns().iter().map(|c| c.name().to_string()).collect();
-                    column_types = row.columns().iter().map(|c| c.type_info().name().to_string()).collect();
-                }
-                result_rows.push(
-                    (0..row.len())
-                        .map(|i| mysql_value_to_json(&row, i, column_types.get(i).map(String::as_str).unwrap_or("")))
-                        .collect(),
-                );
-                if result_rows.len() > row_limit {
-                    break;
-                }
-            }
-
-            let truncated = result_rows.len() > row_limit;
-            if truncated {
-                result_rows.truncate(row_limit);
-            }
-
-            Ok(QueryResult {
-                columns,
-                rows: result_rows,
-                affected_rows: 0,
-                execution_time_ms: start.elapsed().as_millis(),
-                truncated,
-                session_id: None,
-                has_more: false,
-            })
+            execute_result_set_with_text_protocol(pool, sql, row_limit, start).await
         } else {
-            let desc = pool.describe(sql).await.map_err(|e| e.to_string())?;
-            let columns: Vec<String> = desc.columns().iter().map(|c| c.name().to_string()).collect();
-            let column_types: Vec<String> = desc.columns().iter().map(|c| c.type_info().name().to_string()).collect();
-
-            let mut stream = sqlx::query(sql).fetch(&*pool);
-            let mut result_rows: Vec<Vec<serde_json::Value>> = Vec::new();
-
-            while let Some(row) = stream.next().await {
-                let row = row.map_err(|e| e.to_string())?;
-                result_rows.push(
-                    (0..row.len())
-                        .map(|i| mysql_value_to_json(&row, i, column_types.get(i).map(String::as_str).unwrap_or("")))
-                        .collect(),
-                );
-                if result_rows.len() > row_limit {
-                    break;
+            match execute_result_set_with_prepared_protocol(pool, sql, row_limit, start).await {
+                Ok(result) => Ok(result),
+                Err(err) if mysql_error_should_retry_with_text_protocol(&err) => {
+                    execute_result_set_with_text_protocol(pool, sql, row_limit, start).await
                 }
+                Err(err) => Err(err),
             }
-
-            let truncated = result_rows.len() > row_limit;
-            if truncated {
-                result_rows.truncate(row_limit);
-            }
-
-            Ok(QueryResult {
-                columns,
-                rows: result_rows,
-                affected_rows: 0,
-                execution_time_ms: start.elapsed().as_millis(),
-                truncated,
-                session_id: None,
-                has_more: false,
-            })
         }
     } else {
         let result = sqlx::raw_sql(sql).execute(pool).await.map_err(|e| e.to_string())?;
@@ -613,6 +644,8 @@ mod tests {
         assert!(sql.contains("UPDATE_TIME"));
         assert!(sql.contains("'PROCEDURE'"));
         assert!(sql.contains("'FUNCTION'"));
+        assert!(!sql.contains("LAST_ALTERED"));
+        assert!(!sql.contains("CREATED AS created_at"));
     }
 
     #[test]
@@ -652,6 +685,13 @@ mod tests {
             server closed session with no notification";
 
         assert!(mysql_error_should_retry_without_ssl(error));
+    }
+
+    #[test]
+    fn mysql_unknown_error_can_retry_with_text_protocol() {
+        let error = "error returned from database: 1105 (HY000): Unknown error";
+
+        assert!(mysql_error_should_retry_with_text_protocol(error));
     }
 
     #[test]
