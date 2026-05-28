@@ -2572,6 +2572,10 @@ function rowNumberStatusClass(item: RowItem): string {
   return "text-muted-foreground";
 }
 
+function rowCellsUseSelectionVisual(rowId: number): boolean {
+  return hasRowSelection.value && isRowSelected(rowId) && !hasCellSelection.value;
+}
+
 function setRowStatusFilter(value: string) {
   rowStatusFilter.value = value as RowStatusFilter;
 }
@@ -5037,6 +5041,14 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                           cellIsSelected(item.displayIndex, visibleColIdx) && !item.isDirtyCol[actualColIdx],
                         'cell-selected-dirty':
                           cellIsSelected(item.displayIndex, visibleColIdx) && item.isDirtyCol[actualColIdx],
+                        'row-cell-selected':
+                          rowCellsUseSelectionVisual(item.id) &&
+                          !cellIsSelected(item.displayIndex, visibleColIdx) &&
+                          !item.isDirtyCol[actualColIdx],
+                        'row-cell-selected-dirty':
+                          rowCellsUseSelectionVisual(item.id) &&
+                          !cellIsSelected(item.displayIndex, visibleColIdx) &&
+                          item.isDirtyCol[actualColIdx],
                         'bg-yellow-200/60 dark:bg-yellow-500/20': cellIsSearchMatch(item.displayIndex, actualColIdx),
                         'ring-2 ring-inset ring-yellow-500 bg-yellow-300/60 dark:bg-yellow-500/40': cellIsCurrentMatch(
                           item.displayIndex,
@@ -5734,7 +5746,17 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 70%, transparent);
 }
 
+.row-cell-selected {
+  background-color: color-mix(in oklab, var(--primary) 25%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 70%, transparent);
+}
+
 .cell-selected-dirty {
+  background-color: color-mix(in oklab, oklch(0.8 0.15 85) 30%, color-mix(in oklab, var(--primary) 18%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 70%, transparent);
+}
+
+.row-cell-selected-dirty {
   background-color: color-mix(in oklab, oklch(0.8 0.15 85) 30%, color-mix(in oklab, var(--primary) 18%, transparent));
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 70%, transparent);
 }

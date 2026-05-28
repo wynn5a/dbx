@@ -26,6 +26,15 @@ test("data grid intercepts copy and select-all shortcuts for grid selections", (
   assert.match(source, /copySelectedRowsTsv\(\)/);
 });
 
+test("row number multi-selection reuses cell selection visuals", () => {
+  assert.match(source, /function rowCellsUseSelectionVisual\(rowId: number\): boolean/);
+  assert.match(source, /hasRowSelection\.value && isRowSelected\(rowId\) && !hasCellSelection\.value/);
+  assert.match(source, /'row-cell-selected':/);
+  assert.match(source, /'row-cell-selected-dirty':/);
+  assert.match(source, /\.row-cell-selected \{/);
+  assert.match(source, /\.row-cell-selected-dirty \{/);
+});
+
 test("transpose cells reuse grid cell selection and details", () => {
   assert.match(source, /function selectTransposeCell\(rowIndex: number, actualColIdx: number, event: MouseEvent\)/);
   assert.match(source, /transposeCellIsSelected\(cell\.recordIndex, cell\.valueIndex\)/);
