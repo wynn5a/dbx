@@ -97,6 +97,14 @@ import {
 import { matchesRowStatusFilter, type RowStatus, type RowStatusFilter } from "@/lib/gridRowStatus";
 import { displayCellValue, type CellValue } from "@/lib/cellValue";
 import {
+  BINARY_CELL_DOWNLOAD_MODES,
+  binaryCellDownloadFileName,
+  binaryCellDownloadPayload,
+  canDownloadBinaryCellValue,
+  downloadBinaryCellPayload,
+  type BinaryCellDownloadMode,
+} from "@/lib/binaryCellDownload";
+import {
   canFormatCellDetailJson,
   cellDetailEditorText,
   defaultCellDetailTab,
@@ -2198,6 +2206,11 @@ const contextCellValue = computed<CellValue | null>(() => {
   if (!contextCell.value || contextCell.value.col < 0) return null;
   return contextRowItem.value?.data[contextCell.value.col] ?? null;
 });
+const contextCellDetail = computed(() => {
+  const cell = contextCell.value;
+  if (!cell || cell.col < 0) return null;
+  return cellDetailFor(cell.rowIndex, cell.col);
+});
 function cellDetailFor(rowIndex: number, columnIndex: number): DataGridCellDetail | null {
   const item = displayItems.value[rowIndex];
   if (!item) return null;
@@ -3344,6 +3357,45 @@ function copyDetailColumnName() {
   copyText(activeCellDetail.value.column);
 }
 
+function canDownloadDetailBinaryValue(detail: DataGridCellDetail | null): boolean {
+  return !!detail && canDownloadBinaryCellValue(detail.value, detail.type);
+}
+
+async function downloadDetailBinaryValue(detail: DataGridCellDetail | null, mode: BinaryCellDownloadMode) {
+  if (!detail || !canDownloadDetailBinaryValue(detail)) return;
+  try {
+    const payload = binaryCellDownloadPayload(detail.value, mode);
+    const fileName = binaryCellDownloadFileName({
+      column: detail.column,
+      rowNumber: detail.rowNumber,
+      mode,
+      extension: payload.extension,
+    });
+    const result = await downloadBinaryCellPayload(payload, fileName);
+    if (result.kind === "saved" && result.path) {
+      toast(t("grid.downloadSaved", { path: result.path }));
+    } else if (result.kind === "browser-download") {
+      toast(t("grid.downloadStarted", { fileName: result.fileName ?? fileName }));
+    }
+  } catch (e: any) {
+    toast(t("grid.exportFailed", { message: e?.message || String(e) }), 5000);
+  }
+}
+
+function binaryDownloadSubmenu(detail: DataGridCellDetail | null): ContextMenuItem | null {
+  if (!canDownloadDetailBinaryValue(detail)) return null;
+  return {
+    label: t("grid.downloadBinaryValue"),
+    icon: Download,
+    children: BINARY_CELL_DOWNLOAD_MODES.map((mode) => ({
+      label: t(`grid.binaryDownload.${mode}`),
+      action: () => {
+        void downloadDetailBinaryValue(detail, mode);
+      },
+    })),
+  };
+}
+
 async function copyDetailSqlCondition() {
   if (!canCopyPreparedDetailSqlCondition()) return;
   copyText(detailSqlConditionCopy.value.text);
@@ -4331,6 +4383,8 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
   if (contextCell.value) {
     if (contextColumn.value) {
       items.push({ label: t("grid.openCellDetailsDialog"), action: openContextCellDetailDialog, icon: Maximize2 });
+      const downloadItem = binaryDownloadSubmenu(contextCellDetail.value);
+      if (downloadItem) items.push(downloadItem);
       items.push({
         label: t("grid.openColumnDetailsDialog"),
         action: openContextColumnDetailDialog,
@@ -6049,7 +6103,46 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     </div>
                   </div>
                   <div class="space-y-1">
-                    <div class="text-muted-foreground">{{ t("grid.cellValue") }}</div>
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="text-muted-foreground">{{ t("grid.cellValue") }}</div>
+                      <div v-if="!isEditingDetail" class="flex items-center gap-1">
+                        <Button
+                          v-if="activeCellDetail.isEditable"
+                          variant="ghost"
+                          size="icon"
+                          class="h-6 w-6"
+                          :title="t('grid.editValue')"
+                          @click="startDetailEdit"
+                        >
+                          <Pencil class="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          class="h-6 w-6"
+                          :title="t('grid.copyValue')"
+                          @click="copyDetailValue"
+                        >
+                          <Copy class="h-3 w-3" />
+                        </Button>
+                        <DropdownMenu v-if="canDownloadDetailBinaryValue(activeCellDetail)">
+                          <DropdownMenuTrigger as-child>
+                            <Button variant="ghost" size="icon" class="h-6 w-6" :title="t('grid.downloadBinaryValue')">
+                              <Download class="h-3 w-3" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" class="w-44">
+                            <DropdownMenuItem
+                              v-for="mode in BINARY_CELL_DOWNLOAD_MODES"
+                              :key="mode"
+                              @click="downloadDetailBinaryValue(activeCellDetail, mode)"
+                            >
+                              {{ t(`grid.binaryDownload.${mode}`) }}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
                     <div v-if="activeCellDetail.imagePreviewUrl && !isEditingDetail" class="space-y-1.5">
                       <div class="text-muted-foreground">{{ t("grid.imagePreview") }}</div>
                       <a
@@ -6130,15 +6223,6 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
 
                 <div class="border-t p-2 grid grid-cols-1 gap-1">
                   <Button
-                    v-if="activeCellDetail.isEditable && !isEditingDetail"
-                    variant="ghost"
-                    size="sm"
-                    class="h-7 justify-start text-xs"
-                    @click="startDetailEdit"
-                  >
-                    <Pencil class="w-3 h-3 mr-2" /> {{ t("grid.editValue") }}
-                  </Button>
-                  <Button
                     v-if="activeCellDetail.isEditable && activeCellDetail.value !== null"
                     variant="ghost"
                     size="sm"
@@ -6146,9 +6230,6 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     @click="setDetailNull"
                   >
                     <X class="w-3 h-3 mr-2" /> {{ t("grid.setNull") }}
-                  </Button>
-                  <Button variant="ghost" size="sm" class="h-7 justify-start text-xs" @click="copyDetailValue">
-                    <Copy class="w-3 h-3 mr-2" /> {{ t("grid.copyValue") }}
                   </Button>
                   <Button variant="ghost" size="sm" class="h-7 justify-start text-xs" @click="copyDetailColumnName">
                     <Copy class="w-3 h-3 mr-2" /> {{ t("grid.copyColumnName") }}
@@ -6379,7 +6460,46 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
           </div>
 
           <div class="space-y-2">
-            <div class="text-muted-foreground">{{ t("grid.cellValue") }}</div>
+            <div class="flex items-center justify-between gap-2">
+              <div class="text-muted-foreground">{{ t("grid.cellValue") }}</div>
+              <div class="flex items-center gap-1">
+                <Button
+                  v-if="dialogCellDetail.isEditable"
+                  variant="ghost"
+                  size="icon"
+                  class="h-6 w-6"
+                  :title="t('grid.editValue')"
+                  @click="openDialogCellInSidePanel"
+                >
+                  <Pencil class="h-3 w-3" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="h-6 w-6"
+                  :title="t('grid.copyValue')"
+                  @click="copyDialogCellValue"
+                >
+                  <Copy class="h-3 w-3" />
+                </Button>
+                <DropdownMenu v-if="canDownloadDetailBinaryValue(dialogCellDetail)">
+                  <DropdownMenuTrigger as-child>
+                    <Button variant="ghost" size="icon" class="h-6 w-6" :title="t('grid.downloadBinaryValue')">
+                      <Download class="h-3 w-3" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" class="w-44">
+                    <DropdownMenuItem
+                      v-for="mode in BINARY_CELL_DOWNLOAD_MODES"
+                      :key="mode"
+                      @click="downloadDetailBinaryValue(dialogCellDetail, mode)"
+                    >
+                      {{ t(`grid.binaryDownload.${mode}`) }}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
             <a
               v-if="dialogCellDetail.imagePreviewUrl"
               :href="dialogCellDetail.imagePreviewUrl"
@@ -6432,22 +6552,10 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
 
         <DialogFooter class="shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div class="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" class="h-7 text-xs" @click="copyDialogCellValue">
-              <Copy class="mr-1.5 h-3 w-3" /> {{ t("grid.copyValue") }}
-            </Button>
             <Button variant="outline" size="sm" class="h-7 text-xs" @click="copyDialogCellColumnName">
               <Copy class="mr-1.5 h-3 w-3" /> {{ t("grid.copyColumnName") }}
             </Button>
           </div>
-          <Button
-            v-if="dialogCellDetail.isEditable"
-            variant="ghost"
-            size="sm"
-            class="h-7 text-xs"
-            @click="openDialogCellInSidePanel"
-          >
-            <Pencil class="mr-1.5 h-3 w-3" /> {{ t("grid.editValue") }}
-          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
