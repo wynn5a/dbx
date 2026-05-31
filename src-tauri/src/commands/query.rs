@@ -6,9 +6,6 @@ use dbx_core::db;
 use dbx_core::models::connection::DatabaseType;
 use dbx_core::sql::split_sql_statements;
 
-// Re-export core functions for use by other modules (e.g., sql_file.rs)
-pub use dbx_core::query::execute_sql_statement;
-
 #[tauri::command]
 pub async fn execute_query(
     state: State<'_, Arc<AppState>>,
