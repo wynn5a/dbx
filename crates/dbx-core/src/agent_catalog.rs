@@ -225,7 +225,7 @@ const AGENT_CATALOG: &[AgentCatalogEntry] = &[
         db_type: DatabaseType::Iris,
         key: "iris",
         label: "InterSystems IRIS",
-        store_visible: false,
+        store_visible: true,
         profiles: &[],
     },
 ];

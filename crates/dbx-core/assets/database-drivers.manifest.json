@@ -462,6 +462,17 @@
       "defaultPort": 5138
     },
     {
+      "dbType": "iris",
+      "label": "InterSystems IRIS",
+      "runtimeMode": "agent",
+      "mcpMode": "bridge",
+      "agentKey": "iris",
+      "singleConnectionPool": true,
+      "metadataConnectionScoped": false,
+      "skipTcpProbe": true,
+      "defaultPort": 1972
+    },
+    {
       "dbType": "jdbc",
       "label": "JDBC",
       "runtimeMode": "external",
