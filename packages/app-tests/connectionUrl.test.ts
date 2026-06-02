@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { parseConnectionUrl } from "../../apps/desktop/src/lib/connectionUrl.ts";
+import { normalizeMongoConnectionString, parseConnectionUrl } from "../../apps/desktop/src/lib/connectionUrl.ts";
 
 test("parses postgres connection URLs", () => {
   assert.deepEqual(parseConnectionUrl("postgresql://alice:secret@db.example.com:5433/app?sslmode=require"), {
@@ -195,6 +195,21 @@ test("keeps MongoDB URLs as connection strings", () => {
   assert.equal(parsed.connectionString, source);
   assert.equal(parsed.useMongoUrl, true);
   assert.equal(parsed.ssl, true);
+});
+
+test("normalizes MongoDB URL credentials when reserved characters can be parsed safely", () => {
+  const parsed = parseConnectionUrl("mongodb://reader:pa@ss:word@mongo.example.com/admin?authSource=admin");
+
+  assert.equal(parsed.username, "reader");
+  assert.equal(parsed.password, "pa@ss:word");
+  assert.equal(parsed.connectionString, "mongodb://reader:pa%40ss%3Aword@mongo.example.com/admin?authSource=admin");
+});
+
+test("normalizes invalid percent escapes in MongoDB URL credentials", () => {
+  assert.equal(
+    normalizeMongoConnectionString("mongodb://reader:pa%ss@mongo.example.com/admin"),
+    "mongodb://reader:pa%25ss@mongo.example.com/admin",
+  );
 });
 
 test("uses selected HTTP-compatible profile for HTTP URLs", () => {

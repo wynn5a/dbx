@@ -62,6 +62,34 @@ function decodeUrlPart(value: string): string {
   }
 }
 
+function decodePercentEscapes(value: string): string {
+  return value.replace(/%([0-9a-fA-F]{2})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+}
+
+function encodeMongoUserInfoPart(value: string): string {
+  return encodeURIComponent(decodePercentEscapes(value));
+}
+
+export function normalizeMongoConnectionString(value: string): string {
+  const input = value.trim();
+  if (!input) return input;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(input);
+  } catch {
+    return input;
+  }
+
+  const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
+  if (scheme !== "mongodb" && scheme !== "mongodb+srv") return input;
+  if (!parsed.username && !parsed.password) return input;
+
+  const username = encodeMongoUserInfoPart(parsed.username);
+  const password = parsed.password ? `:${encodeMongoUserInfoPart(parsed.password)}` : "";
+  return `${parsed.protocol}//${username}${password}@${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}`;
+}
+
 function databaseFromPath(pathname: string): string | undefined {
   const value = pathname.replace(/^\/+/, "");
   if (!value) return undefined;
@@ -304,7 +332,7 @@ export function parseConnectionUrl(value: string, preferredProfile?: string): Pa
       database: databaseFromPath(parsed.pathname),
       urlParams: parsedUrlParams,
       ssl: scheme === "mongodb+srv",
-      connectionString: source,
+      connectionString: normalizeMongoConnectionString(source),
       useMongoUrl: true,
     };
   }

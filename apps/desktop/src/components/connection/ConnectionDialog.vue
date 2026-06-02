@@ -15,7 +15,7 @@ import { useToast } from "@/composables/useToast";
 import DatabaseIcon from "@/components/icons/DatabaseIcon.vue";
 import * as api from "@/lib/api";
 import { isTauriRuntime } from "@/lib/tauriRuntime";
-import { applyParsedConnectionUrl, parseConnectionUrl } from "@/lib/connectionUrl";
+import { applyParsedConnectionUrl, normalizeMongoConnectionString, parseConnectionUrl } from "@/lib/connectionUrl";
 import type { ConnectionDeepLinkDraft } from "@/lib/connectionDeepLink";
 import { connectionUrlPlaceholder as getUrlPlaceholder } from "@/lib/connectionPresentation";
 import { mongodbAuthFailureHint, mongoUrlParam, setMongoUrlParam } from "@/lib/mongoConnectionOptions";
@@ -894,6 +894,8 @@ function connectionConfigForSubmit(id: string): ConnectionConfig {
   if (!config.one_time) config.one_time = undefined;
   if (config.db_type === "mongodb" && !mongoUseUrl.value) {
     config.connection_string = undefined;
+  } else if (config.db_type === "mongodb") {
+    config.connection_string = normalizeMongoConnectionString(config.connection_string?.trim() || "");
   }
   if (config.db_type !== "oracle") {
     config.oracle_connection_type = undefined;
