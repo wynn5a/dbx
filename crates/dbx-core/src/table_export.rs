@@ -333,9 +333,13 @@ mod tests {
         let out = format_csv_rows(&rows);
         assert!(out.contains("\"hello,world\""));
         assert!(out.contains("\"line1\nline2\""));
-        // CSV escaping wraps in quotes, so commas inside are safe
-        let fields: Vec<&str> = out.split(',').collect();
-        assert_eq!(fields.len(), 2);
+        let records: Vec<Vec<String>> = csv::ReaderBuilder::new()
+            .has_headers(false)
+            .from_reader(out.as_bytes())
+            .records()
+            .map(|record| record.unwrap().iter().map(str::to_string).collect())
+            .collect();
+        assert_eq!(records, vec![vec!["hello,world".to_string(), "line1\nline2".to_string()]]);
     }
 
     // -----------------------------------------------------------------------
