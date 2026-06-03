@@ -930,6 +930,32 @@ const POSTGRES_COLUMNS_COMPAT_SQL: &str = "SELECT a.attname AS column_name, \
              AND a.attnum > 0 AND NOT a.attisdropped \
              ORDER BY a.attnum";
 
+const POSTGRES_COLUMNS_INFORMATION_SCHEMA_SQL: &str = "SELECT c.column_name, \
+             CASE WHEN c.data_type = 'USER-DEFINED' THEN c.udt_name ELSE c.data_type END AS full_type, \
+             c.is_nullable = 'YES' AS is_nullable, \
+             c.column_default, \
+             EXISTS ( \
+               SELECT 1 FROM information_schema.table_constraints tc \
+               JOIN information_schema.key_column_usage kcu \
+                 ON kcu.constraint_catalog = tc.constraint_catalog \
+                AND kcu.constraint_schema = tc.constraint_schema \
+                AND kcu.constraint_name = tc.constraint_name \
+                AND kcu.table_schema = tc.table_schema \
+                AND kcu.table_name = tc.table_name \
+               WHERE tc.constraint_type = 'PRIMARY KEY' \
+                 AND tc.table_schema = c.table_schema \
+                 AND tc.table_name = c.table_name \
+                 AND kcu.column_name = c.column_name \
+             ) AS is_pk, \
+             NULL::text AS column_comment, \
+             NULL::text AS column_extra, \
+             CAST(c.numeric_precision AS int) AS numeric_precision, \
+             CAST(c.numeric_scale AS int) AS numeric_scale, \
+             CAST(c.character_maximum_length AS int) AS character_maximum_length \
+             FROM information_schema.columns c \
+             WHERE c.table_schema = $1 AND c.table_name = $2 \
+             ORDER BY c.ordinal_position";
+
 fn column_info_from_row(row: &Row) -> ColumnInfo {
     let full_type = row.try_get::<_, Option<String>>(1).ok().flatten().unwrap_or_default();
     ColumnInfo {
@@ -967,12 +993,19 @@ pub async fn get_columns(pool: &Pool, schema: &str, table: &str) -> Result<Vec<C
             Err(fallback_error) => {
                 let primary_message = pg_error_to_string(primary_error);
                 let fallback_message = pg_error_to_string(fallback_error);
-                log::debug!(
-                    "[postgres][get_columns:compat-failed] primary_error={} fallback_error={}",
-                    primary_message,
-                    fallback_message
-                );
-                Err(fallback_message)
+                match get_columns_with_sql(&client, POSTGRES_COLUMNS_INFORMATION_SCHEMA_SQL, schema, table).await {
+                    Ok(columns) => Ok(columns),
+                    Err(information_schema_error) => {
+                        let information_schema_message = pg_error_to_string(information_schema_error);
+                        log::debug!(
+                            "[postgres][get_columns:compat-failed] primary_error={} fallback_error={} information_schema_error={}",
+                            primary_message,
+                            fallback_message,
+                            information_schema_message
+                        );
+                        Err(information_schema_message)
+                    }
+                }
             }
         },
     }
@@ -1556,6 +1589,15 @@ mod tests {
         assert!(!POSTGRES_COLUMNS_COMPAT_SQL.contains("pg_sequence"));
         assert!(POSTGRES_COLUMNS_COMPAT_SQL.contains("NULL::text AS column_extra"));
         assert!(POSTGRES_COLUMNS_COMPAT_SQL.contains("col_description"));
+    }
+
+    #[test]
+    fn postgres_column_metadata_has_information_schema_fallback() {
+        assert!(POSTGRES_COLUMNS_INFORMATION_SCHEMA_SQL.contains("information_schema.columns"));
+        assert!(POSTGRES_COLUMNS_INFORMATION_SCHEMA_SQL.contains("information_schema.table_constraints"));
+        assert!(POSTGRES_COLUMNS_INFORMATION_SCHEMA_SQL.contains("information_schema.key_column_usage"));
+        assert!(!POSTGRES_COLUMNS_INFORMATION_SCHEMA_SQL.contains("pg_attribute"));
+        assert!(!POSTGRES_COLUMNS_INFORMATION_SCHEMA_SQL.contains("regclass"));
     }
 
     #[test]

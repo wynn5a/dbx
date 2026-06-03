@@ -32,6 +32,7 @@ import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Properties;
@@ -488,13 +489,13 @@ public final class DbxJdbcPlugin {
         if (driverQuirks(connection).useOracleMetadata()) {
             return oracleGetColumns(conn, oracleEffectiveSchema(conn, schema), table);
         }
-            DatabaseMetaData meta = conn.getMetaData();
-            Set<String> primaryKeys = primaryKeys(meta, database, schema, table);
-            appendColumns(result, meta, emptyToNull(database), emptyToNull(schema), table, primaryKeys);
-            if (result.isEmpty() && database != null) {
-                primaryKeys = primaryKeys(meta, null, schema, table);
-                appendColumns(result, meta, null, emptyToNull(schema), table, primaryKeys);
-            }
+        DatabaseMetaData meta = conn.getMetaData();
+        Set<String> primaryKeys = safePrimaryKeys(meta, database, schema, table);
+        appendColumns(result, meta, emptyToNull(database), emptyToNull(schema), table, primaryKeys);
+        if (result.isEmpty() && database != null) {
+            primaryKeys = safePrimaryKeys(meta, null, schema, table);
+            appendColumns(result, meta, null, emptyToNull(schema), table, primaryKeys);
+        }
         return result;
     }
 
@@ -601,6 +602,14 @@ public final class DbxJdbcPlugin {
             }
         }
         return primaryKeys;
+    }
+
+    private static Set<String> safePrimaryKeys(DatabaseMetaData meta, String database, String schema, String table) {
+        try {
+            return primaryKeys(meta, database, schema, table);
+        } catch (SQLException ignored) {
+            return Collections.emptySet();
+        }
     }
 
     // --- Oracle-specific metadata methods ---
