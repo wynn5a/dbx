@@ -83,6 +83,7 @@ const props = defineProps<{
   modelValue: string;
   connectionId?: string;
   database?: string;
+  schema?: string;
   databaseType?: DatabaseType;
   dialect?: "mysql" | "postgres" | "sqlserver";
   formatDialect?: SqlFormatDialect;
@@ -451,7 +452,8 @@ function identifierRangeAt(sql: string, pos: number): { from: number; to: number
 }
 
 function completionCacheKey(table: { name: string; schema?: string | null }) {
-  return table.schema ? `${table.schema}.${table.name}` : table.name;
+  const schema = table.schema ?? props.schema;
+  return schema ? `${schema}.${table.name}` : table.name;
 }
 
 async function ensureColumnsForTable(table: { name: string; schema?: string | null }) {
@@ -461,7 +463,7 @@ async function ensureColumnsForTable(table: { name: string; schema?: string | nu
     props.connectionId,
     props.database,
     table.name,
-    table.schema ?? undefined,
+    table.schema ?? props.schema,
   );
   if (columns.length === 0) return;
   cachedColumnsByTable.set(cacheKey, columns);
@@ -470,7 +472,7 @@ async function ensureColumnsForTable(table: { name: string; schema?: string | nu
 async function ensureForeignKeysForTable(table: { name: string; schema?: string | null }) {
   const cacheKey = completionCacheKey(table);
   if (cachedForeignKeysByTable.has(cacheKey) || !props.connectionId || props.database == null) return;
-  const querySchema = table.schema ?? props.database;
+  const querySchema = table.schema ?? props.schema ?? props.database;
   try {
     const foreignKeys = await api.listForeignKeys(props.connectionId, props.database, querySchema, table.name);
     cachedForeignKeysByTable.set(
@@ -568,6 +570,7 @@ async function resolveSqlHoverTooltip(currentView: EditorViewType, pos: number) 
         props.database,
         name,
         MAX_COMPLETION_TABLES,
+        props.schema,
       );
     }
 
@@ -578,6 +581,7 @@ async function resolveSqlHoverTooltip(currentView: EditorViewType, pos: number) 
         props.database,
         name,
         MAX_COMPLETION_TABLES,
+        props.schema,
       );
       cachedTables = [...cachedTables, ...hoverTables];
       table = matchTable(identifier, hoverTables) ?? matchTable(name, hoverTables);
@@ -699,6 +703,7 @@ async function enrichSemanticDiagnosticTables(tables: SqlTableReference[]) {
         props.database,
         table.name,
         MAX_COMPLETION_TABLES,
+        props.schema,
       );
       cachedTables = [...cachedTables, ...matches];
       const match = matches.find((item) => item.name.toLowerCase() === table.name.toLowerCase());
@@ -1018,12 +1023,13 @@ async function performAsyncCompletionWithResult(
         props.connectionId!,
         props.database!,
         completionContext.insertTable,
-        completionContext.insertSchema,
+        completionContext.insertSchema ?? props.schema,
       );
       if (epoch !== completionEpoch) return null;
       if (insertCols.length > 0) {
-        const insertKey = completionContext.insertSchema
-          ? `${completionContext.insertSchema}.${completionContext.insertTable}`
+        const insertSchema = completionContext.insertSchema ?? props.schema;
+        const insertKey = insertSchema
+          ? `${insertSchema}.${completionContext.insertTable}`
           : completionContext.insertTable;
         insertColumnsByTable.set(insertKey, insertCols);
       }
@@ -1041,6 +1047,7 @@ async function performAsyncCompletionWithResult(
         props.database!,
         completionContext.qualifier || completionContext.prefix,
         MAX_COMPLETION_TABLES,
+        props.schema,
       )
     : cachedTables;
   if (epoch !== completionEpoch) return null;
@@ -1055,6 +1062,7 @@ async function performAsyncCompletionWithResult(
         props.database!,
         completionContext.qualifier || completionContext.prefix,
         MAX_COMPLETION_TABLES,
+        props.schema,
       )
     : cachedCompletionObjects;
   if (epoch !== completionEpoch) return null;
@@ -1120,7 +1128,7 @@ async function performAsyncCompletionWithResult(
   if (unresolvedRefs.length > 0) {
     const lookupGroups = await Promise.all(
       unresolvedRefs.map((rt) =>
-        connectionStore.listCompletionTables(props.connectionId!, props.database!, rt.name, 20),
+        connectionStore.listCompletionTables(props.connectionId!, props.database!, rt.name, 20, props.schema),
       ),
     );
     if (epoch !== completionEpoch) return null;
@@ -1159,7 +1167,7 @@ async function performAsyncCompletionWithResult(
           props.connectionId!,
           props.database!,
           refTable.name,
-          refTable.schema,
+          refTable.schema ?? props.schema,
         );
         if (epoch !== completionEpoch) return;
         if (columns.length === 0) return;
@@ -1576,6 +1584,7 @@ onMounted(async () => {
                   props.database!,
                   identifier,
                   MAX_COMPLETION_TABLES,
+                  props.schema,
                 );
               }
 
@@ -1636,7 +1645,7 @@ onMounted(async () => {
                       props.connectionId!,
                       props.database!,
                       refTable.name,
-                      refTable.schema,
+                      refTable.schema ?? props.schema,
                     );
                     cachedColumnsByTable.set(cacheKey, cols);
                   } catch {
@@ -1713,6 +1722,15 @@ watch(
 
 watch(
   () => props.database,
+  () => {
+    refreshCompletionCache();
+    setSemanticDiagnostics([]);
+    scheduleSemanticDiagnostics();
+  },
+);
+
+watch(
+  () => props.schema,
   () => {
     refreshCompletionCache();
     setSemanticDiagnostics([]);
