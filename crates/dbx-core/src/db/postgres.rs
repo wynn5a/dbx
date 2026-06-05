@@ -1435,6 +1435,14 @@ pub async fn execute_query_with_schema_and_max_rows(
         start.elapsed().as_millis(),
         schema
     );
+    if is_transaction_recovery_statement(sql) {
+        log::info!(
+            "[postgres][execute_with_schema:skip-search-path] total_ms={} reason=transaction-recovery",
+            start.elapsed().as_millis()
+        );
+        return execute_query_with_max_rows_inner(&client, sql, max_rows).await;
+    }
+
     let set_schema_start = Instant::now();
     client.execute(&format!("SET search_path TO {}", pg_quote_ident(schema)), &[]).await.map_err(pg_error_to_string)?;
     log::info!(
@@ -1462,6 +1470,10 @@ pub async fn execute_query_with_schema_and_max_rows(
     );
 
     result
+}
+
+fn is_transaction_recovery_statement(sql: &str) -> bool {
+    starts_with_executable_sql_keyword(sql, &["ROLLBACK", "ABORT", "COMMIT", "END"])
 }
 
 async fn execute_query_with_max_rows_inner(
@@ -2049,6 +2061,22 @@ mod tests {
     fn both_list_objects_sql_variants_include_pg_proc() {
         assert!(list_objects_sql(true).contains("pg_catalog.pg_proc"));
         assert!(list_objects_sql(false).contains("pg_catalog.pg_proc"));
+    }
+
+    #[test]
+    fn transaction_recovery_statement_detection_matches_common_postgres_commands() {
+        assert!(is_transaction_recovery_statement("ROLLBACK"));
+        assert!(is_transaction_recovery_statement("rollback work"));
+        assert!(is_transaction_recovery_statement("ABORT TRANSACTION"));
+        assert!(is_transaction_recovery_statement("commit"));
+        assert!(is_transaction_recovery_statement("END"));
+    }
+
+    #[test]
+    fn transaction_recovery_statement_detection_ignores_regular_queries() {
+        assert!(!is_transaction_recovery_statement("SELECT 1"));
+        assert!(!is_transaction_recovery_statement("BEGIN"));
+        assert!(!is_transaction_recovery_statement("UPDATE users SET name = 'dbx'"));
     }
 
     // --- execute_batch ---
