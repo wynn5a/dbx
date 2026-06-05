@@ -574,6 +574,7 @@ export default {
     valueEditor: "Value Editor",
     imagePreview: "Image Preview",
     imageLoadFailed: "Image failed to load",
+    geometryPreview: "Geometry Preview",
     zoomIn: "Zoom In",
     zoomOut: "Zoom Out",
     fitImage: "Fit to Window",

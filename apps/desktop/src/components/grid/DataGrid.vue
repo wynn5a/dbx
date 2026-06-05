@@ -34,6 +34,7 @@ import {
   SearchX,
   Code2,
   Copy,
+  Eye,
   Loader2,
   X,
   Undo2,
@@ -122,11 +123,13 @@ import {
   cellDetailEditorText,
   defaultCellDetailTab,
   formatJsonText,
+  isGeometryColumnType,
   linkedCellDetailTarget,
   valueEditorActions,
   visibleCellDetailTabs,
   type CellDetailTab,
 } from "@/lib/cellDetailPresentation";
+import { renderWktOnCanvas, isHexGeometry } from "@/lib/geometryPreview";
 import {
   buildDataGridCellDetail,
   buildDataGridColumnDetail,
@@ -404,6 +407,7 @@ function typeColorClass(t: string): string {
   if (["json", "jsonb", "xml", "array"].includes(base)) return "text-pink-500";
   if (["uuid", "uniqueidentifier"].includes(base)) return "text-amber-500";
   if (["bytea", "blob", "binary", "varbinary", "image"].includes(base)) return "text-red-400";
+  if (["geometry", "geography"].includes(base)) return "text-emerald-500";
   return "text-muted-foreground";
 }
 const contextCell = ref<{ rowId: number; rowIndex: number; col: number } | null>(null);
@@ -426,6 +430,10 @@ const isResizingDetail = ref(false);
 const imagePreviewOpen = ref(false);
 const imagePreviewSrc = ref("");
 const imagePreviewTitle = ref("");
+const sideGeometryPreviewOpen = ref(false);
+const dialogGeometryPreviewOpen = ref(false);
+const sideGeometryCanvas = ref<HTMLCanvasElement | null>(null);
+const dialogGeometryCanvas = ref<HTMLCanvasElement | null>(null);
 const transposeRowIndex = ref<number | null>(null);
 const showTranspose = ref(false);
 const preserveTransposeOnNextResult = ref(false);
@@ -2586,6 +2594,28 @@ watch(rowDetailDialogOpen, (open) => {
 
 watch(columnDetailDialogOpen, (open) => {
   if (!open) columnDetailDialogColumnIndex.value = null;
+});
+
+watch(sideGeometryPreviewOpen, async (open) => {
+  if (open) {
+    await nextTick();
+    const canvas = sideGeometryCanvas.value;
+    const detail = activeCellDetail.value;
+    if (canvas && detail && detail.value !== null) {
+      renderWktOnCanvas(canvas, String(detail.value));
+    }
+  }
+});
+
+watch(dialogGeometryPreviewOpen, async (open) => {
+  if (open) {
+    await nextTick();
+    const canvas = dialogGeometryCanvas.value;
+    const detail = dialogCellDetail.value;
+    if (canvas && detail && detail.value !== null) {
+      renderWktOnCanvas(canvas, String(detail.value));
+    }
+  }
 });
 
 const activeCellDetailTabs = computed(() => {
@@ -7380,6 +7410,31 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
+                        <!-- Skip hex fallback from backend (unsupported geometry types like TIN/Triangle) -->
+                        <Popover
+                          v-if="
+                            isGeometryColumnType(activeCellDetail.type) &&
+                            activeCellDetail.value !== null &&
+                            !isEditingDetail &&
+                            !isHexGeometry(activeCellDetail.value as string)
+                          "
+                          v-model:open="sideGeometryPreviewOpen"
+                        >
+                          <PopoverTrigger as-child>
+                            <Button variant="ghost" size="icon" class="h-6 w-6" :title="t('grid.geometryPreview')">
+                              <Eye class="h-3 w-3" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent class="w-auto p-1.5" align="end">
+                            <canvas
+                              v-show="sideGeometryPreviewOpen"
+                              ref="sideGeometryCanvas"
+                              width="400"
+                              height="280"
+                              class="block rounded"
+                            />
+                          </PopoverContent>
+                        </Popover>
                       </div>
                     </div>
                     <div v-if="activeCellDetail.imagePreviewUrl && !isEditingDetail" class="space-y-1.5">
@@ -7771,6 +7826,30 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+                <!-- Skip hex fallback from backend (unsupported geometry types like TIN/Triangle) -->
+                <Popover
+                  v-if="
+                    isGeometryColumnType(dialogCellDetail.type) &&
+                    dialogCellDetail.value !== null &&
+                    !isHexGeometry(dialogCellDetail.value as string)
+                  "
+                  v-model:open="dialogGeometryPreviewOpen"
+                >
+                  <PopoverTrigger as-child>
+                    <Button variant="ghost" size="icon" class="h-6 w-6" :title="t('grid.geometryPreview')">
+                      <Eye class="h-3 w-3" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent class="w-auto p-1.5" align="end">
+                    <canvas
+                      v-show="dialogGeometryPreviewOpen"
+                      ref="dialogGeometryCanvas"
+                      width="400"
+                      height="280"
+                      class="block rounded"
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
             <a

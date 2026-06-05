@@ -540,6 +540,7 @@ export default {
     valueEditor: "Editor de valor",
     imagePreview: "Vista previa de imagen",
     imageLoadFailed: "No se pudo cargar la imagen",
+    geometryPreview: "Vista previa de geometría",
     zoomIn: "Acercar",
     zoomOut: "Alejar",
     fitImage: "Ajustar a ventana",

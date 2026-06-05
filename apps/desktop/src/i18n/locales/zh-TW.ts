@@ -569,6 +569,7 @@ export default {
     valueEditor: "儲存格編輯器",
     imagePreview: "圖片預覽",
     imageLoadFailed: "圖片載入失敗",
+    geometryPreview: "圖形預覽",
     zoomIn: "放大",
     zoomOut: "縮小",
     fitImage: "適應視窗",
