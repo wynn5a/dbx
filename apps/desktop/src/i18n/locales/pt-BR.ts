@@ -148,11 +148,13 @@ export default {
     mysqlTlsModeRequired: "Obrigatório",
     mysqlTlsModeVerifyCa: "Verificar CA",
     mysqlTlsModeVerifyIdentity: "Verificar Identidade",
-    mysqlCaCertHint: "Necessário para Verificar CA e Verificar Identidade quando o certificado do servidor usa uma CA privada.",
+    mysqlCaCertHint:
+      "Necessário para Verificar CA e Verificar Identidade quando o certificado do servidor usa uma CA privada.",
     mysqlClientCert: "Autenticação do Cliente",
     mysqlClientCertPlaceholder: "/caminho/para/client.crt",
     mysqlClientKeyPlaceholder: "/caminho/para/client.key",
-    mysqlClientCertHint: "O certificado e a chave privada do cliente devem ser fornecidos juntos quando o MySQL exige mTLS.",
+    mysqlClientCertHint:
+      "O certificado e a chave privada do cliente devem ser fornecidos juntos quando o MySQL exige mTLS.",
     mysqlClientCertBrowse: "Escolher certificado do cliente",
     mysqlClientKeyBrowse: "Escolher chave privada do cliente",
     postgresSslMode: "Modo TLS",
@@ -269,13 +271,15 @@ export default {
     jdbcUrl: "URL JDBC",
     jdbcUrlPlaceholder: "jdbc:postgresql://localhost:5432/database",
     jdbcDriverClass: "Classe do Driver (opcional)",
-    jdbcDriverClassPlaceholder: "A maioria dos drivers se registra automaticamente; use com.vendor.jdbc.Driver se necessário",
+    jdbcDriverClassPlaceholder:
+      "A maioria dos drivers se registra automaticamente; use com.vendor.jdbc.Driver se necessário",
     jdbcDriverPaths: "JARs do Driver",
     jdbcDriverSelectPlaceholder: "Escolher driver importado",
     jdbcDriverPathsPlaceholder: "/caminho/para/driver.jar\n/caminho/para/outro-driver.jar",
     jdbcDriverBrowse: "Escolher JAR do driver JDBC",
     jdbcDocs: "Ver documentação JDBC",
-    jdbcPluginHint: "Instale primeiro o plugin JDBC do DBX e depois importe o JAR do driver JDBC do fornecedor do banco de dados.",
+    jdbcPluginHint:
+      "Instale primeiro o plugin JDBC do DBX e depois importe o JAR do driver JDBC do fornecedor do banco de dados.",
     dmCompatHint: "Requer o driver ODBC DM8 instalado no seu sistema.",
     dmDownload: "Baixar da Dameng",
     mongoLegacyHint:
@@ -403,6 +407,10 @@ export default {
     rows: "{count} linhas",
     totalRows: "Total de {count} linhas",
     totalRowCount: "({count} no total)",
+    totalRowCountLoading: "(contando...)",
+    calculateTotalRows: "Contar total de linhas",
+    calculateTotalRowsInline: "(contar total de linhas)",
+    calculateTotalRowsFailed: "Falha ao contar: {message}",
     rowsAffected: "{count} linhas afetadas",
     querySuccess: "Consulta executada com sucesso",
     noRows: "Sem dados",
@@ -643,21 +651,27 @@ export default {
     queryEditUnsupported: {
       "not-select": "Apenas resultados de consultas SELECT podem ser editados diretamente.",
       cte: "Consultas com WITH/CTE ainda não são editáveis. Use um SELECT simples de tabela única.",
-      "set-operation": "Resultados de UNION, INTERSECT ou EXCEPT não podem ser mapeados com segurança de volta às linhas de origem.",
+      "set-operation":
+        "Resultados de UNION, INTERSECT ou EXCEPT não podem ser mapeados com segurança de volta às linhas de origem.",
       aggregation: "Resultados de DISTINCT, GROUP BY, HAVING e agregações não podem ser editados diretamente.",
       "external-source":
         "Arquivos externos e resultados de funções de tabela não podem ser gravados de volta diretamente. Importe-os para uma tabela do banco de dados antes de editar.",
-      "complex-source": "JOINs, múltiplas tabelas e subconsultas não podem ser mapeados com segurança para uma única linha de origem.",
+      "complex-source":
+        "JOINs, múltiplas tabelas e subconsultas não podem ser mapeados com segurança para uma única linha de origem.",
       "computed-columns":
         "Expressões computadas ou resultados de funções não podem ser gravados de volta. Selecione os nomes brutos das colunas em vez disso.",
       "no-table": "Nenhuma tabela de origem editável foi detectada.",
-      "no-primary-key": "A tabela de destino não possui chave primária, portanto as linhas não podem ser atualizadas ou excluídas com segurança.",
+      "no-primary-key":
+        "A tabela de destino não possui chave primária, portanto as linhas não podem ser atualizadas ou excluídas com segurança.",
       "primary-key-not-returned":
         "O resultado está sem a coluna bruta da chave primária. Inclua-a pelo seu nome de coluna original.",
-      "aliased-columns": "As colunas do resultado usam aliases ou expressões. Selecione colunas editáveis pelos seus nomes originais.",
-      "metadata-unavailable": "O DBX não conseguiu carregar os metadados da tabela, portanto a edição do resultado está desabilitada.",
+      "aliased-columns":
+        "As colunas do resultado usam aliases ou expressões. Selecione colunas editáveis pelos seus nomes originais.",
+      "metadata-unavailable":
+        "O DBX não conseguiu carregar os metadados da tabela, portanto a edição do resultado está desabilitada.",
     },
-    sortUnsupported: "Este SQL não suporta a ordenação do resultado completo. Tente novamente com uma única consulta SELECT.",
+    sortUnsupported:
+      "Este SQL não suporta a ordenação do resultado completo. Tente novamente com uma única consulta SELECT.",
     truncatedHint: "Resultados truncados em {count} linhas. Use a paginação no rodapé ou ajuste as linhas por página.",
   },
   exportProgress: {
@@ -746,14 +760,18 @@ export default {
       sameName: "Mesmo Nome",
     },
     description: {
-      foreignKeyIncoming: "{target} aponta para o campo atual através de uma chave estrangeira. Esta é uma dependência verificada.",
-      foreignKeyOutgoing: "O campo atual referencia {target} através de uma chave estrangeira. Esta é uma dependência verificada.",
-      viewLikely: "A definição da visão menciona tanto a tabela quanto o campo de destino, geralmente indicando dependência de consulta.",
+      foreignKeyIncoming:
+        "{target} aponta para o campo atual através de uma chave estrangeira. Esta é uma dependência verificada.",
+      foreignKeyOutgoing:
+        "O campo atual referencia {target} através de uma chave estrangeira. Esta é uma dependência verificada.",
+      viewLikely:
+        "A definição da visão menciona tanto a tabela quanto o campo de destino, geralmente indicando dependência de consulta.",
       viewPossible:
         "A definição da visão menciona um campo de mesmo nome, mas não a tabela de destino, então precisa de confirmação.",
       historyLikely:
         "Uma instrução SQL histórica menciona tanto a tabela quanto o campo de destino. Use-a como contexto de análise de impacto.",
-      historyPossible: "Uma instrução SQL histórica menciona um campo de mesmo nome. Pode estar relacionado, mas precisa de contexto.",
+      historyPossible:
+        "Uma instrução SQL histórica menciona um campo de mesmo nome. Pode estar relacionado, mas precisa de contexto.",
       sameName:
         "Outra tabela possui um campo de mesmo nome. Isso pode compartilhar significado de negócio, mas não é uma dependência verificada do banco de dados.",
     },
@@ -873,7 +891,8 @@ export default {
     fixWithAi: "Corrigir com AI",
     truncated: "Contexto truncado",
     contextSummary: "{database} · {tables} tabelas",
-    autoSqlBlocked: "O SQL gerado pela AI pareceu arriscado demais para execução automática. Revise-o manualmente antes de executar.",
+    autoSqlBlocked:
+      "O SQL gerado pela AI pareceu arriscado demais para execução automática. Revise-o manualmente antes de executar.",
     agentSteps: {
       generated: "SQL gerado",
       noSql: "Nenhum SQL encontrado",
@@ -970,7 +989,8 @@ export default {
     structureDocYes: "Sim",
     structureDocNo: "Não",
     structureDocCopied: "Estrutura copiada",
-    structureDocCopyFallbackHint: "A cópia automática foi bloqueada. Clique em Copiar novamente ou selecione o conteúdo abaixo.",
+    structureDocCopyFallbackHint:
+      "A cópia automática foi bloqueada. Clique em Copiar novamente ou selecione o conteúdo abaixo.",
     saveStructure: "Salvar SQL",
     exportStructureCopied: "Estrutura copiada",
     createTable: "Criar Tabela",
@@ -1003,7 +1023,8 @@ export default {
     batchDrop: "Remover selecionados ({count})",
     executeProcedure: "Executar Procedimento",
     confirmExecuteProcedureTitle: "Executar Procedimento",
-    confirmExecuteProcedureMessage: 'Executar o procedimento "{name}"? Você pode preencher ou ajustar os valores dos parâmetros primeiro.',
+    confirmExecuteProcedureMessage:
+      'Executar o procedimento "{name}"? Você pode preencher ou ajustar os valores dos parâmetros primeiro.',
     loadingProcedureParameters: "Carregando parâmetros...",
     procedureParametersUnavailable:
       "Não foi possível carregar os metadados dos parâmetros. Você ainda pode editar o SQL abaixo e executá-lo.",
@@ -1035,7 +1056,8 @@ export default {
     confirmDropTriggerTitle: "Remover Gatilho",
     confirmDropTableChildObjectMessage: 'Tem certeza de que deseja remover "{name}" de "{table}"?',
     confirmBatchDropTitle: "Remover Objetos Selecionados",
-    confirmBatchDropMessage: "Tem certeza de que deseja remover {count} objetos selecionados? Esta ação não pode ser desfeita.",
+    confirmBatchDropMessage:
+      "Tem certeza de que deseja remover {count} objetos selecionados? Esta ação não pode ser desfeita.",
     confirmDropProcedureTitle: "Remover Procedimento",
     confirmDropProcedureMessage: 'Tem certeza de que deseja remover o procedimento "{name}"?',
     confirmDropFunctionTitle: "Remover Função",
@@ -1059,7 +1081,8 @@ export default {
       'Tem certeza de que deseja remover o banco de dados "{name}"? Isso excluirá permanentemente o banco de dados e todos os seus dados.',
     createDatabaseSuccess: 'Banco de dados "{name}" criado',
     createDuckDbFileSuccess: 'Arquivo de banco de dados DuckDB "{name}" criado e anexado',
-    createDuckDbFileDesktopOnly: "A criação de arquivos de banco de dados DuckDB só está disponível no aplicativo desktop",
+    createDuckDbFileDesktopOnly:
+      "A criação de arquivos de banco de dados DuckDB só está disponível no aplicativo desktop",
     dropDatabaseSuccess: 'Banco de dados "{name}" removido',
     createDatabaseNamePlaceholder: "Nome do banco de dados",
     createDatabaseCharset: "Conjunto de caracteres",
@@ -1137,7 +1160,8 @@ export default {
     dropSelected: "Remover selecionados",
     clearSelection: "Limpar seleção",
     confirmBatchDropTitle: "Remover tabelas selecionadas",
-    confirmBatchDropMessage: "Tem certeza de que deseja remover {count} tabelas selecionadas? Esta ação não pode ser desfeita.",
+    confirmBatchDropMessage:
+      "Tem certeza de que deseja remover {count} tabelas selecionadas? Esta ação não pode ser desfeita.",
     batchDropSuccess: "{count} tabelas removidas",
   },
   structureEditor: {
@@ -1389,7 +1413,8 @@ export default {
   },
   dangerDialog: {
     title: "Operação perigosa",
-    message: "Esta instrução SQL pode modificar ou excluir dados de forma irreversível. Tem certeza de que deseja executá-la?",
+    message:
+      "Esta instrução SQL pode modificar ou excluir dados de forma irreversível. Tem certeza de que deseja executá-la?",
     suppressFuturePrompts: "Não perguntar novamente para SQL perigoso",
     deleteMessage: "Esta operação de exclusão pode ser irreversível. Continuar?",
     deleteConfirm: "Confirmar exclusão",
@@ -1537,7 +1562,8 @@ export default {
     selectedTables: "{selected}/{total} selecionadas",
     selectAllTables: "Selecionar tudo",
     deselectAllTables: "Desmarcar tudo",
-    selectSourceTables: "Selecione primeiro a conexão e o banco de dados de origem, depois escolha as tabelas para comparar",
+    selectSourceTables:
+      "Selecione primeiro a conexão e o banco de dados de origem, depois escolha as tabelas para comparar",
     noTables: "Nenhuma tabela disponível para comparação",
     autoMatchHint: "O modo em lote corresponde automaticamente as tabelas de destino pelo mesmo nome",
     matchedTables: "{matched}/{total} tabelas correspondidas",
@@ -1620,7 +1646,8 @@ export default {
       "Quando desativado, nenhum ícone é exibido, mas fechar a janela ainda oculta o DBX em segundo plano como antes.",
     dataGridDisplay: "Exibição da grade de dados",
     showColumnCommentsInHeader: "Mostrar comentários de coluna sob os nomes",
-    showColumnCommentsInHeaderDescription: "Exibir comentários de colunas da tabela diretamente abaixo dos nomes das colunas da grade.",
+    showColumnCommentsInHeaderDescription:
+      "Exibir comentários de colunas da tabela diretamente abaixo dos nomes das colunas da grade.",
     compactColumnHeaderActions: "Ferramentas compactas no cabeçalho da coluna",
     compactColumnHeaderActionsDescription:
       "Mover as ferramentas de formatação e filtro local para um menu de mais opções para que os nomes das colunas tenham prioridade.",
@@ -1675,7 +1702,8 @@ export default {
     snippetsAddTitle: "Adicionar snippet",
     snippetsEditTitle: "Editar snippet",
     syncWebDavTitle: "Sincronização WebDAV",
-    syncWebDavDescription: "Envie ou restaure um snapshot do DBX a partir de um serviço de armazenamento compatível com WebDAV.",
+    syncWebDavDescription:
+      "Envie ou restaure um snapshot do DBX a partir de um serviço de armazenamento compatível com WebDAV.",
     syncEndpoint: "URL do WebDAV",
     syncUsername: "Nome de usuário",
     syncPassword: "Senha",
@@ -1703,7 +1731,8 @@ export default {
     syncDownloadSuccess: "Baixados e aplicados {bytes} bytes de {path}.",
     syncSecretsApplied: "Os segredos criptografados foram restaurados.",
     syncSecretsSkipped: "Havia segredos criptografados, mas não foram restaurados.",
-    syncDownloadConfirm: "Baixar e aplicar o snapshot remoto do DBX? Os metadados locais e os SQL salvos serão substituídos.",
+    syncDownloadConfirm:
+      "Baixar e aplicar o snapshot remoto do DBX? Os metadados locais e os SQL salvos serão substituídos.",
     apply: "Aplicar",
     applyAndClose: "Aplicar e fechar",
     reset: "Redefinir",
@@ -1764,7 +1793,8 @@ export default {
     jdbcDeleteSuccess: "Driver removido",
     jdbcNoDrivers: "Nenhum driver JDBC importado ainda.",
     mcpTitle: "Servidor MCP",
-    mcpDescription: "Verifique a instalação e a versão do Servidor MCP do DBX usado pelo Claude Code, Cursor e outros agentes.",
+    mcpDescription:
+      "Verifique a instalação e a versão do Servidor MCP do DBX usado pelo Claude Code, Cursor e outros agentes.",
     mcpChecking: "Verificando",
     mcpStatusUnknown: "Não verificado",
     mcpStatusError: "Falha na verificação",
@@ -1784,12 +1814,15 @@ export default {
     mcpCodexConfig: "Configuração do Codex",
     mcpCodexConfigPath: "O Codex pode usar ~/.codex/config.toml ou um .codex/config.toml no nível do projeto.",
     mcpReadonlyMode: "Modo somente leitura",
-    mcpReadonlyModeDescription: "Adiciona DBX_MCP_ALLOW_WRITES=0 à configuração de exemplo para que a sessão MCP permaneça apenas para consultas.",
+    mcpReadonlyModeDescription:
+      "Adiciona DBX_MCP_ALLOW_WRITES=0 à configuração de exemplo para que a sessão MCP permaneça apenas para consultas.",
     mcpAllowDangerous: "Permitir SQL perigoso",
     mcpAllowDangerousDescription:
       "Adiciona DBX_MCP_ALLOW_DANGEROUS_SQL=1 à configuração de exemplo para que instruções como DROP, TRUNCATE, ALTER e similares sejam permitidas.",
-    mcpDetectionTiming: "O DBX verifica automaticamente quando esta página é aberta; use Verificar novamente para atualizar.",
-    mcpNpmBoundary: "O DBX apenas verifica e explica o status do MCP; a instalação e as atualizações ainda são feitas pelo npm.",
+    mcpDetectionTiming:
+      "O DBX verifica automaticamente quando esta página é aberta; use Verificar novamente para atualizar.",
+    mcpNpmBoundary:
+      "O DBX apenas verifica e explica o status do MCP; a instalação e as atualizações ainda são feitas pelo npm.",
     mcpRefresh: "Verificar novamente",
     mcpGuide: "Guia do MCP",
     aboutDescription: "Uma ferramenta de gerenciamento de banco de dados leve e de código aberto.",

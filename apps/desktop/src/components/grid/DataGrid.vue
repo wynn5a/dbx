@@ -158,6 +158,7 @@ import {
   isToggleTransposeShortcut,
 } from "@/lib/keyboardShortcuts";
 import { dataGridHeaderContentWidth, scrollbarGutterWidth } from "@/lib/dataGridScrollGutter";
+import { canGoNextDataGridPage } from "@/lib/dataGridPagination";
 import { CANVAS_DATA_GRID_ROW_HEIGHT, drawCanvasDataGrid } from "@/lib/canvasDataGridRenderer";
 import { dataGridSaveActionMode, dataGridSaveToolbarState } from "@/lib/dataGridSaveUi";
 import {
@@ -237,6 +238,7 @@ const props = defineProps<{
   pageLimit?: number;
   countSql?: string;
   totalRowCount?: number;
+  totalRowCountLoading?: boolean;
   loading?: boolean;
   cacheKey?: string;
   onExecuteSql?: (sql: string) => Promise<void>;
@@ -1796,12 +1798,31 @@ watch(
   },
   { immediate: true },
 );
-const canGoNextPage = computed(() => props.result.has_more === true || props.result.rows.length >= pageSize.value);
-const canJumpLastPage = computed(() => canGoNextPage.value && (!!props.tableMeta || !!props.countSql));
+const manualTotalRowCount = ref<number | undefined>(undefined);
+const manualTotalRowCountLoading = ref(false);
 const showTruncationWarning = computed(
   () => props.result.truncated === true && typeof props.pageLimit !== "number" && props.result.has_more !== true,
 );
 const isResultsContext = computed(() => props.context === "results");
+const displayedTotalRowCount = computed(() => props.totalRowCount ?? manualTotalRowCount.value);
+const hasKnownTotalRowCount = computed(
+  () => typeof displayedTotalRowCount.value === "number" && displayedTotalRowCount.value >= 0,
+);
+const canGoNextPage = computed(() => {
+  return canGoNextDataGridPage({
+    hasMore: props.result.has_more,
+    rowCount: props.result.rows.length,
+    pageSize: pageSize.value,
+    pageOffset: props.pageOffset,
+    currentPage: currentPage.value,
+    totalRowCount: hasKnownTotalRowCount.value ? displayedTotalRowCount.value : undefined,
+  });
+});
+const canJumpLastPage = computed(() => canGoNextPage.value && (!!props.tableMeta || !!props.countSql));
+const totalRowCountBusy = computed(() => props.totalRowCountLoading === true || manualTotalRowCountLoading.value);
+const canCalculateTotalRowCount = computed(
+  () => !isResultsContext.value && !!props.connectionId && (!!props.tableMeta || !!props.countSql),
+);
 const showQueryEditReadyBadge = computed(
   () => isResultsContext.value && hasData.value && !!props.editable && !!props.tableMeta,
 );
@@ -1859,6 +1880,21 @@ function currentOrderBy(): string | undefined {
   );
 }
 
+watch(
+  () => [
+    props.countSql ?? "",
+    props.tableMeta?.schema ?? "",
+    props.tableMeta?.tableName ?? "",
+    currentWhereInput() ?? "",
+    props.database ?? "",
+    props.connectionId ?? "",
+    props.result,
+  ],
+  () => {
+    manualTotalRowCount.value = undefined;
+  },
+);
+
 function syncOrderByInputWithSort(column: string | null, direction: "asc" | "desc" | null) {
   const nextOrderByInput = column && direction ? `${queryColumnRef(column)} ${direction.toUpperCase()}` : "";
   orderByInput.value = nextOrderByInput;
@@ -1915,20 +1951,11 @@ function applyCustomPageSize() {
 
 async function lastPage() {
   if (!props.connectionId) return;
-  let sql = props.countSql;
-  let schema = props.schema;
-  if (props.tableMeta) {
-    sql = await buildDataGridCountSql({
-      databaseType: props.databaseType,
-      schema: props.tableMeta.schema,
-      tableName: props.tableMeta.tableName,
-      whereInput: currentWhereInput(),
-    });
-    schema = props.tableMeta.schema;
-  }
+  const countTarget = await buildCurrentCountTarget();
+  const sql = countTarget?.sql;
   if (!sql) return;
   try {
-    const result = await api.executeQuery(props.connectionId, props.database ?? "", sql, schema);
+    const result = await api.executeQuery(props.connectionId, props.database ?? "", sql, countTarget.schema);
     const total = Number(result.rows?.[0]?.[0] ?? 0);
     if (total <= 0) return;
     const lastPageNum = Math.ceil(total / pageSize.value);
@@ -1938,6 +1965,43 @@ async function lastPage() {
     emit("paginate", (lastPageNum - 1) * pageSize.value, pageSize.value, currentWhereInput(), currentOrderBy());
   } catch {
     // COUNT query failed — ignore silently
+  }
+}
+
+async function buildCurrentCountTarget(): Promise<{ sql: string; schema?: string } | undefined> {
+  if (props.countSql) return { sql: props.countSql, schema: props.schema };
+  if (props.tableMeta) {
+    const sql = await buildDataGridCountSql({
+      databaseType: props.databaseType,
+      schema: props.tableMeta.schema,
+      tableName: props.tableMeta.tableName,
+      whereInput: currentWhereInput(),
+    });
+    return { sql, schema: props.context === "table-data" ? undefined : (props.tableMeta.schema ?? props.schema) };
+  }
+  return undefined;
+}
+
+async function calculateTotalRowCount() {
+  if (!props.connectionId || manualTotalRowCountLoading.value) return;
+  manualTotalRowCountLoading.value = true;
+  try {
+    const countTarget = await buildCurrentCountTarget();
+    if (!countTarget?.sql) return;
+    const result = await api.executeQuery(
+      props.connectionId,
+      props.database ?? "",
+      countTarget.sql,
+      countTarget.schema,
+    );
+    const total = Number(result.rows?.[0]?.[0] ?? 0);
+    if (Number.isFinite(total) && total >= 0) {
+      manualTotalRowCount.value = total;
+    }
+  } catch (e: any) {
+    toast(t("grid.calculateTotalRowsFailed", { message: e?.message || String(e) }), 5000);
+  } finally {
+    manualTotalRowCountLoading.value = false;
   }
 }
 
@@ -7649,9 +7713,23 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
       <div class="flex min-w-0 items-center gap-2 overflow-hidden">
         <span v-if="hasData" class="shrink-0">
           {{ t("grid.totalRows", { count: result.rows.length }) }}
-          <span v-if="typeof totalRowCount === 'number' && totalRowCount > 0" class="text-muted-foreground/70">{{
-            t("grid.totalRowCount", { count: totalRowCount })
-          }}</span>
+          <span
+            v-if="typeof displayedTotalRowCount === 'number' && displayedTotalRowCount >= 0"
+            class="text-muted-foreground/70"
+            >{{ t("grid.totalRowCount", { count: displayedTotalRowCount }) }}</span
+          >
+          <span v-else-if="totalRowCountBusy" class="text-muted-foreground/70">
+            {{ t("grid.totalRowCountLoading") }}
+          </span>
+          <button
+            v-else-if="canCalculateTotalRowCount"
+            type="button"
+            class="text-muted-foreground/70 hover:text-foreground hover:underline underline-offset-2 disabled:pointer-events-none"
+            :disabled="manualTotalRowCountLoading"
+            @click="calculateTotalRowCount"
+          >
+            {{ t("grid.calculateTotalRowsInline") }}
+          </button>
         </span>
         <span v-if="showTruncationWarning" class="shrink-0 text-amber-500 text-xs">(truncated)</span>
         <span v-if="!hasData" class="shrink-0">{{ t("grid.rowsAffected", { count: result.affected_rows }) }}</span>

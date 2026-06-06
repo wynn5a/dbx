@@ -566,6 +566,7 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
                 :page-limit="activeTab.resultPageLimit"
                 :count-sql="activeTab.resultCountSql"
                 :total-row-count="activeTab.resultTotalRowCount"
+                :total-row-count-loading="activeTab.resultTotalRowCountLoading"
                 :on-execute-sql="async (sql: string) => emit('executeSql', sql)"
                 :full-export-result="() => queryStore.fetchTabResultForExport(activeTab.id)"
                 @update:order-by-input="(v: string) => (activeTab.orderByInput = v)"

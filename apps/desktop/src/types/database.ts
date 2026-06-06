@@ -360,6 +360,7 @@ export interface QueryTab {
   resultPageOffset?: number;
   resultCountSql?: string;
   resultTotalRowCount?: number;
+  resultTotalRowCountLoading?: boolean;
   resultSessionId?: string;
   resultAccessedAt?: number;
   pinned?: boolean;
