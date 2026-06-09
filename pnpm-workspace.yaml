@@ -2,9 +2,10 @@ packages:
   - "packages/*"
 
 # Native deps whose install/build scripts must run.
-# Lives here (not package.json's `pnpm` field), which pnpm v11+ no longer reads.
-onlyBuiltDependencies:
-  - better-sqlite3
-  - esbuild
-  - keytar
-  - vue-demi
+# pnpm v11 no longer reads the `pnpm` field from package.json and uses the
+# `allowBuilds` map here (it replaced the deprecated `onlyBuiltDependencies`).
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  keytar: true
+  vue-demi: true
