@@ -18,6 +18,11 @@ import {
   type DropPosition,
 } from "@/lib/sidebarLayout";
 import type { SqlCompletionColumn, SqlCompletionObject, SqlCompletionTable } from "@/lib/sqlCompletion";
+
+// Indexed completion entries carry pre-computed lowercase names so the
+// per-keystroke fuzzy scan never re-allocates `toLowerCase()` strings.
+type IndexedCompletionTable = SqlCompletionTable & { nameLower: string; schemaLower?: string };
+type IndexedCompletionObject = SqlCompletionObject & { nameLower: string; schemaLower?: string };
 import * as api from "@/lib/api";
 import { isTauriRuntime } from "@/lib/tauriRuntime";
 import {
@@ -125,9 +130,16 @@ export const useConnectionStore = defineStore("connection", () => {
   const completionColumnsCache = ref<Record<string, ColumnInfo[]>>({});
   const elasticsearchCompletionIndicesCache = ref<Record<string, string[]>>({});
   const schemaListCache = ref<Record<string, string[]>>({});
-  const completionTableIndex = new Map<string, { touched: number; tables: SqlCompletionTable[] }>();
-  const completionObjectIndex = new Map<string, { touched: number; objects: SqlCompletionObject[] }>();
+  const completionTableIndex = new Map<string, { touched: number; tables: IndexedCompletionTable[] }>();
+  const completionObjectIndex = new Map<string, { touched: number; objects: IndexedCompletionObject[] }>();
   const completionColumnIndex = new Map<string, { touched: number; columns: SqlCompletionColumn[] }>();
+  // Cross-keystroke narrowing cache for table completion. Keyed by lookup scope.
+  // When the user extends a previous filter and the prior result was not truncated,
+  // we re-score only those candidates instead of rescanning every indexed table.
+  const tableNarrowCache = new Map<
+    string,
+    { filter: string; candidates: IndexedCompletionTable[]; truncated: boolean }
+  >();
   const completionInFlight = new Map<string, Promise<unknown>>();
   const transferSource = ref<{ connectionId: string; database: string } | null>(null);
   const schemaDiffSource = ref<{ connectionId: string; database: string; schema?: string } | null>(null);
@@ -1724,11 +1736,16 @@ export const useConnectionStore = defineStore("connection", () => {
     return promise;
   }
 
-  function tableMatchScore(table: SqlCompletionTable, filter: string, preferredSchema?: string): number {
-    const text = table.name.toLowerCase();
-    const schema = table.schema?.toLowerCase();
-    const normalized = filter.trim().toLowerCase();
-    let score = schema && preferredSchema && schema === preferredSchema.toLowerCase() ? 10_000 : 0;
+  // `normalized` must already be trimmed + lowercased; `preferredSchemaLower`
+  // must already be lowercased. Callers hoist this work out of the per-table loop.
+  function tableMatchScore(
+    table: { name: string; schema?: string; nameLower?: string; schemaLower?: string },
+    normalized: string,
+    preferredSchemaLower?: string,
+  ): number {
+    const text = table.nameLower ?? table.name.toLowerCase();
+    const schema = table.schemaLower ?? table.schema?.toLowerCase();
+    let score = schema && preferredSchemaLower && schema === preferredSchemaLower ? 10_000 : 0;
     if (!normalized) return score;
     if (text === normalized) return score + 9_000 - text.length;
     if (text.startsWith(normalized)) return score + 7_000 - text.length;
@@ -1742,9 +1759,12 @@ export const useConnectionStore = defineStore("connection", () => {
     return score + 1_000 - text.length;
   }
 
-  function objectMatchScore(object: SqlCompletionObject, filter: string, preferredSchema?: string): number {
-    const tableLike: SqlCompletionTable = { name: object.name, schema: object.schema };
-    return tableMatchScore(tableLike, filter, preferredSchema);
+  function objectMatchScore(
+    object: IndexedCompletionObject,
+    normalized: string,
+    preferredSchemaLower?: string,
+  ): number {
+    return tableMatchScore(object, normalized, preferredSchemaLower);
   }
 
   function indexCompletionTables(
@@ -1753,12 +1773,17 @@ export const useConnectionStore = defineStore("connection", () => {
     schema: string | undefined,
     tables: SqlCompletionTable[],
   ) {
-    const groups = new Map<string, SqlCompletionTable[]>();
+    const groups = new Map<string, IndexedCompletionTable[]>();
     for (const table of tables) {
       const tableSchema = table.schema ?? schema;
       const key = completionScopeKey(connectionId, database, tableSchema);
       const list = groups.get(key) ?? [];
-      list.push({ ...table, schema: tableSchema });
+      list.push({
+        ...table,
+        schema: tableSchema,
+        nameLower: table.name.toLowerCase(),
+        schemaLower: tableSchema?.toLowerCase(),
+      });
       groups.set(key, list);
     }
     for (const [key, group] of groups) {
@@ -1767,6 +1792,10 @@ export const useConnectionStore = defineStore("connection", () => {
         tables: dedupeCompletionTables([...previous, ...group]),
       });
     }
+    // Indexed tables changed — drop the narrowing cache so stale candidate lists
+    // are never reused. Indexing happens on (debounced) metadata refresh, not per
+    // keystroke, so clearing wholesale is cheap and safe.
+    tableNarrowCache.clear();
   }
 
   function indexCompletionObjects(
@@ -1775,12 +1804,17 @@ export const useConnectionStore = defineStore("connection", () => {
     schema: string | undefined,
     objects: SqlCompletionObject[],
   ) {
-    const groups = new Map<string, SqlCompletionObject[]>();
+    const groups = new Map<string, IndexedCompletionObject[]>();
     for (const object of objects) {
       const objectSchema = object.schema ?? schema;
       const key = completionScopeKey(connectionId, database, objectSchema);
       const list = groups.get(key) ?? [];
-      list.push({ ...object, schema: objectSchema });
+      list.push({
+        ...object,
+        schema: objectSchema,
+        nameLower: object.name.toLowerCase(),
+        schemaLower: objectSchema?.toLowerCase(),
+      });
       groups.set(key, list);
     }
     for (const [key, group] of groups) {
@@ -1810,17 +1844,50 @@ export const useConnectionStore = defineStore("connection", () => {
     limit?: number,
     schema?: string,
   ): SqlCompletionTable[] {
-    const allScopes = [...completionTableIndex.entries()]
-      .filter(([key]) => key.startsWith(`${connectionId}:${database}:`))
-      .map(([, entry]) => entry);
-    const preferred = schema ? completionTableIndex.get(completionScopeKey(connectionId, database, schema)) : undefined;
-    const scopes = preferred ? [preferred, ...allScopes.filter((entry) => entry !== preferred)] : allScopes;
-    const ranked = scopes
-      .flatMap((entry) => entry?.tables ?? [])
-      .map((table) => ({ table, score: tableMatchScore(table, filter, schema) }))
-      .filter((entry) => entry.score >= 0)
-      .sort((a, b) => b.score - a.score || a.table.name.localeCompare(b.table.name));
-    return dedupeCompletionTables(ranked.map((entry) => entry.table)).slice(0, limit ?? 200);
+    const cap = limit ?? 200;
+    const normalized = filter.trim().toLowerCase();
+    const preferredSchemaLower = schema?.toLowerCase();
+    const scopeKey = completionScopeKey(connectionId, database, schema);
+
+    // Score a candidate list, rank by score then name, and dedupe. Returns the
+    // full ranked candidate set (pre-slice) so it can seed the narrowing cache.
+    const rankCandidates = (candidates: IndexedCompletionTable[]): IndexedCompletionTable[] => {
+      const scored: Array<{ table: IndexedCompletionTable; score: number }> = [];
+      for (const table of candidates) {
+        const score = tableMatchScore(table, normalized, preferredSchemaLower);
+        if (score >= 0) scored.push({ table, score });
+      }
+      scored.sort((a, b) => b.score - a.score || a.table.name.localeCompare(b.table.name));
+      return dedupeCompletionTables(scored.map((entry) => entry.table));
+    };
+
+    // Fast path: when the new filter extends the previous one and that result was
+    // not truncated, every still-matching candidate is a subset of the cached set,
+    // so we re-score only those instead of rescanning the entire index.
+    const cached = tableNarrowCache.get(scopeKey);
+    if (cached && !cached.truncated && cached.filter && normalized.startsWith(cached.filter)) {
+      const narrowed = rankCandidates(cached.candidates);
+      tableNarrowCache.set(scopeKey, { filter: normalized, candidates: narrowed, truncated: false });
+      return narrowed.slice(0, cap);
+    }
+
+    // Cold path: single-pass scan over the connection/database scopes, preferred
+    // schema first (matching the previous ordering before sort).
+    const scopePrefix = `${connectionId}:${database}:`;
+    const preferred = schema ? completionTableIndex.get(scopeKey) : undefined;
+    const all: IndexedCompletionTable[] = [];
+    if (preferred) all.push(...preferred.tables);
+    for (const [key, entry] of completionTableIndex) {
+      if (entry === preferred || !key.startsWith(scopePrefix)) continue;
+      all.push(...entry.tables);
+    }
+    const ranked = rankCandidates(all);
+    tableNarrowCache.set(scopeKey, {
+      filter: normalized,
+      candidates: ranked,
+      truncated: ranked.length > cap,
+    });
+    return ranked.slice(0, cap);
   }
 
   function lookupLocalCompletionObjects(
@@ -1830,19 +1897,27 @@ export const useConnectionStore = defineStore("connection", () => {
     limit?: number,
     schema?: string,
   ): SqlCompletionObject[] {
-    const allScopes = [...completionObjectIndex.entries()]
-      .filter(([key]) => key.startsWith(`${connectionId}:${database}:`))
-      .map(([, entry]) => entry);
+    const normalized = filter.trim().toLowerCase();
+    const preferredSchemaLower = schema?.toLowerCase();
+    const scopePrefix = `${connectionId}:${database}:`;
     const preferred = schema
       ? completionObjectIndex.get(completionScopeKey(connectionId, database, schema))
       : undefined;
-    const scopes = preferred ? [preferred, ...allScopes.filter((entry) => entry !== preferred)] : allScopes;
-    const ranked = scopes
-      .flatMap((entry) => entry?.objects ?? [])
-      .map((object) => ({ object, score: objectMatchScore(object, filter, schema) }))
-      .filter((entry) => entry.score >= 0)
-      .sort((a, b) => b.score - a.score || a.object.name.localeCompare(b.object.name));
-    return dedupeCompletionObjects(ranked.map((entry) => entry.object)).slice(0, limit ?? 200);
+    const scored: Array<{ object: IndexedCompletionObject; score: number }> = [];
+    const visit = (entry?: { objects: IndexedCompletionObject[] }) => {
+      if (!entry) return;
+      for (const object of entry.objects) {
+        const score = objectMatchScore(object, normalized, preferredSchemaLower);
+        if (score >= 0) scored.push({ object, score });
+      }
+    };
+    if (preferred) visit(preferred);
+    for (const [key, entry] of completionObjectIndex) {
+      if (entry === preferred || !key.startsWith(scopePrefix)) continue;
+      visit(entry);
+    }
+    scored.sort((a, b) => b.score - a.score || a.object.name.localeCompare(b.object.name));
+    return dedupeCompletionObjects(scored.map((entry) => entry.object)).slice(0, limit ?? 200);
   }
 
   function lookupLocalCompletionSchemas(connectionId: string, database: string, filter = "", limit = 50): string[] {
@@ -2014,9 +2089,9 @@ export const useConnectionStore = defineStore("connection", () => {
     return Math.min(Math.max(limit * 3, limit), 1000);
   }
 
-  function dedupeCompletionTables(tables: SqlCompletionTable[]): SqlCompletionTable[] {
+  function dedupeCompletionTables<T extends SqlCompletionTable>(tables: T[]): T[] {
     const seen = new Set<string>();
-    const deduped: SqlCompletionTable[] = [];
+    const deduped: T[] = [];
     for (const table of tables) {
       const key = `${table.schema ?? ""}.${table.name}`.toLowerCase();
       if (seen.has(key)) continue;
@@ -2116,9 +2191,9 @@ export const useConnectionStore = defineStore("connection", () => {
     return true;
   }
 
-  function dedupeCompletionObjects(objects: SqlCompletionObject[]): SqlCompletionObject[] {
+  function dedupeCompletionObjects<T extends SqlCompletionObject>(objects: T[]): T[] {
     const seen = new Set<string>();
-    const deduped: SqlCompletionObject[] = [];
+    const deduped: T[] = [];
     for (const object of objects) {
       const key = `${object.type}:${object.schema ?? ""}:${object.name}:${object.parentName ?? ""}`.toLowerCase();
       if (seen.has(key)) continue;

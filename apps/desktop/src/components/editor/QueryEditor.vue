@@ -925,7 +925,12 @@ function completionOptionForItem(item: QueryCompletionItem) {
         if (typeof originalApply === "function") {
           originalApply(view, completionItem as never, from, to);
         } else {
-          view.dispatch({ changes: { from, to, insert: String(originalApply ?? item.label) } });
+          const insert = String(originalApply ?? item.label);
+          view.dispatch({
+            changes: { from, to, insert },
+            selection: { anchor: from + insert.length },
+            userEvent: "input.complete",
+          });
         }
       },
     };
@@ -938,7 +943,12 @@ function completionOptionForItem(item: QueryCompletionItem) {
     boost: item.boost,
     apply(view: EditorViewType, _completionItem: unknown, from: number, to: number) {
       record();
-      view.dispatch({ changes: { from, to, insert: item.apply ?? item.label } });
+      const insert = item.apply ?? item.label;
+      view.dispatch({
+        changes: { from, to, insert },
+        selection: { anchor: from + insert.length },
+        userEvent: "input.complete",
+      });
     },
   };
 }

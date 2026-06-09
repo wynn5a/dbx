@@ -1021,7 +1021,6 @@ onUnmounted(() => {
           @set-theme-mode="setThemeMode"
           @toggle-ai="toggleAiPanel"
           @toggle-history="showHistory = !showHistory"
-          @open-github="openGitHub"
           @open-settings="showSettingsDialog = true"
           @open-driver-store="showDriverStore = !showDriverStore"
           @check-updates="checkUpdates()"

@@ -384,7 +384,7 @@ export function buildSqlCompletionThemeRules(): CodeMirrorStyleSpec {
       boxShadow: "0 8px 18px rgb(0 0 0 / 0.14)",
       color: "var(--popover-foreground)",
       fontFamily: `var(${EDITOR_FONT_FAMILY_CSS_VAR}, var(--font-mono, monospace))`,
-      maxWidth: "min(520px, calc(100vw - 24px))",
+      maxWidth: "min(640px, calc(100vw - 24px))",
       minWidth: "min(280px, calc(100vw - 24px))",
       overflow: "hidden",
       padding: "4px 0",
@@ -501,6 +501,8 @@ export function buildSqlCompletionThemeRules(): CodeMirrorStyleSpec {
     },
     ".cm-completionLabel": {
       color: "inherit",
+      // Keep the label intact: it only shrinks (and ellipsizes) once the detail
+      // beside it has fully collapsed, so the leading name stays readable.
       flex: "0 1 auto",
       fontFamily: `var(${EDITOR_FONT_FAMILY_CSS_VAR}, var(--font-mono, monospace))`,
       fontSize: `clamp(12px, var(${EDITOR_FONT_SIZE_CSS_VAR}, 13px), 14px)`,
@@ -524,7 +526,9 @@ export function buildSqlCompletionThemeRules(): CodeMirrorStyleSpec {
       fontSize: `clamp(11px, calc(var(${EDITOR_FONT_SIZE_CSS_VAR}, 13px) - 1px), 13px)`,
       fontWeight: "500",
       fontStyle: "normal",
-      flex: "1 1 auto",
+      // High flex-shrink so the detail collapses (and ellipsizes) before the
+      // label does — the label is given truncation priority.
+      flex: "1 1000 auto",
       marginLeft: "10px",
       minWidth: "0",
       opacity: "1",
