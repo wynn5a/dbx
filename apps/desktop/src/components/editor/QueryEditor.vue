@@ -497,19 +497,50 @@ async function ensureForeignKeysForTable(table: { name: string; schema?: string 
   }
 }
 
-function createHoverDom(title: string, detail: string, rows: string[] = []) {
+type SqlHoverKind = "table" | "column";
+
+// Badge tints mirror the completion icon palette (table → primary, column → blue).
+const HOVER_BADGE_CLASSES: Record<SqlHoverKind, string> = {
+  table: "bg-primary/10 text-primary",
+  column: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+};
+
+function sqlDataTypeColorClass(dataType: string): string {
+  const type = dataType.toLowerCase();
+  if (/bool/.test(type)) return "text-amber-600 dark:text-amber-400";
+  if (/json|xml|\[\]|array/.test(type)) return "text-cyan-600 dark:text-cyan-400";
+  if (/date|time|interval|year/.test(type)) return "text-violet-600 dark:text-violet-400";
+  if (/int|serial|dec|numeric|float|double|real|money|number/.test(type)) return "text-orange-600 dark:text-orange-400";
+  if (/char|text|string|uuid|enum|citext/.test(type)) return "text-emerald-600 dark:text-emerald-400";
+  if (/blob|binary|bytea|bit/.test(type)) return "text-rose-600 dark:text-rose-400";
+  return "text-muted-foreground";
+}
+
+function createHoverDom(kind: SqlHoverKind, title: string, typeInfo?: string, rows: string[] = []) {
   const dom = document.createElement("div");
   dom.className = "rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md";
 
   const heading = document.createElement("div");
-  heading.className = "font-medium";
-  heading.textContent = title;
+  heading.className = "flex items-center gap-2";
+
+  const titleNode = document.createElement("span");
+  titleNode.className = "font-medium";
+  titleNode.textContent = title;
+  heading.appendChild(titleNode);
+
+  const badge = document.createElement("span");
+  badge.className = `rounded px-1.5 py-px text-[10px] font-medium uppercase tracking-wide ${HOVER_BADGE_CLASSES[kind]}`;
+  badge.textContent = kind;
+  heading.appendChild(badge);
+
   dom.appendChild(heading);
 
-  const detailNode = document.createElement("div");
-  detailNode.className = "mt-1 text-muted-foreground";
-  detailNode.textContent = detail;
-  dom.appendChild(detailNode);
+  if (typeInfo) {
+    const typeNode = document.createElement("div");
+    typeNode.className = `mt-1 font-mono ${kind === "column" ? sqlDataTypeColorClass(typeInfo) : "text-muted-foreground"}`;
+    typeNode.textContent = typeInfo;
+    dom.appendChild(typeNode);
+  }
 
   for (const row of rows) {
     const rowNode = document.createElement("div");
@@ -597,7 +628,7 @@ async function resolveSqlHoverTooltip(currentView: EditorViewType, pos: number) 
         pos: range.from,
         end: range.to,
         create: () => ({
-          dom: createHoverDom(table.name, table.schema ? `table in ${table.schema}` : "table"),
+          dom: createHoverDom("table", table.name, table.schema ? `in ${table.schema}` : undefined),
         }),
       };
     }
@@ -619,7 +650,7 @@ async function resolveSqlHoverTooltip(currentView: EditorViewType, pos: number) 
         pos: range.from,
         end: range.to,
         create: () => ({
-          dom: createHoverDom(column.name, column.dataType || "column", [
+          dom: createHoverDom("column", column.name, column.dataType || undefined, [
             column.schema ? `${column.schema}.${column.table}` : column.table,
             ...(column.comment?.trim() ? [column.comment.trim()] : []),
           ]),
