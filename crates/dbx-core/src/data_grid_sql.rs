@@ -497,52 +497,89 @@ fn build_data_grid_save_statements(options: &DataGridSaveStatementOptions) -> Ve
         options.table_meta.schema.as_deref(),
         &options.table_meta.table_name,
     );
+    let batched = supports_batched_dml(options.database_type);
     let mut statements = Vec::new();
 
+    // Group dirty rows by the set of columns they change. Rows sharing a
+    // signature can be merged into one CASE/WHEN UPDATE without ever writing
+    // columns a row didn't actually change.
+    let mut update_groups: Vec<(Vec<String>, Vec<PendingRowUpdate>)> = Vec::new();
     for (row_index, changes) in &options.dirty_rows {
         let Some(row) = options.rows.get(*row_index) else {
             continue;
         };
-        let sets = changes
+        let set_pairs: Vec<(String, String)> = changes
             .iter()
             .filter_map(|(column_index, value)| {
                 let column = save_columns.get(*column_index)?.as_deref()?;
                 if is_oracle_row_id(options.database_type, Some(column)) {
                     return None;
                 }
-                Some(format!(
-                    "{} = {}",
+                Some((
                     quote_ident(options.database_type, column),
-                    format_grid_sql_literal(value, options.database_type, column_info_for(column_info, column))
+                    format_grid_sql_literal(value, options.database_type, column_info_for(column_info, column)),
                 ))
             })
-            .collect::<Vec<_>>()
-            .join(", ");
-        if sets.is_empty() {
+            .collect();
+        if set_pairs.is_empty() {
             continue;
         }
-        let where_clause = build_primary_key_where(
+        let predicate = build_primary_key_where(
             options.database_type,
             &options.table_meta.primary_keys,
             &save_columns,
             row,
             column_info,
         );
-        statements.push(format!("UPDATE {table} SET {sets} WHERE {where_clause};"));
+        let mut signature: Vec<String> = set_pairs.iter().map(|(column, _)| column.clone()).collect();
+        signature.sort();
+        let pending = PendingRowUpdate { set_pairs, predicate };
+        match update_groups.iter_mut().find(|(group_signature, _)| *group_signature == signature) {
+            Some((_, group)) => group.push(pending),
+            None => update_groups.push((signature, vec![pending])),
+        }
+    }
+    for (_, group) in &update_groups {
+        if batched && group.len() > 1 {
+            for chunk in group.chunks(DML_BATCH_SIZE) {
+                statements.push(build_case_batched_update(&table, chunk));
+            }
+        } else {
+            for update in group {
+                let sets = update
+                    .set_pairs
+                    .iter()
+                    .map(|(column, literal)| format!("{column} = {literal}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                statements.push(format!("UPDATE {table} SET {sets} WHERE {};", update.predicate));
+            }
+        }
     }
 
-    for row_index in &options.deleted_rows {
-        let Some(row) = options.rows.get(*row_index) else {
-            continue;
-        };
-        let where_clause = build_primary_key_where(
-            options.database_type,
-            &options.table_meta.primary_keys,
-            &save_columns,
-            row,
-            column_info,
-        );
-        statements.push(format!("DELETE FROM {table} WHERE {where_clause};"));
+    let delete_predicates: Vec<String> = options
+        .deleted_rows
+        .iter()
+        .filter_map(|row_index| {
+            let row = options.rows.get(*row_index)?;
+            Some(build_primary_key_where(
+                options.database_type,
+                &options.table_meta.primary_keys,
+                &save_columns,
+                row,
+                column_info,
+            ))
+        })
+        .collect();
+    if batched && delete_predicates.len() > 1 {
+        for chunk in delete_predicates.chunks(DML_BATCH_SIZE) {
+            let combined = chunk.iter().map(|predicate| format!("({predicate})")).collect::<Vec<_>>().join(" OR ");
+            statements.push(format!("DELETE FROM {table} WHERE {combined};"));
+        }
+    } else {
+        for predicate in &delete_predicates {
+            statements.push(format!("DELETE FROM {table} WHERE {predicate};"));
+        }
     }
 
     for row in &options.new_rows {
@@ -962,6 +999,76 @@ fn local_timezone_offset_suffix(text: &str) -> String {
     let sign = if offset_minutes <= 0 { "+" } else { "-" };
     let abs = offset_minutes.abs();
     format!("{sign}{:02}:{:02}", abs / 60, abs % 60)
+}
+
+/// Rows per batched UPDATE/DELETE statement — bounds statement size; larger
+/// edits produce multiple batched statements.
+const DML_BATCH_SIZE: usize = 100;
+
+struct PendingRowUpdate {
+    /// (quoted column, formatted literal) for every column this row changes.
+    set_pairs: Vec<(String, String)>,
+    /// Full row predicate from build_primary_key_where.
+    predicate: String,
+}
+
+/// Dialects where batched data-grid DML (multi-row CASE/WHEN UPDATEs and
+/// OR-combined DELETEs) is known to be safe. Everything else keeps the
+/// per-row statements.
+fn supports_batched_dml(database_type: Option<DatabaseType>) -> bool {
+    matches!(
+        database_type,
+        Some(
+            DatabaseType::Mysql
+                | DatabaseType::Postgres
+                | DatabaseType::Sqlite
+                | DatabaseType::Rqlite
+                | DatabaseType::DuckDb
+                | DatabaseType::SqlServer
+                | DatabaseType::Oracle
+                | DatabaseType::Redshift
+                | DatabaseType::Doris
+                | DatabaseType::StarRocks
+                | DatabaseType::OpenGauss
+                | DatabaseType::Gaussdb
+                | DatabaseType::OceanbaseOracle
+                | DatabaseType::Kingbase
+                | DatabaseType::Highgo
+                | DatabaseType::Vastbase
+                | DatabaseType::Goldendb
+                | DatabaseType::Dameng
+        )
+    )
+}
+
+/// Merge several single-row updates that change the same column set into one
+/// statement: each column becomes a CASE over the per-row predicates, and the
+/// WHERE clause ORs those predicates. `ELSE {col}` keeps a row untouched in
+/// the keyless-predicate edge case where predicates overlap.
+fn build_case_batched_update(table: &str, group: &[PendingRowUpdate]) -> String {
+    let columns: Vec<&str> = group[0].set_pairs.iter().map(|(column, _)| column.as_str()).collect();
+    let sets = columns
+        .iter()
+        .map(|column| {
+            let whens = group
+                .iter()
+                .map(|update| {
+                    let literal = update
+                        .set_pairs
+                        .iter()
+                        .find(|(set_column, _)| set_column == column)
+                        .map(|(_, literal)| literal.as_str())
+                        .unwrap_or("NULL");
+                    format!("WHEN {} THEN {literal}", update.predicate)
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("{column} = CASE {whens} ELSE {column} END")
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let combined = group.iter().map(|update| format!("({})", update.predicate)).collect::<Vec<_>>().join(" OR ");
+    format!("UPDATE {table} SET {sets} WHERE {combined};")
 }
 
 fn build_primary_key_where(
@@ -1454,6 +1561,159 @@ mod tests {
                 "INSERT INTO [game].[player states] ([role id], [state], [updated at]) VALUES (43, N'new', N'2026-05-05');",
             ]
         );
+    }
+
+    #[test]
+    fn batches_same_column_updates_into_case_statement() {
+        let result = prepare_data_grid_save(DataGridSaveStatementOptions {
+            database_type: Some(DatabaseType::Postgres),
+            table_meta: DataGridTableMeta {
+                schema: Some("public".to_string()),
+                table_name: "users".to_string(),
+                primary_keys: vec!["id".to_string()],
+                columns: None,
+            },
+            columns: vec!["id".to_string(), "name".to_string(), "status".to_string()],
+            source_columns: None,
+            rows: vec![
+                vec![json!(1), json!("Ada"), json!("active")],
+                vec![json!(2), json!("Linus"), json!("active")],
+                vec![json!(3), json!("Grace"), json!("active")],
+            ],
+            dirty_rows: vec![
+                (0, vec![(1, json!("Ada L")), (2, json!("paused"))]),
+                (1, vec![(1, json!("Linus T")), (2, json!("paused"))]),
+                (2, vec![(1, json!("Grace H")), (2, json!("paused"))]),
+            ],
+            deleted_rows: vec![],
+            new_rows: vec![],
+        });
+
+        assert_eq!(
+            result.statements,
+            vec![concat!(
+                r#"UPDATE "public"."users" SET "#,
+                r#""name" = CASE WHEN "id" = 1 THEN 'Ada L' WHEN "id" = 2 THEN 'Linus T' WHEN "id" = 3 THEN 'Grace H' ELSE "name" END, "#,
+                r#""status" = CASE WHEN "id" = 1 THEN 'paused' WHEN "id" = 2 THEN 'paused' WHEN "id" = 3 THEN 'paused' ELSE "status" END "#,
+                r#"WHERE ("id" = 1) OR ("id" = 2) OR ("id" = 3);"#,
+            )]
+        );
+    }
+
+    #[test]
+    fn groups_batched_updates_by_dirty_column_signature() {
+        let result = prepare_data_grid_save(DataGridSaveStatementOptions {
+            database_type: Some(DatabaseType::Postgres),
+            table_meta: DataGridTableMeta {
+                schema: None,
+                table_name: "users".to_string(),
+                primary_keys: vec!["id".to_string()],
+                columns: None,
+            },
+            columns: vec!["id".to_string(), "name".to_string(), "status".to_string()],
+            source_columns: None,
+            rows: vec![
+                vec![json!(1), json!("Ada"), json!("active")],
+                vec![json!(2), json!("Linus"), json!("active")],
+                vec![json!(3), json!("Grace"), json!("active")],
+            ],
+            dirty_rows: vec![
+                (0, vec![(1, json!("Ada L"))]),
+                (1, vec![(1, json!("Linus T"))]),
+                (2, vec![(2, json!("paused"))]),
+            ],
+            deleted_rows: vec![],
+            new_rows: vec![],
+        });
+
+        assert_eq!(
+            result.statements,
+            vec![
+                concat!(
+                    r#"UPDATE "users" SET "name" = CASE WHEN "id" = 1 THEN 'Ada L' WHEN "id" = 2 THEN 'Linus T' ELSE "name" END "#,
+                    r#"WHERE ("id" = 1) OR ("id" = 2);"#,
+                )
+                .to_string(),
+                r#"UPDATE "users" SET "status" = 'paused' WHERE "id" = 3;"#.to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn keeps_per_row_updates_for_unsupported_dialects() {
+        let result = prepare_data_grid_save(DataGridSaveStatementOptions {
+            database_type: Some(DatabaseType::Snowflake),
+            table_meta: DataGridTableMeta {
+                schema: None,
+                table_name: "users".to_string(),
+                primary_keys: vec!["id".to_string()],
+                columns: None,
+            },
+            columns: vec!["id".to_string(), "name".to_string()],
+            source_columns: None,
+            rows: vec![vec![json!(1), json!("Ada")], vec![json!(2), json!("Linus")]],
+            dirty_rows: vec![(0, vec![(1, json!("Ada L"))]), (1, vec![(1, json!("Linus T"))])],
+            deleted_rows: vec![0, 1],
+            new_rows: vec![],
+        });
+
+        assert_eq!(
+            result.statements,
+            vec![
+                r#"UPDATE "users" SET "name" = 'Ada L' WHERE "id" = 1;"#,
+                r#"UPDATE "users" SET "name" = 'Linus T' WHERE "id" = 2;"#,
+                r#"DELETE FROM "users" WHERE "id" = 1;"#,
+                r#"DELETE FROM "users" WHERE "id" = 2;"#,
+            ]
+        );
+    }
+
+    #[test]
+    fn batches_multi_row_deletes_with_or_predicates() {
+        let result = prepare_data_grid_save(DataGridSaveStatementOptions {
+            database_type: Some(DatabaseType::Mysql),
+            table_meta: DataGridTableMeta {
+                schema: None,
+                table_name: "users".to_string(),
+                primary_keys: vec!["id".to_string()],
+                columns: None,
+            },
+            columns: vec!["id".to_string(), "name".to_string()],
+            source_columns: None,
+            rows: vec![vec![json!(1), json!("Ada")], vec![json!(2), json!("Linus")], vec![json!(3), json!("Grace")]],
+            dirty_rows: vec![],
+            deleted_rows: vec![0, 2],
+            new_rows: vec![],
+        });
+
+        assert_eq!(result.statements, vec!["DELETE FROM `users` WHERE (`id` = 1) OR (`id` = 3);"]);
+    }
+
+    #[test]
+    fn chunks_batched_updates_at_batch_size() {
+        let row_count = DML_BATCH_SIZE + 1;
+        let rows: Vec<Vec<Value>> = (0..row_count).map(|i| vec![json!(i), json!("old")]).collect();
+        let dirty_rows: Vec<(usize, Vec<(usize, Value)>)> =
+            (0..row_count).map(|i| (i, vec![(1, json!("new"))])).collect();
+        let result = prepare_data_grid_save(DataGridSaveStatementOptions {
+            database_type: Some(DatabaseType::Postgres),
+            table_meta: DataGridTableMeta {
+                schema: None,
+                table_name: "users".to_string(),
+                primary_keys: vec!["id".to_string()],
+                columns: None,
+            },
+            columns: vec!["id".to_string(), "name".to_string()],
+            source_columns: None,
+            rows,
+            dirty_rows,
+            deleted_rows: vec![],
+            new_rows: vec![],
+        });
+
+        assert_eq!(result.statements.len(), 2);
+        assert_eq!(result.statements[0].matches("WHEN").count(), DML_BATCH_SIZE);
+        assert_eq!(result.statements[1].matches("WHEN").count(), 1);
     }
 
     #[test]

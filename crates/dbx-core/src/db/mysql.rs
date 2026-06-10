@@ -309,7 +309,7 @@ fn mysql_value_to_json(row: &mysql_async::Row, idx: usize) -> serde_json::Value 
     }
 
     row_get::<String, _>(row, idx)
-        .map(|s| serde_json::Value::String(fix_potential_double_encoding(&s)))
+        .map(|s| serde_json::Value::String(fix_potential_double_encoding(s)))
         .or_else(|| row_get::<i64, _>(row, idx).map(super::safe_i64_to_json))
         .or_else(|| row_get::<u64, _>(row, idx).map(super::safe_u64_to_json))
         .or_else(|| row_get::<i32, _>(row, idx).map(|v| serde_json::Value::Number(v.into())))
@@ -1245,7 +1245,12 @@ fn columns_sql(database: &str, table: &str) -> String {
 /// Example: "主键" → UTF-8 bytes [E4 B8 BB E9 94 AE]
 ///   → each byte → CP1252 char → UTF-8 re-encoded → garbled text
 ///   → reversal: map each char back to its CP1252 byte, decode as UTF-8
-fn fix_potential_double_encoding(s: &str) -> String {
+fn fix_potential_double_encoding(s: String) -> String {
+    // Double-encoded CP1252 artifacts always involve chars >= 0x80, so pure
+    // ASCII strings (the common case) need no Vec/copy — runs per text cell.
+    if s.is_ascii() {
+        return s;
+    }
     // Map each character to its CP1252 byte value
     let mut bytes = Vec::with_capacity(s.len());
     for c in s.chars() {
@@ -1279,7 +1284,7 @@ fn fix_potential_double_encoding(s: &str) -> String {
             0x017E => 0x9E, // ž
             0x0178 => 0x9F, // Ÿ
             v if v <= 0xFF => v as u8,
-            _ => return s.to_string(), // contains non-Latin1 char, skip
+            _ => return s, // contains non-Latin1 char, skip
         };
         bytes.push(byte);
     }
@@ -1293,10 +1298,10 @@ fn fix_potential_double_encoding(s: &str) -> String {
             if decoded.chars().any(|c| c > '\u{00FF}') {
                 decoded
             } else {
-                s.to_string()
+                s
             }
         }
-        Err(_) => s.to_string(),
+        Err(_) => s,
     }
 }
 
@@ -1331,7 +1336,7 @@ pub async fn get_columns(pool: &MySqlPool, database: &str, table: &str) -> Resul
                 column_default: get_opt_str(row, "COLUMN_DEFAULT"),
                 extra: get_opt_str(row, "EXTRA"),
                 comment: get_opt_str(row, "COLUMN_COMMENT")
-                    .map(|s| fix_potential_double_encoding(&s))
+                    .map(fix_potential_double_encoding)
                     .filter(|s| !s.is_empty()),
                 numeric_precision: get_opt_i32(row, "NUMERIC_PRECISION"),
                 numeric_scale: get_opt_i32(row, "NUMERIC_SCALE"),
@@ -1376,9 +1381,7 @@ pub async fn get_columns_show(pool: &MySqlPool, database: &str, table: &str) -> 
                 column_default: get_opt_str(row, "Default"),
                 is_primary_key: key.eq_ignore_ascii_case("PRI"),
                 extra: get_opt_str(row, "Extra"),
-                comment: get_opt_str(row, "Comment")
-                    .map(|s| fix_potential_double_encoding(&s))
-                    .filter(|s| !s.is_empty()),
+                comment: get_opt_str(row, "Comment").map(fix_potential_double_encoding).filter(|s| !s.is_empty()),
                 numeric_precision: None,
                 numeric_scale: None,
                 character_maximum_length: None,

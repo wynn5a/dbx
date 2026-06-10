@@ -25,8 +25,10 @@ export function dataGridSaveToolbarState(options: {
   hasSaveTarget: boolean;
   hasPendingChanges: boolean;
   isSaving: boolean;
+  transactionActive?: boolean;
 }): DataGridSaveToolbarState {
-  const showActions = options.editable && options.hasSaveTarget;
+  const canSave = options.editable && options.hasSaveTarget;
+  const showActions = canSave && (options.hasPendingChanges || options.isSaving || !!options.transactionActive);
   return {
     showActions,
     actionsDisabled: !showActions || !options.hasPendingChanges || options.isSaving,

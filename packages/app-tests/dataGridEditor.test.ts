@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "vitest";
-import { computed, nextTick, ref } from "vue";
+import { computed, markRaw, nextTick, reactive, ref } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import { useDataGridEditor } from "../../apps/desktop/src/composables/useDataGridEditor.ts";
 import type { CellValue } from "../../apps/desktop/src/lib/cellValue.ts";
@@ -446,6 +446,137 @@ test("saving edited rows without deletes does not reload table data", async () =
   await editor.saveChanges();
 
   assert.deepEqual(emitted, []);
+});
+
+test("saving deleted rows without inserts removes rows locally instead of reloading", async () => {
+  setActivePinia(createPinia());
+  installBrowserTestGlobals();
+
+  const rows = [[1, "Ada"] as CellValue[], [2, "Linus"] as CellValue[], [3, "Grace"] as CellValue[]];
+  // Mirror the real app: the result lives in a reactive store with markRaw rows.
+  const resultObject = reactive({ columns: ["id", "name"], rows: markRaw(rows) });
+  const result = computed(() => resultObject);
+  // Mimics DataGrid computeds that read result.rows without extra dependencies:
+  // the rows-array replacement must retrigger them through property tracking.
+  const derivedRowCount = computed(() => result.value.rows.length);
+  const emitted: unknown[][] = [];
+  const executedSql: string[] = [];
+  const removedCounts: number[] = [];
+
+  const editor = useDataGridEditor({
+    result,
+    editable: computed(() => true),
+    databaseType: computed(() => "postgres"),
+    connectionId: computed(() => undefined),
+    database: computed(() => undefined),
+    tableMeta: computed(() => ({
+      tableName: "people",
+      columns: [column("id", true), column("name")],
+      primaryKeys: ["id"],
+    })),
+    onExecuteSql: computed(() => async (sql: string) => {
+      executedSql.push(sql);
+    }),
+    customSave: computed(() => undefined),
+    sql: computed(() => "SELECT id, name FROM people"),
+    searchText: ref(""),
+    whereFilterInput: ref(""),
+    orderByInput: ref(""),
+    currentWhereInput: computed(() => undefined),
+    rowStatusFilter: ref("all"),
+    pageSize: ref(50),
+    currentPage: ref(1),
+    getRowItem: (rowId) => {
+      const row = rows[rowId];
+      if (!row) return undefined;
+      return {
+        id: rowId,
+        sourceIndex: rowId,
+        data: row,
+        isNew: false,
+        isDeleted: false,
+        isDirtyCol: [false, false],
+        status: "clean",
+      };
+    },
+    onRowsRemovedLocally: (count) => removedCounts.push(count),
+    emit: (...args) => {
+      emitted.push(args);
+    },
+  });
+
+  assert.equal(derivedRowCount.value, 3);
+  editor.applyDeleteRow(0);
+  editor.applyDeleteRow(2);
+  const revisionBefore = editor.rowsRevision.value;
+  await editor.saveChanges();
+
+  assert.deepEqual(executedSql, [`DELETE FROM "people" WHERE "id" = 1;`, `DELETE FROM "people" WHERE "id" = 3;`]);
+  assert.deepEqual(emitted, []);
+  assert.deepEqual(resultObject.rows, [[2, "Linus"]]);
+  assert.equal(derivedRowCount.value, 1);
+  assert.deepEqual(removedCounts, [2]);
+  assert.ok(editor.rowsRevision.value > revisionBefore);
+  assert.equal(editor.deletedRows.value.size, 0);
+});
+
+test("saving inserts together with deletes still reloads and keeps local rows untouched", async () => {
+  setActivePinia(createPinia());
+  installBrowserTestGlobals();
+
+  const rows = [[1, "Ada"] as CellValue[], [2, "Linus"] as CellValue[]];
+  const result = computed(() => ({ columns: ["id", "name"], rows }));
+  const emitted: unknown[][] = [];
+  const removedCounts: number[] = [];
+
+  const editor = useDataGridEditor({
+    result,
+    editable: computed(() => true),
+    databaseType: computed(() => "postgres"),
+    connectionId: computed(() => undefined),
+    database: computed(() => undefined),
+    tableMeta: computed(() => ({
+      tableName: "people",
+      columns: [column("id", true), column("name")],
+      primaryKeys: ["id"],
+    })),
+    onExecuteSql: computed(() => async () => {}),
+    customSave: computed(() => undefined),
+    sql: computed(() => "SELECT id, name FROM people"),
+    searchText: ref(""),
+    whereFilterInput: ref(""),
+    orderByInput: ref(""),
+    currentWhereInput: computed(() => undefined),
+    rowStatusFilter: ref("all"),
+    pageSize: ref(50),
+    currentPage: ref(1),
+    getRowItem: (rowId) => {
+      const row = rows[rowId];
+      if (!row) return undefined;
+      return {
+        id: rowId,
+        sourceIndex: rowId,
+        data: row,
+        isNew: false,
+        isDeleted: false,
+        isDirtyCol: [false, false],
+        status: "clean",
+      };
+    },
+    onRowsRemovedLocally: (count) => removedCounts.push(count),
+    emit: (...args) => {
+      emitted.push(args);
+    },
+  });
+
+  editor.applyDeleteRow(0);
+  editor.newRows.value = [[3, "Grace"]];
+  await editor.saveChanges();
+
+  assert.equal(emitted.length, 1);
+  assert.equal(emitted[0]?.[0], "reload");
+  assert.deepEqual(rows, [[1, "Ada"], [2, "Linus"]]);
+  assert.deepEqual(removedCounts, []);
 });
 
 test("saving manually typed JSON from a MySQL grid normalizes smart quotes", async () => {

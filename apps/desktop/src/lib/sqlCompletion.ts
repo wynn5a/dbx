@@ -2279,27 +2279,29 @@ function buildColumnItems(
   columnsByTable: Map<string, SqlCompletionColumn[]>,
   dialect?: "mysql" | "postgres" | "sqlserver",
 ): SqlCompletionItem[] {
-  // Collect all columns from the map (all tables have been fetched)
-  const allColumns: Array<SqlCompletionColumn & { key: string }> = [];
-  for (const [key, cols] of columnsByTable.entries()) {
-    for (const col of cols) {
-      allColumns.push({ ...col, key });
+  // Collect all columns from the map (all tables have been fetched).
+  // Parallel arrays avoid allocating a wrapper object per column per keystroke.
+  const cols: SqlCompletionColumn[] = [];
+  const keys: string[] = [];
+  for (const [key, list] of columnsByTable.entries()) {
+    for (const col of list) {
+      cols.push(col);
+      keys.push(key);
     }
   }
 
-  // Handle INSERT column list: filter to only the target table
-  let relevantCols = allColumns;
+  // Resolve which column indexes are relevant (INSERT column list / qualifier)
+  let indexes: number[];
   if (context.insertTable) {
     const tableLower = context.insertTable.toLowerCase();
-    if (context.insertSchema) {
-      const schemaLower = context.insertSchema.toLowerCase();
-      relevantCols = allColumns.filter(
-        (c) =>
-          c.table.toLowerCase() === tableLower &&
-          (c.schema?.toLowerCase() === schemaLower || c.key.toLowerCase() === `${schemaLower}.${tableLower}`),
-      );
-    } else {
-      relevantCols = allColumns.filter((c) => c.table.toLowerCase() === tableLower);
+    const schemaLower = context.insertSchema?.toLowerCase();
+    const qualifiedKey = schemaLower ? `${schemaLower}.${tableLower}` : null;
+    indexes = [];
+    for (let i = 0; i < cols.length; i++) {
+      const c = cols[i];
+      if (c.table.toLowerCase() !== tableLower) continue;
+      if (schemaLower && !(c.schema?.toLowerCase() === schemaLower || keys[i].toLowerCase() === qualifiedKey)) continue;
+      indexes.push(i);
     }
   } else if (context.qualifier) {
     const q = context.qualifier;
@@ -2319,30 +2321,19 @@ function buildColumnItems(
         tableKeys.add(`${table.schema}.${table.name}`);
       }
     }
-    relevantCols = allColumns.filter((c) => tableNameSet.has(c.table.toLowerCase()) || tableKeys.has(c.key));
+    indexes = [];
+    for (let i = 0; i < cols.length; i++) {
+      if (tableNameSet.has(cols[i].table.toLowerCase()) || tableKeys.has(keys[i])) indexes.push(i);
+    }
+  } else {
+    indexes = cols.map((_, i) => i);
   }
 
   // Count name frequencies to detect duplicates across tables
   const nameCount = new Map<string, number>();
-  for (const c of relevantCols) {
-    nameCount.set(c.name, (nameCount.get(c.name) || 0) + 1);
-  }
-
-  // Deduplicate — for dupes, qualify with table name
-  const seen = new Set<string>();
-  const uniqueColumns: Array<SqlCompletionColumn & { key: string; displayLabel: string }> = [];
-  for (const c of relevantCols) {
-    const count = nameCount.get(c.name) || 0;
-    if (count > 1) {
-      const qualifiedKey = `${c.table}.${c.name}`;
-      if (seen.has(qualifiedKey)) continue;
-      seen.add(qualifiedKey);
-      uniqueColumns.push({ ...c, key: c.key, displayLabel: `${c.table}.${c.name}` });
-    } else {
-      if (seen.has(c.name)) continue;
-      seen.add(c.name);
-      uniqueColumns.push({ ...c, key: c.key, displayLabel: c.name });
-    }
+  for (const i of indexes) {
+    const name = cols[i].name;
+    nameCount.set(name, (nameCount.get(name) || 0) + 1);
   }
 
   // When the query already references concrete tables (or we are after a
@@ -2351,20 +2342,28 @@ function buildColumnItems(
   // keywords so they rank at the top instead of being interleaved.
   const relevanceBoost = context.referencedTables.length > 0 || !!context.qualifier || !!context.insertTable ? 2000 : 0;
 
-  return uniqueColumns
-    .filter((column) => matchesPrefix(column.displayLabel, context.prefix))
-    .map((column) => {
-      const keyBoost = isKeyColumn(column.name) ? 500 : 0;
-      return {
-        label: column.displayLabel,
-        type: "column" as const,
-        detail: buildColumnDetail(column),
-        info: buildColumnInfo(column),
-        apply: buildColumnApply(column, context, dialect),
-        boost: computeBoost(column.displayLabel, context.prefix) + keyBoost + relevanceBoost,
-      };
-    })
-    .sort(compareCompletionItems);
+  // Deduplicate, prefix-filter, and score in one pass; full items (detail,
+  // info, apply strings) are only built for columns that match the prefix.
+  const seen = new Set<string>();
+  const items: SqlCompletionItem[] = [];
+  for (const i of indexes) {
+    const c = cols[i];
+    const displayLabel = (nameCount.get(c.name) || 0) > 1 ? `${c.table}.${c.name}` : c.name;
+    if (seen.has(displayLabel)) continue;
+    seen.add(displayLabel);
+    const score = computeMatchScore(displayLabel, context.prefix);
+    if (score < 0) continue;
+    const column = { ...c, displayLabel };
+    items.push({
+      label: displayLabel,
+      type: "column" as const,
+      detail: buildColumnDetail(column),
+      info: buildColumnInfo(column),
+      apply: buildColumnApply(column, context, dialect),
+      boost: score + (isKeyColumn(c.name) ? 500 : 0) + relevanceBoost,
+    });
+  }
+  return items.sort(compareCompletionItems);
 }
 
 function buildColumnApply(
@@ -3033,11 +3032,30 @@ function matchesPrefix(candidate: string, prefix: string): boolean {
  *   Loose fuzzy:     500 + partialEarlyBonus - gapPenalty - len (gaps >= prefix length)
  *   Substring:       300 - len
  */
+// Candidates are filtered with matchesPrefix() and then scored again with
+// computeBoost() — the same (candidate, prefix) pair twice per keystroke, over
+// potentially thousands of candidates. Memoize per prefix; the cache resets
+// whenever the prefix changes (i.e. on the next keystroke).
+let scoreCachePrefix = "";
+let scoreCachePrefixLower = "";
+const scoreCache = new Map<string, number>();
+const SCORE_CACHE_LIMIT = 20000;
+
 function computeMatchScore(candidate: string, prefix: string): number {
   if (!prefix) return 1;
-  const c = candidate.toLowerCase();
-  const p = prefix.toLowerCase();
+  if (prefix !== scoreCachePrefix) {
+    scoreCachePrefix = prefix;
+    scoreCachePrefixLower = prefix.toLowerCase();
+    scoreCache.clear();
+  }
+  const cached = scoreCache.get(candidate);
+  if (cached !== undefined) return cached;
+  const score = computeMatchScoreUncached(candidate.toLowerCase(), scoreCachePrefixLower);
+  if (scoreCache.size < SCORE_CACHE_LIMIT) scoreCache.set(candidate, score);
+  return score;
+}
 
+function computeMatchScoreUncached(c: string, p: string): number {
   // Exact match
   if (c === p) return 3000 - c.length;
 

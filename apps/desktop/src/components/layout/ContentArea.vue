@@ -701,6 +701,13 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
                   (column: string, columnIndex: number, direction: 'asc' | 'desc' | null, whereInput?: string) =>
                     emit('sort', column, columnIndex, direction, whereInput)
                 "
+                @rows-deleted="
+                  (count: number) => {
+                    if (activeTab.resultTotalRowCount !== undefined) {
+                      activeTab.resultTotalRowCount = Math.max(0, activeTab.resultTotalRowCount - count);
+                    }
+                  }
+                "
               >
                 <template v-if="activeTab.result?.columns.includes('Error')" #error-actions="{ errorMessage }">
                   <Button

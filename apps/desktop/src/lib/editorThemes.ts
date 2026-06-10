@@ -436,6 +436,9 @@ export function buildSqlCompletionThemeRules(): CodeMirrorStyleSpec {
       justifyContent: "center",
       marginRight: "0.65em",
       opacity: "1",
+      // CodeMirror's base theme adds `padding-right: .6em`; with border-box
+      // sizing that shrinks the content area and clips the mask, so reset it.
+      padding: "0",
       position: "relative",
       overflow: "hidden",
       width: "15px",
@@ -445,7 +448,10 @@ export function buildSqlCompletionThemeRules(): CodeMirrorStyleSpec {
       content: "''",
       display: "block",
       height: "14px",
+      left: "50%",
       position: "absolute",
+      top: "50%",
+      transform: "translate(-50%, -50%)",
       WebkitMaskImage: "var(--dbx-completion-icon-mask)",
       WebkitMaskPosition: "center",
       WebkitMaskRepeat: "no-repeat",

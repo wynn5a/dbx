@@ -16,7 +16,7 @@ test("uses concise save and commit labels for the primary grid save action", () 
   });
 });
 
-test("keeps grid save actions visible for editable grids even without pending changes", () => {
+test("hides grid save actions until there is something to commit or roll back", () => {
   assert.deepEqual(
     dataGridSaveToolbarState({
       editable: true,
@@ -25,7 +25,7 @@ test("keeps grid save actions visible for editable grids even without pending ch
       isSaving: false,
     }),
     {
-      showActions: true,
+      showActions: false,
       actionsDisabled: true,
     },
   );
@@ -40,6 +40,33 @@ test("keeps grid save actions visible for editable grids even without pending ch
     {
       showActions: true,
       actionsDisabled: false,
+    },
+  );
+
+  assert.deepEqual(
+    dataGridSaveToolbarState({
+      editable: true,
+      hasSaveTarget: true,
+      hasPendingChanges: false,
+      isSaving: true,
+    }),
+    {
+      showActions: true,
+      actionsDisabled: true,
+    },
+  );
+
+  assert.deepEqual(
+    dataGridSaveToolbarState({
+      editable: true,
+      hasSaveTarget: true,
+      hasPendingChanges: false,
+      isSaving: false,
+      transactionActive: true,
+    }),
+    {
+      showActions: true,
+      actionsDisabled: true,
     },
   );
 });

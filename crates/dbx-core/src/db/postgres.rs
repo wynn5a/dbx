@@ -85,6 +85,31 @@ impl<'a> FromSql<'a> for PgRawBytes {
     }
 }
 
+/// A `FromSql` adapter that renders PostgreSQL's network address types
+/// (`inet`, `cidr`, `macaddr`, `macaddr8`) as the text psql displays.
+///
+/// tokio_postgres has no built-in mapping for these types and their binary
+/// wire format is not UTF-8, so without this adapter they fall through to the
+/// raw-bytes fallback and surface as a binary blob (e.g. a `cidr` value shows
+/// as hex bytes instead of `192.168.1.0/24`). Decoding here also lets the array
+/// path render `inet[]`/`cidr[]` columns correctly.
+struct PgNetworkString(String);
+
+impl<'a> FromSql<'a> for PgNetworkString {
+    fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let text = match *ty {
+            Type::INET | Type::CIDR => decode_pg_inet(raw),
+            Type::MACADDR | Type::MACADDR8 => decode_pg_macaddr(raw),
+            _ => None,
+        };
+        text.map(PgNetworkString).ok_or_else(|| "unrecognized network address binary format".into())
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::INET | Type::CIDR | Type::MACADDR | Type::MACADDR8)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct WkbDimensions {
     has_z: bool,
@@ -408,6 +433,172 @@ fn decode_pgvector_bytes(raw: &[u8]) -> Option<Vec<f32>> {
     Some(floats)
 }
 
+/// Decode PostgreSQL's binary wire format for `inet`/`cidr` into the text
+/// representation psql shows (e.g. `192.168.1.0/24`, `::1`, `192.168.1.1`).
+///
+/// Layout (see `network_send` in PostgreSQL's `utils/adt/network.c`):
+/// - byte 0: address family
+/// - byte 1: netmask bits
+/// - byte 2: `is_cidr` flag (1 for `cidr`, 0 for `inet`)
+/// - byte 3: number of address bytes (`nb`; 4 for IPv4, 16 for IPv6)
+/// - bytes 4..4+nb: big-endian address bytes
+///
+/// IPv4 vs IPv6 is decided by `nb` rather than the family byte so the result is
+/// independent of the server platform's `AF_INET` value. A `cidr` always keeps
+/// its mask; an `inet` shows the mask only when it is not the full width, which
+/// is exactly how PostgreSQL's `inet_out`/`cidr_out` render them.
+fn decode_pg_inet(raw: &[u8]) -> Option<String> {
+    if raw.len() < 4 {
+        return None;
+    }
+    let bits = raw[1];
+    let is_cidr = raw[2] != 0;
+    let nb = raw[3] as usize;
+    let addr = raw.get(4..4 + nb)?;
+    let (ip, max_bits) = match nb {
+        4 => (std::net::Ipv4Addr::from(<[u8; 4]>::try_from(addr).ok()?).to_string(), 32u8),
+        16 => (std::net::Ipv6Addr::from(<[u8; 16]>::try_from(addr).ok()?).to_string(), 128u8),
+        _ => return None,
+    };
+    if is_cidr || bits != max_bits {
+        Some(format!("{ip}/{bits}"))
+    } else {
+        Some(ip)
+    }
+}
+
+/// Format PostgreSQL `macaddr` (6 bytes) / `macaddr8` (8 bytes) binary data as
+/// the lowercase, colon-separated text psql renders (e.g. `08:00:2b:01:02:03`).
+fn decode_pg_macaddr(raw: &[u8]) -> Option<String> {
+    if raw.len() != 6 && raw.len() != 8 {
+        return None;
+    }
+    Some(raw.iter().map(|byte| format!("{byte:02x}")).collect::<Vec<_>>().join(":"))
+}
+
+/// Append one year/mon/day field of an interval, mirroring PostgreSQL's
+/// `postgres` IntervalStyle: skip zero fields, space-separate, pluralize unless
+/// the value is exactly `1`, and prefix a positive field with `+` when it
+/// follows a negative one (tracked via `is_before`).
+fn push_pg_interval_int_part(out: &mut String, value: i32, unit: &str, is_zero: &mut bool, is_before: &mut bool) {
+    if value == 0 {
+        return;
+    }
+    if !*is_zero {
+        out.push(' ');
+    }
+    if *is_before && value > 0 {
+        out.push('+');
+    }
+    out.push_str(&value.to_string());
+    out.push(' ');
+    out.push_str(unit);
+    if value != 1 {
+        out.push('s');
+    }
+    *is_zero = false;
+    *is_before = value < 0;
+}
+
+/// Decode PostgreSQL's binary `interval` into the text its default
+/// (`postgres`) IntervalStyle produces, e.g. `1 year 2 mons 3 days 04:05:06`,
+/// `-00:00:01.5`, `00:00:00`.
+///
+/// Layout (integer-datetimes, the only mode since PostgreSQL 10):
+/// - bytes 0..8:  microseconds of the time-of-day part (`int64`, big-endian)
+/// - bytes 8..12: day count (`int32`)
+/// - bytes 12..16: month count (`int32`)
+///
+/// The three parts are stored and rendered independently — PostgreSQL does not
+/// justify them on output (so `24:00:00` and hour counts > 24 are expected).
+/// chrono has no month-aware duration, so without this the value would fall
+/// through to the raw-bytes fallback and surface as a binary blob.
+fn decode_pg_interval(raw: &[u8]) -> Option<String> {
+    if raw.len() != 16 {
+        return None;
+    }
+    let micros = i64::from_be_bytes(raw[0..8].try_into().ok()?);
+    let days = i32::from_be_bytes(raw[8..12].try_into().ok()?);
+    let months = i32::from_be_bytes(raw[12..16].try_into().ok()?);
+
+    let mut out = String::new();
+    let mut is_zero = true;
+    let mut is_before = false;
+
+    push_pg_interval_int_part(&mut out, months / 12, "year", &mut is_zero, &mut is_before);
+    push_pg_interval_int_part(&mut out, months % 12, "mon", &mut is_zero, &mut is_before);
+    push_pg_interval_int_part(&mut out, days, "day", &mut is_zero, &mut is_before);
+
+    // The time-of-day prints when it is nonzero, and also when the whole
+    // interval is zero so an empty interval renders as `00:00:00`.
+    if micros != 0 || is_zero {
+        let abs = micros.unsigned_abs();
+        let hour = abs / 3_600_000_000;
+        let min = (abs % 3_600_000_000) / 60_000_000;
+        let sec = (abs % 60_000_000) / 1_000_000;
+        let fsec = abs % 1_000_000;
+
+        if !is_zero {
+            out.push(' ');
+        }
+        if micros < 0 {
+            out.push('-');
+        } else if is_before {
+            out.push('+');
+        }
+        out.push_str(&format!("{hour:02}:{min:02}:{sec:02}"));
+        if fsec != 0 {
+            out.push('.');
+            out.push_str(format!("{fsec:06}").trim_end_matches('0'));
+        }
+    }
+
+    Some(out)
+}
+
+/// Decode PostgreSQL's binary `timetz` (time with time zone) into the text its
+/// ISO output produces, e.g. `14:30:00+05:30`, `12:00:00-05`, `06:07:08+00`.
+///
+/// Layout (`timetz_send`, integer-datetimes):
+/// - bytes 0..8:  microseconds since midnight (`int64`, big-endian)
+/// - bytes 8..12: zone as **seconds west of UTC** (`int32`); the ISO offset is
+///   its negation, so the sign shown is `+` when the stored zone is `<= 0`.
+///
+/// The offset prints hours always, minutes when minutes or seconds are present,
+/// and seconds only when nonzero — matching PostgreSQL's `EncodeTimezone`.
+/// chrono has no time-with-offset type tokio_postgres maps to `timetz`, so
+/// without this the value would surface as a raw-bytes blob.
+fn decode_pg_timetz(raw: &[u8]) -> Option<String> {
+    if raw.len() != 12 {
+        return None;
+    }
+    let time_us = i64::from_be_bytes(raw[0..8].try_into().ok()?);
+    let zone = i32::from_be_bytes(raw[8..12].try_into().ok()?);
+
+    let abs = time_us.max(0) as u64;
+    let hour = abs / 3_600_000_000;
+    let min = (abs % 3_600_000_000) / 60_000_000;
+    let sec = (abs % 60_000_000) / 1_000_000;
+    let fsec = abs % 1_000_000;
+
+    let mut out = format!("{hour:02}:{min:02}:{sec:02}");
+    if fsec != 0 {
+        out.push('.');
+        out.push_str(format!("{fsec:06}").trim_end_matches('0'));
+    }
+
+    out.push(if zone <= 0 { '+' } else { '-' });
+    let z = zone.unsigned_abs();
+    out.push_str(&format!("{:02}", z / 3600));
+    if z % 3600 != 0 {
+        out.push_str(&format!(":{:02}", (z % 3600) / 60));
+        if z % 60 != 0 {
+            out.push_str(&format!(":{:02}", z % 60));
+        }
+    }
+    Some(out)
+}
+
 fn pg_u32_number(v: u32) -> serde_json::Value {
     serde_json::Value::Number(serde_json::Number::from(v))
 }
@@ -478,6 +669,9 @@ fn pg_array_to_json_value(row: &Row, idx: usize) -> Option<serde_json::Value> {
     if let Ok(values) = row.try_get::<_, Vec<Option<f64>>>(idx) {
         return Some(pg_optional_array_to_json(values, pg_float_number));
     }
+    if let Ok(values) = row.try_get::<_, Vec<Option<PgNetworkString>>>(idx) {
+        return Some(pg_optional_array_to_json(values, |v| serde_json::Value::String(v.0)));
+    }
     if let Ok(values) = row.try_get::<_, Vec<Option<PgAnyString>>>(idx) {
         return Some(pg_optional_array_to_json(values, |v| serde_json::Value::String(v.0)));
     }
@@ -502,9 +696,9 @@ fn pg_char_to_json(byte: i8) -> serde_json::Value {
     }
 }
 
-fn pg_value_to_json(row: &Row, idx: usize, type_name: &str) -> serde_json::Value {
-    let upper = type_name.to_uppercase();
-
+/// `upper` is the column's type name, already uppercased once per column by the
+/// caller — this runs for every cell, so it must not allocate for dispatch.
+fn pg_value_to_json(row: &Row, idx: usize, upper: &str) -> serde_json::Value {
     if upper == "BYTEA" {
         return row
             .try_get::<_, Vec<u8>>(idx)
@@ -526,12 +720,21 @@ fn pg_value_to_json(row: &Row, idx: usize, type_name: &str) -> serde_json::Value
         return row.try_get::<_, bool>(idx).map(serde_json::Value::Bool).unwrap_or(serde_json::Value::Null);
     }
 
-    if upper.contains("TIMESTAMP")
-        || upper == "DATE"
-        || upper == "TIME"
-        || upper == "TIMETZ"
-        || upper.contains("INTERVAL")
-    {
+    if upper.contains("INTERVAL") {
+        if let Ok(PgRawBytes(raw)) = row.try_get::<_, PgRawBytes>(idx) {
+            return decode_pg_interval(&raw).map(serde_json::Value::String).unwrap_or(serde_json::Value::Null);
+        }
+        return serde_json::Value::Null;
+    }
+
+    if upper == "TIMETZ" {
+        if let Ok(PgRawBytes(raw)) = row.try_get::<_, PgRawBytes>(idx) {
+            return decode_pg_timetz(&raw).map(serde_json::Value::String).unwrap_or(serde_json::Value::Null);
+        }
+        return serde_json::Value::Null;
+    }
+
+    if upper.contains("TIMESTAMP") || upper == "DATE" || upper == "TIME" {
         if let Some(v) = pg_temporal_to_json_value(row, idx) {
             return v;
         }
@@ -551,7 +754,7 @@ fn pg_value_to_json(row: &Row, idx: usize, type_name: &str) -> serde_json::Value
             .unwrap_or(serde_json::Value::Null);
     }
 
-    if matches!(upper.as_str(), "OID" | "XID" | "CID") {
+    if matches!(upper, "OID" | "XID" | "CID") {
         return pg_system_u32_to_json(row, idx).unwrap_or(serde_json::Value::Null);
     }
 
@@ -592,6 +795,13 @@ fn pg_value_to_json(row: &Row, idx: usize, type_name: &str) -> serde_json::Value
                 .unwrap_or_else(|| super::binary_value_to_json(&raw));
         }
         return serde_json::Value::Null;
+    }
+
+    if matches!(upper, "INET" | "CIDR" | "MACADDR" | "MACADDR8") {
+        return row
+            .try_get::<_, PgNetworkString>(idx)
+            .map(|v| serde_json::Value::String(v.0))
+            .unwrap_or(serde_json::Value::Null);
     }
 
     row.try_get::<_, String>(idx)
@@ -649,6 +859,8 @@ async fn execute_select_prepared(
     );
     let columns: Vec<String> = stmt.columns().iter().map(|c| c.name().to_string()).collect();
     let column_types: Vec<String> = stmt.columns().iter().map(|c| c.type_().name().to_string()).collect();
+    // Uppercased once per column; pg_value_to_json dispatches on this per cell.
+    let column_types_upper: Vec<String> = column_types.iter().map(|t| t.to_uppercase()).collect();
 
     let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
     let query_start = Instant::now();
@@ -672,7 +884,7 @@ async fn execute_select_prepared(
         let row = row_result?;
         result_rows.push(
             (0..row.columns().len())
-                .map(|i| pg_value_to_json(&row, i, column_types.get(i).map(String::as_str).unwrap_or("")))
+                .map(|i| pg_value_to_json(&row, i, column_types_upper.get(i).map(String::as_str).unwrap_or("")))
                 .collect(),
         );
     }
@@ -1847,6 +2059,99 @@ mod tests {
             "0107000020E61000000200000001010000000000000000005D4000000000000044400102000000020000000000000000405D4000000000008044400000000000805D400000000000004540",
         );
         assert_eq!(ewkb_to_wkt(&raw), Some("GEOMETRYCOLLECTION(POINT(116 40),LINESTRING(117 41,118 42))".to_string()));
+    }
+
+    #[test]
+    fn decode_pg_inet_ipv4_keeps_cidr_mask_but_drops_full_inet_mask() {
+        // cidr 192.168.1.0/24 (is_cidr=1, bits=24) keeps the mask.
+        assert_eq!(decode_pg_inet(&decode_hex("02180104c0a80100")), Some("192.168.1.0/24".to_string()));
+        // cidr 10.0.0.0/8.
+        assert_eq!(decode_pg_inet(&decode_hex("020801040a000000")), Some("10.0.0.0/8".to_string()));
+        // inet 192.168.1.1 (is_cidr=0, bits=32) hides the full mask.
+        assert_eq!(decode_pg_inet(&decode_hex("02200004c0a80101")), Some("192.168.1.1".to_string()));
+        // inet 192.168.1.0/24 (is_cidr=0, bits=24) shows the partial mask.
+        assert_eq!(decode_pg_inet(&decode_hex("02180004c0a80100")), Some("192.168.1.0/24".to_string()));
+    }
+
+    #[test]
+    fn decode_pg_inet_ipv6_uses_nb_to_pick_family() {
+        // inet ::1 (bits=128) hides the full mask.
+        assert_eq!(decode_pg_inet(&decode_hex("0380001000000000000000000000000000000001")), Some("::1".to_string()));
+        // cidr 2001:db8::/32 keeps the mask.
+        assert_eq!(
+            decode_pg_inet(&decode_hex("0320011020010db8000000000000000000000000")),
+            Some("2001:db8::/32".to_string())
+        );
+        // inet 2001:db8::1/64 shows the partial mask.
+        assert_eq!(
+            decode_pg_inet(&decode_hex("0340001020010db8000000000000000000000001")),
+            Some("2001:db8::1/64".to_string())
+        );
+    }
+
+    #[test]
+    fn decode_pg_inet_rejects_truncated_input() {
+        assert_eq!(decode_pg_inet(&[]), None);
+        assert_eq!(decode_pg_inet(&decode_hex("022004")), None); // header without enough address bytes
+        assert_eq!(decode_pg_inet(&decode_hex("02200005c0a80101")), None); // nb=5 is neither IPv4 nor IPv6
+    }
+
+    #[test]
+    fn decode_pg_macaddr_formats_six_and_eight_byte_addresses() {
+        assert_eq!(decode_pg_macaddr(&decode_hex("08002b010203")), Some("08:00:2b:01:02:03".to_string()));
+        assert_eq!(decode_pg_macaddr(&decode_hex("08002b0102030405")), Some("08:00:2b:01:02:03:04:05".to_string()));
+        assert_eq!(decode_pg_macaddr(&decode_hex("08002b0102")), None);
+    }
+
+    #[test]
+    fn decode_pg_interval_matches_postgres_style_output() {
+        // (wire bytes, expected text) captured from PostgreSQL 16, intervalstyle=postgres.
+        let cases = [
+            ("000000036c8bc080000000030000000e", "1 year 2 mons 3 days 04:05:06"),
+            ("000000000000000000000000fffffff4", "-1 years"),
+            ("fffffffc93743f80000000030000000a", "10 mons 3 days -04:05:06"),
+            ("ffffffffffe91ca00000000000000000", "-00:00:01.5"),
+            ("000000000001d4c00000000000000000", "00:00:00.12"),
+            ("fffffffd6df6f800fffffffe00000000", "-2 days -03:04:00"),
+            ("0000000000000000ffffffff00000002", "2 mons -1 days"),
+            ("00000000000000000000000000000000", "00:00:00"),
+            ("fffffffebe228a000000000000000000", "-01:30:00"),
+            ("000000141dd760000000000100000000", "1 day 24:00:00"),
+            ("ffffffffffffffff0000000000000000", "-00:00:00.000001"),
+            ("fffffffd6da05450fffffffeffffffff", "-1 mons -2 days -03:04:05.678"),
+        ];
+        for (hex, expected) in cases {
+            assert_eq!(decode_pg_interval(&decode_hex(hex)).as_deref(), Some(expected), "wire {hex}");
+        }
+    }
+
+    #[test]
+    fn decode_pg_timetz_matches_iso_output() {
+        // (wire bytes, expected text) captured from PostgreSQL 16.
+        let cases = [
+            ("0000000c275cca00ffffb2a8", "14:30:00+05:30"),
+            ("0000000a0eebb00000004650", "12:00:00-05"),
+            ("0000000a0eebb000ffff8f80", "12:00:00+08"),
+            ("000000141dca000000000000", "23:59:59.123456+00"),
+            ("0000000000000000ffffb299", "00:00:00+05:30:15"),
+            ("00000006b49d200000008598", "08:00:00-09:30"),
+            ("0000000520f89b0000000000", "06:07:08+00"),
+        ];
+        for (hex, expected) in cases {
+            assert_eq!(decode_pg_timetz(&decode_hex(hex)).as_deref(), Some(expected), "wire {hex}");
+        }
+    }
+
+    #[test]
+    fn decode_pg_timetz_rejects_wrong_length() {
+        assert_eq!(decode_pg_timetz(&[]), None);
+        assert_eq!(decode_pg_timetz(&decode_hex("0000000c275cca00ffff")), None);
+    }
+
+    #[test]
+    fn decode_pg_interval_rejects_wrong_length() {
+        assert_eq!(decode_pg_interval(&[]), None);
+        assert_eq!(decode_pg_interval(&decode_hex("00000000000000000000000000")), None);
     }
 
     #[test]

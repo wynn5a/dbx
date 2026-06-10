@@ -1,6 +1,7 @@
 import {
   ref,
   computed,
+  markRaw,
   nextTick,
   watch,
   getCurrentInstance,
@@ -81,6 +82,9 @@ export interface UseDataGridEditorOptions {
   pageSize: Ref<number>;
   currentPage: Ref<number>;
   cacheKey?: ComputedRef<string | undefined>;
+  /** Called after a delete-only save removes rows from result.rows in place
+   *  (instead of a full reload), so the host can fix selection/total count. */
+  onRowsRemovedLocally?: (removedCount: number) => void;
   emit: {
     (
       event: "reload",
@@ -166,6 +170,9 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
   const dirtyRows = ref<Map<number, Map<number, CellValue>>>(new Map());
   const newRows = ref<CellValue[][]>([]);
   const deletedRows = ref<Set<number>>(new Set());
+  // result.rows is non-reactive (markRaw); bumped whenever a save mutates its
+  // contents in place so computeds reading the rows directly can depend on it.
+  const rowsRevision = ref(0);
   let restoredEditingCell = false;
   let restoredTransactionActive = false;
   let suppressNextBlurCommit = false;
@@ -755,6 +762,10 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
     saveError.value = "";
     isSaving.value = true;
     const shouldReloadAfterSave = newRows.value.length > 0 || deletedRows.value.size > 0;
+    // Inserts need a reload to pick up DB-generated values (auto-increment
+    // keys, defaults). Delete-only saves are applied to the grid in place.
+    const hadInserts = newRows.value.length > 0;
+    const deletedSourceIndexes = new Set(deletedRows.value);
 
     if (customSave?.value) {
       try {
@@ -863,9 +874,19 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
     dirtyRows.value.clear();
     newRows.value = [];
     deletedRows.value.clear();
+    rowsRevision.value++;
     exitTransaction();
     isSaving.value = false;
-    if (shouldReloadAfterSave) {
+    if (!hadInserts && deletedSourceIndexes.size > 0) {
+      // Remove saved deletions from the grid without a reload. Assigning a new
+      // rows array to the (store-reactive) result object lets every computed
+      // that reads result.rows recompute through normal property tracking;
+      // rowsRevision covers result objects that aren't reactive. State above
+      // is already cleared, so the stale-index rows watcher firing is benign.
+      result.value.rows = markRaw(result.value.rows.filter((_, index) => !deletedSourceIndexes.has(index)));
+      rowsRevision.value++;
+      options.onRowsRemovedLocally?.(deletedSourceIndexes.size);
+    } else if (hadInserts) {
       reloadCurrentData();
     }
   }
@@ -963,6 +984,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
     dirtyRows,
     newRows,
     deletedRows,
+    rowsRevision,
     dirtyRowCount,
     newRowCount,
     deletedRowCount,
