@@ -1,0 +1,159 @@
+<!-- @dsCard group="Components" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Data Buddy — States & Focus</title>
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:26px 32px; }
+  .spec h3 { font-size:12.5px; font-weight:600; margin:0 0 4px; }
+  .spec p { margin:0 0 12px; font-size:11.5px; color:var(--text-3); line-height:1.5; }
+  .demo {
+    border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-canvas);
+    padding:18px; min-height:150px; display:flex; align-items:center; justify-content:center;
+  }
+  svg { display:block; flex-shrink:0; }
+
+  /* empty state */
+  .empty { text-align:center; color:var(--text-3); }
+  .empty .ic {
+    width:44px; height:44px; border-radius:11px; display:grid; place-items:center; margin:0 auto 14px;
+    background:var(--bg-elevated); border:1px solid var(--border);
+  }
+  .empty b { display:block; font-size:13.5px; font-weight:500; color:var(--text-2); margin-bottom:5px; }
+  .empty span { font-size:12px; }
+  .empty .cta {
+    display:inline-flex; align-items:center; gap:6px; margin-top:16px; padding:6px 12px; white-space:nowrap;
+    border-radius:var(--radius-sm); border:1px solid var(--border); background:transparent;
+    color:var(--text-2); font-size:12px; font-family:var(--font); cursor:pointer;
+  }
+
+  /* loading */
+  .spin { width:18px; height:18px; border:2px solid var(--border-strong); border-top-color:var(--accent); border-radius:99px; animation:spin .7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .loading { display:flex; align-items:center; gap:11px; color:var(--text-3); font-size:13px; }
+  .skel { width:100%; display:flex; flex-direction:column; gap:9px; }
+  .skel i {
+    display:block; height:11px; border-radius:5px;
+    background:linear-gradient(90deg, var(--bg-elevated) 25%, rgba(255,255,255,0.06) 37%, var(--bg-elevated) 63%);
+    background-size:400% 100%; animation:shimmer 1.4s ease infinite;
+  }
+  @keyframes shimmer { 0% { background-position:100% 0; } 100% { background-position:-100% 0; } }
+
+  /* error / warning banners */
+  .banner {
+    display:flex; align-items:flex-start; gap:10px; width:100%; padding:12px 14px;
+    border-radius:var(--radius); font-size:12.5px; line-height:1.5;
+  }
+  .banner b { font-weight:600; }
+  .banner.err { background:color-mix(in srgb, var(--red) 11%, transparent); border:1px solid color-mix(in srgb, var(--red) 32%, transparent); color:#f1b3ae; }
+  .banner.warn { background:color-mix(in srgb, var(--amber) 10%, transparent); border:1px solid color-mix(in srgb, var(--amber) 30%, transparent); color:#e6cd8a; }
+  .banner .mono { color:inherit; opacity:.85; }
+
+  /* focus + disabled rows */
+  .stack { width:100%; display:flex; flex-direction:column; gap:12px; align-items:flex-start; }
+  .btn-chip {
+    display:inline-flex; align-items:center; gap:6px; padding:5.5px 11px; white-space:nowrap;
+    border-radius:var(--radius-sm); border:1px solid var(--border); background:transparent;
+    color:var(--text-2); font-size:12.5px; font-family:var(--font); cursor:pointer;
+  }
+  .btn-chip.focus { outline:2px solid var(--accent); outline-offset:1px; color:var(--text-1); }
+  .btn-primary {
+    display:inline-flex; align-items:center; gap:6px; padding:6px 13px; white-space:nowrap;
+    border-radius:var(--radius-sm); border:none; background:var(--accent); color:#fff;
+    font-size:12.5px; font-weight:500; font-family:var(--font); cursor:pointer;
+  }
+  .btn-primary.disabled { opacity:.4; cursor:not-allowed; }
+  .field {
+    border:none; outline:2px solid var(--accent); background:var(--bg-elevated); color:var(--text-1);
+    font-size:12.5px; padding:7px 10px; border-radius:4px; font-family:var(--font); width:220px;
+  }
+  .field.rest { outline:1px solid var(--border); }
+  .field.disabled { outline:1px solid var(--border-soft); color:var(--text-4); background:var(--bg-panel); cursor:not-allowed; }
+  .cap { font-family:var(--mono); font-size:10.5px; color:var(--text-3); }
+  .cellsel {
+    display:inline-grid; place-items:center; width:120px; height:34px;
+    box-shadow:inset 0 0 0 1.5px var(--accent-line); border-radius:2px;
+    font-family:var(--mono); font-size:12px; color:var(--text-1);
+  }
+</style>
+</head>
+<body class="ds">
+  <div class="ds-head"><span class="ds-kicker">Library</span></div>
+  <h1 class="ds-title">States &amp; Focus</h1>
+  <p class="ds-sub">How surfaces behave when there is nothing, something loading, or something wrong — and how the system signals focus and disablement. Feedback stays quiet: a tinted banner, a single spinner, a soft skeleton, never a wall of color.</p>
+
+  <div class="grid2">
+
+    <div class="spec">
+      <h3>Empty state</h3>
+      <p>Centered, low-contrast. A bordered glyph tile, a one-line cause in secondary text, an optional ghost CTA. No illustration.</p>
+      <div class="demo">
+        <div class="empty">
+          <span class="ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg></span>
+          <b>No rows yet</b>
+          <span>This table is empty.</span>
+          <button class="cta"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>Insert first row</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Loading</h3>
+      <p>Two flavors: a centered spinner with label for query runs, and shimmering skeleton rows for grids streaming in. Spinner top-arc uses the accent.</p>
+      <div class="demo" style="flex-direction:column; gap:18px; align-items:stretch;">
+        <div class="loading" style="justify-content:center;"><span class="spin"></span> Running query…</div>
+        <div class="skel"><i style="width:90%"></i><i style="width:70%"></i><i style="width:82%"></i></div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Error banner</h3>
+      <p>Red tint fill + 32% red border. Bold lead, the failing detail in mono. Reserved for query failures and lost connections.</p>
+      <div class="demo">
+        <div class="banner err">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-top:1px;"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>
+          <div><b>Query failed.</b> <span class="mono">syntax error at or near "SELCT" — line 1</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Warning banner</h3>
+      <p>Amber variant for soft caution — unsaved edits, large scans, destructive confirms. Same shape, lower urgency.</p>
+      <div class="demo">
+        <div class="banner warn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-top:1px;"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 9v5M12 17h.01"/></svg>
+          <div><b>Full scan.</b> <span class="mono">4,820 rows · no index on this filter</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Focus</h3>
+      <p>Focus is always a 2px accent outline (1px offset for buttons), never a glow. Selected grid cells use an inset accent-line ring instead of an outline.</p>
+      <div class="demo">
+        <div class="stack" style="align-items:center;gap:16px;flex-direction:row;justify-content:center;flex-wrap:wrap;">
+          <span style="display:flex;flex-direction:column;gap:7px;align-items:center;"><button class="btn-chip focus">Filter</button><span class="cap">button :focus-visible</span></span>
+          <span style="display:flex;flex-direction:column;gap:7px;align-items:center;"><input class="field" value="ada@databuddy.io" style="width:180px;" /><span class="cap">input :focus</span></span>
+          <span style="display:flex;flex-direction:column;gap:7px;align-items:center;"><span class="cellsel">48213</span><span class="cap">grid cell selected</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Disabled</h3>
+      <p>Disablement drops opacity to 40% for filled controls; inputs fade to quaternary text on the panel surface with a soft hairline. Cursor goes not-allowed.</p>
+      <div class="demo">
+        <div class="stack" style="align-items:center;gap:16px;flex-direction:row;justify-content:center;flex-wrap:wrap;">
+          <span style="display:flex;flex-direction:column;gap:7px;align-items:center;"><button class="btn-primary disabled">Run</button><span class="cap">button :disabled</span></span>
+          <span style="display:flex;flex-direction:column;gap:7px;align-items:center;"><input class="field disabled" value="read-only" readonly /><span class="cap">input :disabled</span></span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

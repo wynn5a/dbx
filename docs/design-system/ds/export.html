@@ -1,0 +1,226 @@
+<!-- @dsCard group="Spacing" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Data Buddy — Token Export</title>
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  .tabs { display:flex; gap:6px; margin-bottom:14px; }
+  .tab {
+    display:inline-flex; align-items:center; gap:7px; padding:6px 12px; border-radius:var(--radius-sm);
+    border:1px solid var(--border); background:transparent; color:var(--text-2);
+    font-size:12.5px; font-family:var(--font); cursor:pointer;
+  }
+  .tab.on { background:var(--bg-active); color:var(--text-1); }
+  .tab .pill { font-family:var(--mono); font-size:10px; padding:1px 5px; border-radius:99px; background:var(--bg-elevated); color:var(--text-3); }
+
+  .codewrap {
+    position:relative; border:1px solid var(--border); border-radius:var(--radius);
+    background:var(--bg-canvas); overflow:hidden;
+  }
+  .codebar {
+    display:flex; align-items:center; gap:10px; padding:9px 12px; border-bottom:1px solid var(--border);
+    font-family:var(--mono); font-size:11px; color:var(--text-3);
+  }
+  .codebar .fn { color:var(--text-2); }
+  .codebar .right { margin-left:auto; display:flex; gap:8px; }
+  .mini {
+    display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:var(--radius-sm);
+    border:1px solid var(--border); background:transparent; color:var(--text-2);
+    font-size:11.5px; font-family:var(--font); cursor:pointer; transition:all .12s;
+  }
+  .mini:hover { background:var(--bg-active); color:var(--text-1); border-color:var(--border-strong); }
+  .mini.primary { background:var(--accent); color:#fff; border:none; }
+  .mini.ok { color:var(--green); border-color:color-mix(in srgb,var(--green) 35%,transparent); }
+  pre {
+    margin:0; padding:16px 16px 18px; overflow:auto; max-height:440px;
+    font-family:var(--mono); font-size:12px; line-height:1.65; color:var(--text-2);
+    white-space:pre; tab-size:2;
+  }
+  pre .c { color:var(--accent); }       /* property / key */
+  pre .v { color:var(--t-text); }        /* string value */
+  pre .n { color:var(--t-int); }         /* numbers */
+  pre .m { color:var(--text-4); }        /* comment / punctuation */
+  svg { display:block; }
+</style>
+</head>
+<body class="ds">
+  <div class="ds-head"><span class="ds-kicker">Foundations</span></div>
+  <h1 class="ds-title">Token Export</h1>
+  <p class="ds-sub">The whole system in three portable files. Drop <span class="mono" style="color:var(--text-2)">tokens.css</span> into any project, consume <span class="mono" style="color:var(--text-2)">tokens.json</span> in a build pipeline, or hand <span class="mono" style="color:var(--text-2)">DESIGN-SYSTEM.md</span> to a coding agent — tokens, recipes and rules in one file. Copy a block or download the file.</p>
+
+  <div class="tabs">
+    <button class="tab on" id="t-css" onclick="show('css')">tokens.css <span class="pill">CSS variables</span></button>
+    <button class="tab" id="t-json" onclick="show('json')">tokens.json <span class="pill">design tokens</span></button>
+    <button class="tab" id="t-md" onclick="show('md')">DESIGN-SYSTEM.md <span class="pill">agent guide</span></button>
+  </div>
+
+  <div class="codewrap">
+    <div class="codebar">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+      <span class="fn" id="fname">ds/tokens.css</span>
+      <span class="right">
+        <button class="mini" id="copyBtn" onclick="copyCode()"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span id="copyLabel">Copy</span></button>
+        <button class="mini primary" onclick="download()"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/></svg>Download</button>
+      </span>
+    </div>
+    <pre id="css-block"><span class="m">/* Data Buddy — design tokens */</span>
+<span class="c">:root</span> {
+  <span class="m">/* surfaces */</span>
+  <span class="c">--bg-base</span>:      <span class="v">#08090a</span>;
+  <span class="c">--bg-canvas</span>:    <span class="v">#0b0c0e</span>;
+  <span class="c">--bg-panel</span>:     <span class="v">#0f1011</span>;
+  <span class="c">--bg-elevated</span>:  <span class="v">#16171a</span>;
+  <span class="c">--bg-input</span>:     <span class="v">#191a1e</span>;
+  <span class="c">--bg-hover</span>:     <span class="v">rgba(255,255,255,.035)</span>;
+  <span class="c">--bg-active</span>:    <span class="v">rgba(255,255,255,.06)</span>;
+
+  <span class="m">/* borders */</span>
+  <span class="c">--border-soft</span>:   <span class="v">rgba(255,255,255,.045)</span>;
+  <span class="c">--border</span>:        <span class="v">rgba(255,255,255,.07)</span>;
+  <span class="c">--border-strong</span>: <span class="v">rgba(255,255,255,.12)</span>;
+
+  <span class="m">/* text ramp */</span>
+  <span class="c">--text-1</span>: <span class="v">#f7f8f8</span>;
+  <span class="c">--text-2</span>: <span class="v">#9c9da7</span>;
+  <span class="c">--text-3</span>: <span class="v">#6b6d79</span>;
+  <span class="c">--text-4</span>: <span class="v">#4c4e5a</span>;
+
+  <span class="m">/* accent — tweakable */</span>
+  <span class="c">--accent</span>:      <span class="v">#6e79d6</span>;
+  <span class="c">--accent-soft</span>: <span class="v">rgba(110,121,214,.16)</span>;
+  <span class="c">--accent-line</span>: <span class="v">rgba(110,121,214,.45)</span>;
+
+  <span class="m">/* semantic */</span>
+  <span class="c">--green</span>:  <span class="v">#3fb950</span>;
+  <span class="c">--amber</span>:  <span class="v">#d9a521</span>;
+  <span class="c">--red</span>:    <span class="v">#e5534b</span>;
+  <span class="c">--blue</span>:   <span class="v">#4f9be6</span>;
+  <span class="c">--purple</span>: <span class="v">#a371e8</span>;
+  <span class="c">--teal</span>:   <span class="v">#2dd4bf</span>;
+
+  <span class="m">/* data-type chips */</span>
+  <span class="c">--t-int</span>:  <span class="v">#4f9be6</span>;
+  <span class="c">--t-text</span>: <span class="v">#3fb950</span>;
+  <span class="c">--t-time</span>: <span class="v">#d9a521</span>;
+  <span class="c">--t-bool</span>: <span class="v">#a371e8</span>;
+  <span class="c">--t-json</span>: <span class="v">#e07a5f</span>;
+  <span class="c">--t-uuid</span>: <span class="v">#2dd4bf</span>;
+
+  <span class="m">/* geometry */</span>
+  <span class="c">--radius</span>:    <span class="n">8px</span>;
+  <span class="c">--radius-sm</span>: <span class="n">6px</span>;
+  <span class="c">--row-h</span>:    <span class="n">34px</span>;
+  <span class="c">--sidebar-w</span>: <span class="n">256px</span>;
+
+  <span class="m">/* type */</span>
+  <span class="c">--font</span>: <span class="v">'Geist', system-ui, sans-serif</span>;
+  <span class="c">--mono</span>: <span class="v">'Geist Mono', ui-monospace, monospace</span>;
+
+  <span class="c">--shadow-pop</span>: <span class="v">0 16px 48px -12px rgba(0,0,0,.65), 0 4px 12px -2px rgba(0,0,0,.45), 0 0 0 .5px rgba(255,255,255,.06)</span>;
+  <span class="c">--shadow-card</span>: <span class="v">0 1px 2px rgba(0,0,0,.25)</span>;
+  <span class="c">--sheen</span>: <span class="v">inset 0 1px 0 rgba(255,255,255,.07)</span>;
+  <span class="c">--speed</span>: <span class="n">120ms</span>;
+  <span class="c">--ease</span>: <span class="v">cubic-bezier(.25,.46,.45,.94)</span>;
+}</pre>
+    <pre id="json-block" style="display:none;"><span class="m">{</span>
+  <span class="c">"color"</span>: {
+    <span class="c">"surface"</span>: {
+      <span class="c">"base"</span>:     <span class="v">"#08090a"</span>,
+      <span class="c">"canvas"</span>:   <span class="v">"#0b0c0e"</span>,
+      <span class="c">"panel"</span>:    <span class="v">"#0f1011"</span>,
+      <span class="c">"elevated"</span>: <span class="v">"#16171a"</span>,
+      <span class="c">"input"</span>:    <span class="v">"#191a1e"</span>
+    },
+    <span class="c">"text"</span>: {
+      <span class="c">"primary"</span>:    <span class="v">"#f7f8f8"</span>,
+      <span class="c">"secondary"</span>:  <span class="v">"#9c9da7"</span>,
+      <span class="c">"tertiary"</span>:   <span class="v">"#6b6d79"</span>,
+      <span class="c">"quaternary"</span>: <span class="v">"#4c4e5a"</span>
+    },
+    <span class="c">"accent"</span>:   { <span class="c">"base"</span>: <span class="v">"#6e79d6"</span>, <span class="c">"tweakable"</span>: <span class="n">true</span> },
+    <span class="c">"semantic"</span>: { <span class="c">"green"</span>: <span class="v">"#3fb950"</span>, <span class="c">"amber"</span>: <span class="v">"#d9a521"</span>, <span class="c">"red"</span>: <span class="v">"#e5534b"</span>,
+                  <span class="c">"blue"</span>: <span class="v">"#4f9be6"</span>, <span class="c">"purple"</span>: <span class="v">"#a371e8"</span>, <span class="c">"teal"</span>: <span class="v">"#2dd4bf"</span> },
+    <span class="c">"dataType"</span>: { <span class="c">"int"</span>: <span class="v">"#4f9be6"</span>, <span class="c">"text"</span>: <span class="v">"#3fb950"</span>, <span class="c">"time"</span>: <span class="v">"#d9a521"</span>,
+                  <span class="c">"bool"</span>: <span class="v">"#a371e8"</span>, <span class="c">"json"</span>: <span class="v">"#e07a5f"</span>, <span class="c">"uuid"</span>: <span class="v">"#2dd4bf"</span> }
+  },
+  <span class="c">"radius"</span>: { <span class="c">"sm"</span>: <span class="v">"6px"</span>, <span class="c">"base"</span>: <span class="v">"8px"</span>, <span class="c">"pill"</span>: <span class="v">"99px"</span> },
+  <span class="c">"size"</span>:   { <span class="c">"row"</span>: <span class="v">"34px"</span>, <span class="c">"sidebar"</span>: <span class="v">"256px"</span>, <span class="c">"inspector"</span>: <span class="v">"360px"</span> },
+  <span class="c">"font"</span>:   { <span class="c">"ui"</span>: <span class="v">"Geist"</span>, <span class="c">"mono"</span>: <span class="v">"Geist Mono"</span> }
+<span class="m">}</span>
+<span class="m">// full file: ds/tokens.json</span></pre>
+    <pre id="md-block" style="display:none;"><span class="m"># Data Buddy — Design System (v1.1)</span>
+
+<span class="m">&gt;</span> Single-file reference for coding agents. Everything needed to build UI
+<span class="m">&gt;</span> that looks like Data Buddy: tokens, type scale, component recipes, state rules.
+
+<span class="c">## Identity</span>
+A dense, calm, keyboard-first dark interface in the Linear lineage.
+Hierarchy from elevation + a 4-step text ramp — never heavy borders or big type.
+Color means something: neutral by default; accent = action, selection, focus.
+Geist for chrome, Geist Mono for anything machine-shaped.
+
+<span class="c">## Tokens</span> <span class="m">(full :root block, copy verbatim)</span>
+<span class="c">## Type scale</span> <span class="m">(display → micro, 9 roles with usage)</span>
+<span class="c">## Layout dimensions</span> <span class="m">(topbar / rows / sidebar / palette …)</span>
+<span class="c">## Component recipes</span> <span class="m">(buttons, cards, nav, pills, grid, ⌘K — ready CSS)</span>
+<span class="c">## States</span> <span class="m">(hover / focus / disabled / empty / loading / error)</span>
+<span class="c">## Hard rules</span> <span class="m">(do / don't — 8 binding rules)</span>
+
+<span class="m">// full file: DESIGN-SYSTEM.md (project root) — download for the real thing</span></pre>
+  </div>
+  <p class="ds-sub" style="margin-top:14px;font-size:12px;">Download pulls the complete file from the system — the JSON above is abridged for readability.</p>
+
+<script>
+  let current = 'css';
+  const FILES = {
+    css:  { fetch: 'tokens.css',          name: 'tokens.css',        label: 'ds/tokens.css' },
+    json: { fetch: 'tokens.json',         name: 'tokens.json',       label: 'ds/tokens.json' },
+    md:   { fetch: '../DESIGN-SYSTEM.md', name: 'DESIGN-SYSTEM.md',  label: 'DESIGN-SYSTEM.md' }
+  };
+  function show(which) {
+    current = which;
+    for (const k of ['css','json','md']) {
+      document.getElementById(k + '-block').style.display = which === k ? 'block' : 'none';
+      document.getElementById('t-' + k).classList.toggle('on', which === k);
+    }
+    document.getElementById('fname').textContent = FILES[which].label;
+    resetCopy();
+  }
+  if (location.hash === '#agents') show('md');
+  function resetCopy() {
+    const b = document.getElementById('copyBtn'); b.classList.remove('ok');
+    document.getElementById('copyLabel').textContent = 'Copy';
+  }
+  function copyCode() {
+    const grab = current === 'md'
+      ? fetch(FILES.md.fetch).then(r => r.ok ? r.text() : Promise.reject()).catch(() => document.getElementById('md-block').innerText)
+      : Promise.resolve(document.getElementById(current + '-block').innerText);
+    grab.then(text => navigator.clipboard?.writeText(text)).then(() => {
+      const b = document.getElementById('copyBtn'); b.classList.add('ok');
+      document.getElementById('copyLabel').textContent = 'Copied';
+      setTimeout(resetCopy, 1600);
+    }).catch(() => {});
+  }
+  async function download() {
+    const f = FILES[current];
+    try {
+      const res = await fetch(f.fetch);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      const block = document.getElementById(current + '-block');
+      const blob = new Blob([block.innerText], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = f.name;
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+  }
+</script>
+</body>
+</html>

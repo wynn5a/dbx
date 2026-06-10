@@ -1,0 +1,103 @@
+<!-- @dsCard group="Brand" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Data Buddy — Theming</title>
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  .ds-section-label .right { margin-left:auto; font-family:var(--mono); font-size:10.5px; color:var(--text-4); text-transform:none; letter-spacing:0; white-space:nowrap; }
+  .ds-section-label .right::after { content:none; }
+
+  .opts { display:flex; gap:10px; flex-wrap:wrap; }
+  .accent-opt { display:flex; flex-direction:column; gap:7px; align-items:center; }
+  .accent-opt .sw { width:60px; height:48px; border-radius:var(--radius); border:1px solid var(--border-strong); }
+  .accent-opt .sw.on { box-shadow:0 0 0 2px var(--bg-base), 0 0 0 4px currentColor; }
+  .accent-opt span { font-family:var(--mono); font-size:10.5px; color:var(--text-3); }
+
+  .font-opt {
+    border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-panel);
+    padding:14px 16px; flex:1; min-width:150px;
+  }
+  .font-opt.on { border-color:var(--accent-line); background:var(--bg-elevated); }
+  .font-opt .big { font-size:24px; font-weight:500; letter-spacing:-0.01em; }
+  .font-opt .lab { font-family:var(--mono); font-size:10.5px; color:var(--text-3); margin-top:8px; }
+
+  .density-row { border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
+  .density-row .r { display:flex; align-items:center; gap:12px; padding:0 16px; border-bottom:1px solid var(--border-soft); background:var(--bg-panel); font-size:12.5px; }
+  .density-row .r:last-child { border-bottom:none; }
+  .density-row .r.on { background:var(--accent-soft); }
+  .density-row .dn { font-family:var(--mono); font-size:11px; color:var(--text-2); width:130px; }
+  .density-row .dv { color:var(--text-3); flex:1; }
+  .density-row .dx { font-family:var(--mono); font-size:11.5px; color:var(--accent); }
+
+  .radius-row { display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; }
+  .radius-row div { text-align:center; }
+  .radius-row .b { width:62px; height:46px; background:var(--bg-elevated); border:1px solid var(--border-strong); }
+  .radius-row .b.on { border-color:var(--accent-line); box-shadow:inset 0 0 0 100px var(--accent-soft); }
+  .radius-row span { display:block; margin-top:7px; font-family:var(--mono); font-size:10.5px; color:var(--text-3); }
+
+  .track { position:relative; height:6px; border-radius:99px; background:var(--bg-elevated); border:1px solid var(--border); margin:18px 0 8px; }
+  .track .fill { position:absolute; left:0; top:0; bottom:0; border-radius:99px; background:var(--accent); }
+  .track .knob { position:absolute; top:50%; width:14px; height:14px; border-radius:99px; background:#fff; box-shadow:var(--shadow-pop); transform:translate(-50%,-50%); }
+  .track-ends { display:flex; justify-content:space-between; font-family:var(--mono); font-size:10.5px; color:var(--text-4); }
+
+  .note {
+    border-left:2px solid var(--accent-line); padding:2px 0 2px 14px; margin-top:14px;
+    font-size:12px; color:var(--text-3); line-height:1.55;
+  }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:30px; }
+</style>
+</head>
+<body class="ds">
+  <div class="ds-head"><span class="ds-kicker">Foundations</span></div>
+  <h1 class="ds-title">Theming</h1>
+  <p class="ds-sub">Five tokens are exposed to the user through the in-product Tweaks panel. They are CSS custom properties set on the app root, so the whole interface re-themes live. Everything else in the system is fixed — these are the only dials.</p>
+
+  <div class="ds-section-label">Accent <span class="right">--accent · 6 presets</span></div>
+  <div class="opts">
+    <div class="accent-opt"><span class="sw on" style="background:#6e79d6;color:#6e79d6;"></span><span>#6e79d6</span></div>
+    <div class="accent-opt"><span class="sw" style="background:#3fb950;"></span><span>#3fb950</span></div>
+    <div class="accent-opt"><span class="sw" style="background:#e0894f;"></span><span>#e0894f</span></div>
+    <div class="accent-opt"><span class="sw" style="background:#d44d6e;"></span><span>#d44d6e</span></div>
+    <div class="accent-opt"><span class="sw" style="background:#2dd4bf;"></span><span>#2dd4bf</span></div>
+    <div class="accent-opt"><span class="sw" style="background:#a371e8;"></span><span>#a371e8</span></div>
+  </div>
+  <div class="note">Picking an accent regenerates <span class="mono" style="color:var(--text-2)">--accent-soft</span> (16% alpha) and <span class="mono" style="color:var(--text-2)">--accent-line</span> (50% alpha) from the chosen hex, so selection fills and focus rings stay in tune.</div>
+
+  <div class="ds-section-label">Font <span class="right">font · 3 stacks</span></div>
+  <div class="opts">
+    <div class="font-opt on"><div class="big" style="font-family:'Geist',sans-serif;">Geist</div><div class="lab">default · geometric grotesk</div></div>
+    <div class="font-opt"><div class="big" style="font-family:'IBM Plex Sans',sans-serif;">IBM Plex Sans</div><div class="lab">humanist · slightly warmer</div></div>
+    <div class="font-opt"><div class="big" style="font-family:'Inter Tight',sans-serif;">Söhne-ish</div><div class="lab">tight · editorial</div></div>
+  </div>
+  <div class="note">Only the UI font swaps. Geist Mono stays fixed for all data so numbers and IDs never reflow.</div>
+
+  <div class="row2" style="margin-top:30px;">
+    <div>
+      <div class="ds-section-label" style="margin-top:0;">Density <span class="right">3 steps</span></div>
+      <div class="density-row">
+        <div class="r" style="height:30px;"><span class="dn">compact</span><span class="dv">tight</span><span class="dx">30px</span></div>
+        <div class="r on" style="height:34px;"><span class="dn">regular</span><span class="dv">default</span><span class="dx">34px</span></div>
+        <div class="r" style="height:42px;"><span class="dn">comfy</span><span class="dv">roomy</span><span class="dx">42px</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="ds-section-label" style="margin-top:0;">Corners <span class="right">--radius</span></div>
+      <div class="radius-row">
+        <div><div class="b" style="border-radius:0;"></div><span>0</span></div>
+        <div><div class="b on" style="border-radius:8px;"></div><span>8 ·def</span></div>
+        <div><div class="b" style="border-radius:14px;"></div><span>14</span></div>
+      </div>
+      <div class="track"><div class="fill" style="width:57%;"></div><div class="knob" style="left:57%;"></div></div>
+      <div class="track-ends"><span>0px</span><span>14px</span></div>
+    </div>
+  </div>
+
+  <div class="ds-section-label">Sidebar width <span class="right">--sidebar-w</span></div>
+  <div class="track"><div class="fill" style="width:42%;"></div><div class="knob" style="left:42%;"></div></div>
+  <div class="track-ends"><span>210px</span><span>256px · default</span><span>320px</span></div>
+  <div class="note">The sidebar is resizable within a clamped range so dense schemas get room without letting navigation crowd the data.</div>
+</body>
+</html>

@@ -1,0 +1,140 @@
+/* ============================================================
+   Data Buddy — Design System tokens
+   Extracted from the Data Buddy product UI (Linear-DNA dark).
+   Every card in this system links this single file.
+   ============================================================ */
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* ---- surfaces (darkest → most elevated) ---- */
+  --bg-base:      #08090a;
+  --bg-canvas:    #0b0c0e;
+  --bg-panel:     #0f1011;
+  --bg-elevated:  #16171a;
+  --bg-input:     #191a1e;
+  --bg-hover:     rgba(255,255,255,0.035);
+  --bg-active:    rgba(255,255,255,0.06);
+
+  /* ---- borders (hairlines) ---- */
+  --border:        rgba(255,255,255,0.07);
+  --border-soft:   rgba(255,255,255,0.045);
+  --border-strong: rgba(255,255,255,0.12);
+
+  /* ---- text ramp ---- */
+  --text-1: #f7f8f8;
+  --text-2: #9c9da7;
+  --text-3: #6b6d79;
+  --text-4: #4c4e5a;
+
+  /* ---- accent ---- */
+  --accent:       #6e79d6;
+  --accent-soft:  rgba(110,121,214,0.16);
+  --accent-line:  rgba(110,121,214,0.45);
+
+  /* ---- semantic ---- */
+  --green:  #3fb950;
+  --amber:  #d9a521;
+  --red:    #e5534b;
+  --blue:   #4f9be6;
+  --purple: #a371e8;
+  --teal:   #2dd4bf;
+
+  /* ---- type-color chips (column data types) ---- */
+  --t-int:    #4f9be6;
+  --t-text:   #3fb950;
+  --t-time:   #d9a521;
+  --t-bool:   #a371e8;
+  --t-json:   #e07a5f;
+  --t-uuid:   #2dd4bf;
+
+  /* ---- geometry ---- */
+  --radius:    8px;
+  --radius-sm: 6px;
+  --radius-pill: 99px;
+  --row-h:     34px;
+  --sidebar-w: 256px;
+
+  /* ---- type ---- */
+  --font: 'Geist', system-ui, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
+
+  --shadow-pop: 0 16px 48px -12px rgba(0,0,0,0.65), 0 4px 12px -2px rgba(0,0,0,0.45), 0 0 0 0.5px rgba(255,255,255,0.06);
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.25);
+  --sheen: inset 0 1px 0 rgba(255,255,255,0.07);
+  --speed: 120ms;
+  --ease: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+  /* doc-only spacing rhythm */
+  --pad: 28px;
+}
+
+* { box-sizing: border-box; }
+
+body.ds {
+  margin: 0;
+  background: var(--bg-base);
+  color: var(--text-1);
+  font-family: var(--font);
+  font-size: 13.5px;
+  letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  padding: var(--pad);
+  /* subtle vignette so cards read as one surface even cropped */
+  background-image: radial-gradient(120% 80% at 50% -10%, rgba(110,121,214,0.05), transparent 60%);
+}
+
+/* ---------- doc scaffolding ---------- */
+.ds-head {
+  display: flex; align-items: baseline; gap: 12px;
+  margin: 0 0 4px;
+}
+.ds-kicker {
+  font-family: var(--mono);
+  font-size: 10.5px; font-weight: 500;
+  letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--accent);
+}
+.ds-title {
+  font-size: 22px; font-weight: 600; letter-spacing: -0.022em; margin: 0;
+}
+.ds-sub {
+  font-size: 13px; color: var(--text-3); margin: 6px 0 26px; max-width: 60ch;
+  line-height: 1.55;
+}
+.ds-section-label {
+  font-family: var(--mono);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-3);
+  margin: 30px 0 14px;
+  display: flex; align-items: center; gap: 10px;
+}
+.ds-section-label::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+.ds-section-label:first-of-type { margin-top: 4px; }
+
+.mono { font-family: var(--mono); }
+.dim  { color: var(--text-3); }
+
+/* token name + value caption */
+.ds-cap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ds-cap b { font-weight: 500; font-size: 12.5px; color: var(--text-1); }
+.ds-cap span {
+  font-family: var(--mono); font-size: 11px; color: var(--text-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ---------- shared component recreations ---------- */
+.kbd {
+  font-family: var(--mono); font-size: 10.5px;
+  padding: 1.5px 5px; border-radius: 4px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  color: var(--text-2); line-height: 1;
+  box-shadow: var(--sheen), 0 1px 1px rgba(0,0,0,0.3);
+}
+.dot {
+  width: 7px; height: 7px; border-radius: var(--radius-pill);
+  background: var(--green); flex-shrink: 0;
+  box-shadow: 0 0 0 3px rgba(63,185,80,0.13);
+}

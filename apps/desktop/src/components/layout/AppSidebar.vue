@@ -58,11 +58,8 @@ defineExpose({ focusSearch });
     :style="{ width: sidebarWidth + 'px' }"
   >
     <div class="h-full flex flex-col overflow-hidden">
-      <div
-        class="flex items-center gap-px px-3 text-xs font-medium text-muted-foreground border-b bg-muted/20"
-        :class="classicLayout ? 'h-9' : 'h-10'"
-      >
-        <span class="flex self-stretch items-center truncate" data-tauri-drag-region>{{
+      <div class="sidebar-panel-header flex items-center gap-px px-3 border-b" :class="classicLayout ? 'h-9' : 'h-10'">
+        <span class="sidebar-section-label flex self-stretch items-center truncate" data-tauri-drag-region>{{
           t("sidebar.connections")
         }}</span>
         <span class="flex-1 self-stretch" data-tauri-drag-region />
@@ -128,3 +125,18 @@ defineExpose({ focusSearch });
     <div class="panel-resize-handle panel-resize-handle--right" @mousedown="emit('startResize', $event)" />
   </div>
 </template>
+
+<style scoped>
+.sidebar-panel-header {
+  border-color: var(--ds-border);
+  color: var(--ds-text-3);
+}
+
+.sidebar-section-label {
+  font-family: var(--ds-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+</style>

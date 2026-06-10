@@ -1,0 +1,134 @@
+<!-- @dsCard group="Colors" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Data Buddy — Colors</title>
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  .swatch-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
+    gap: 10px;
+  }
+  .swatch {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    overflow: hidden; background: var(--bg-panel);
+  }
+  .swatch .chip { height: 64px; border-bottom: 1px solid var(--border-soft); }
+  .swatch .meta { padding: 9px 11px; }
+
+  /* surfaces shown stacked to read the elevation ramp */
+  .surface-ramp {
+    display: flex; gap: 0; border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden;
+  }
+  .surface-ramp > div {
+    flex: 1; padding: 16px 14px 14px; min-height: 96px;
+    display: flex; flex-direction: column; justify-content: flex-end; gap: 3px;
+    border-right: 1px solid var(--border-soft);
+  }
+  .surface-ramp > div:last-child { border-right: none; }
+  .surface-ramp b { font-size: 12px; font-weight: 500; }
+  .surface-ramp span { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
+
+  /* text ramp */
+  .text-ramp { display: flex; flex-direction: column; gap: 2px; }
+  .text-ramp div {
+    display: flex; align-items: baseline; gap: 16px;
+    padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+    background: var(--bg-panel);
+  }
+  .text-ramp .sample { font-size: 17px; font-weight: 500; flex: 1; }
+  .text-ramp .role { font-family: var(--mono); font-size: 11px; color: var(--text-3); width: 130px; }
+
+  .row { display: flex; gap: 16px; align-items: stretch; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 340px; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px;
+    border-radius: var(--radius-pill); font-size: 11.5px; font-weight: 500; line-height: 1.5;
+  }
+  .pill .pdot { width: 5px; height: 5px; border-radius: 99px; }
+</style>
+</head>
+<body class="ds">
+  <div class="ds-head">
+    <span class="ds-kicker">Foundations</span>
+  </div>
+  <h1 class="ds-title">Color</h1>
+  <p class="ds-sub">A near-black, layered dark palette. Hierarchy comes from elevation and a four-step text ramp — not from heavy borders. Color is reserved for the accent, semantic states, and data-type identity.</p>
+
+  <div class="ds-section-label">Surfaces — elevation ramp</div>
+  <div class="surface-ramp">
+    <div style="background: var(--bg-base);"><b>Base</b><span>--bg-base · #08090a</span></div>
+    <div style="background: var(--bg-canvas);"><b>Canvas</b><span>--bg-canvas · #0b0c0e</span></div>
+    <div style="background: var(--bg-panel);"><b>Panel</b><span>--bg-panel · #0f1011</span></div>
+    <div style="background: var(--bg-elevated);"><b>Elevated</b><span>--bg-elevated · #16171a</span></div>
+    <div style="background: var(--bg-input);"><b>Input</b><span>--bg-input · #191a1e</span></div>
+  </div>
+
+  <div class="ds-section-label">Interaction & border overlays</div>
+  <div class="swatch-grid">
+    <div class="swatch"><div class="chip" style="background:#101012;box-shadow:inset 0 0 0 100px var(--bg-hover);"></div><div class="meta"><div class="ds-cap"><b>Hover</b><span>--bg-hover · white 3.5%</span></div></div></div>
+    <div class="swatch"><div class="chip" style="background:#101012;box-shadow:inset 0 0 0 100px var(--bg-active);"></div><div class="meta"><div class="ds-cap"><b>Active</b><span>--bg-active · white 6%</span></div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--bg-panel);border-bottom:1px solid var(--border-soft);box-shadow:inset 0 0 0 1px var(--border-soft);"></div><div class="meta"><div class="ds-cap"><b>Border soft</b><span>--border-soft · white 4.5%</span></div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--bg-panel);box-shadow:inset 0 0 0 1px var(--border);"></div><div class="meta"><div class="ds-cap"><b>Border</b><span>--border · white 7%</span></div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--bg-panel);box-shadow:inset 0 0 0 1px var(--border-strong);"></div><div class="meta"><div class="ds-cap"><b>Border strong</b><span>--border-strong · white 12%</span></div></div></div>
+  </div>
+
+  <div class="ds-section-label">Text ramp</div>
+  <div class="text-ramp">
+    <div><span class="sample" style="color:var(--text-1)">Primary — titles, values, focus</span><span class="role">--text-1 · #f7f8f8</span></div>
+    <div><span class="sample" style="color:var(--text-2)">Secondary — labels, nav, body</span><span class="role">--text-2 · #9c9da7</span></div>
+    <div><span class="sample" style="color:var(--text-3)">Tertiary — captions, metadata</span><span class="role">--text-3 · #6b6d79</span></div>
+    <div><span class="sample" style="color:var(--text-4)">Quaternary — disabled, hints, NULL</span><span class="role">--text-4 · #4c4e5a</span></div>
+  </div>
+
+  <div class="row" style="margin-top:30px;">
+    <div>
+      <div class="ds-section-label" style="margin-top:0;">Accent</div>
+      <div class="swatch-grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));">
+        <div class="swatch"><div class="chip" style="background:var(--accent);"></div><div class="meta"><div class="ds-cap"><b>Accent</b><span>--accent · #6e79d6</span></div></div></div>
+        <div class="swatch"><div class="chip" style="background:var(--bg-panel);box-shadow:inset 0 0 0 100px var(--accent-soft);"></div><div class="meta"><div class="ds-cap"><b>Accent soft</b><span>--accent-soft · 16%</span></div></div></div>
+        <div class="swatch"><div class="chip" style="background:var(--bg-panel);box-shadow:inset 0 0 0 2px var(--accent-line);"></div><div class="meta"><div class="ds-cap"><b>Accent line</b><span>--accent-line · 45%</span></div></div></div>
+      </div>
+      <p class="ds-sub" style="margin:14px 0 0;font-size:12px;">The accent is user-tweakable in product. Soft = selection & cell fills; line = focus rings.</p>
+    </div>
+    <div>
+      <div class="ds-section-label" style="margin-top:0;">Semantic</div>
+      <div class="swatch-grid" style="grid-template-columns:repeat(auto-fill,minmax(120px,1fr));">
+        <div class="swatch"><div class="chip" style="background:var(--green);"></div><div class="meta"><div class="ds-cap"><b>Green</b><span>#3fb950</span></div></div></div>
+        <div class="swatch"><div class="chip" style="background:var(--amber);"></div><div class="meta"><div class="ds-cap"><b>Amber</b><span>#d9a521</span></div></div></div>
+        <div class="swatch"><div class="chip" style="background:var(--red);"></div><div class="meta"><div class="ds-cap"><b>Red</b><span>#e5534b</span></div></div></div>
+        <div class="swatch"><div class="chip" style="background:var(--blue);"></div><div class="meta"><div class="ds-cap"><b>Blue</b><span>#4f9be6</span></div></div></div>
+        <div class="swatch"><div class="chip" style="background:var(--purple);"></div><div class="meta"><div class="ds-cap"><b>Purple</b><span>#a371e8</span></div></div></div>
+        <div class="swatch"><div class="chip" style="background:var(--teal);"></div><div class="meta"><div class="ds-cap"><b>Teal</b><span>#2dd4bf</span></div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="ds-section-label">Data-type identity</div>
+  <p class="ds-sub" style="margin-top:-4px;">Every column type carries a fixed hue, reused across type badges, cell values, and syntax highlighting so a value reads the same everywhere.</p>
+  <div class="swatch-grid" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr));">
+    <div class="swatch"><div class="chip" style="background:var(--bg-panel);display:grid;place-items:center;"><span class="mono" style="color:var(--t-int);font-size:13px;">int8 · 42</span></div><div class="meta"><div class="ds-cap"><b>Integer</b><span>--t-int · #4f9be6</span></div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--bg-panel);display:grid;place-items:center;"><span class="mono" style="color:var(--t-text);font-size:13px;">'text'</span></div><div class="meta"><div class="ds-cap"><b>Text / string</b><span>--t-text · #3fb950</span></div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--bg-panel);display:grid;place-items:center;"><span class="mono" style="color:var(--t-time);font-size:13px;">timestamptz</span></div><div class="meta"><div class="ds-cap"><b>Time / date</b><span>--t-time · #d9a521</span></div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--bg-panel);display:grid;place-items:center;"><span class="mono" style="color:var(--t-bool);font-size:13px;">bool · true</span></div><div class="meta"><div class="ds-cap"><b>Boolean</b><span>--t-bool · #a371e8</span></div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--bg-panel);display:grid;place-items:center;"><span class="mono" style="color:var(--t-json);font-size:13px;">{ jsonb }</span></div><div class="meta"><div class="ds-cap"><b>JSON</b><span>--t-json · #e07a5f</span></div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--bg-panel);display:grid;place-items:center;"><span class="mono" style="color:var(--t-uuid);font-size:13px;">uuid</span></div><div class="meta"><div class="ds-cap"><b>UUID</b><span>--t-uuid · #2dd4bf</span></div></div></div>
+  </div>
+
+  <div class="ds-section-label">Status pills — tint recipe</div>
+  <p class="ds-sub" style="margin-top:-4px;">Enum and status values use <code class="mono" style="color:var(--text-2)">color-mix(in srgb, hue 14%, transparent)</code> fills with the full hue for text and a 5px leading dot.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <span class="pill" style="background:color-mix(in srgb, var(--green) 14%, transparent);color:var(--green);"><span class="pdot" style="background:var(--green);"></span>active</span>
+    <span class="pill" style="background:color-mix(in srgb, var(--blue) 14%, transparent);color:var(--blue);"><span class="pdot" style="background:var(--blue);"></span>trialing</span>
+    <span class="pill" style="background:color-mix(in srgb, var(--amber) 14%, transparent);color:var(--amber);"><span class="pdot" style="background:var(--amber);"></span>past_due</span>
+    <span class="pill" style="background:color-mix(in srgb, var(--purple) 14%, transparent);color:var(--purple);"><span class="pdot" style="background:var(--purple);"></span>team</span>
+    <span class="pill" style="background:color-mix(in srgb, var(--accent) 14%, transparent);color:var(--accent);"><span class="pdot" style="background:var(--accent);"></span>enterprise</span>
+    <span class="pill" style="background:color-mix(in srgb, var(--teal) 14%, transparent);color:var(--teal);"><span class="pdot" style="background:var(--teal);"></span>year</span>
+    <span class="pill" style="background:color-mix(in srgb, var(--text-3) 14%, transparent);color:var(--text-3);"><span class="pdot" style="background:var(--text-3);"></span>canceled</span>
+  </div>
+</body>
+</html>

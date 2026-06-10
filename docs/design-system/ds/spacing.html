@@ -1,0 +1,122 @@
+<!-- @dsCard group="Spacing" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Data Buddy — Spacing & Geometry</title>
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 300px; }
+
+  .radii { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; }
+  .radii div { text-align: center; }
+  .radii .box {
+    width: 76px; height: 76px; background: var(--bg-elevated);
+    border: 1px solid var(--border-strong);
+  }
+  .radii .lab { margin-top: 9px; }
+  .radii .lab b { display: block; font-size: 12.5px; font-weight: 500; }
+  .radii .lab span { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
+
+  /* density / row heights */
+  .density { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .density .drow {
+    display: flex; align-items: center; gap: 12px; padding: 0 16px;
+    border-bottom: 1px solid var(--border-soft); background: var(--bg-panel);
+  }
+  .density .drow:last-child { border-bottom: none; }
+  .density .dn { font-family: var(--mono); font-size: 11px; color: var(--text-3); width: 110px; }
+  .density .dv { flex: 1; font-size: 12.5px; }
+  .density .ds-num { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+
+  .dims { display: flex; flex-direction: column; gap: 2px; }
+  .dims div {
+    display: flex; align-items: baseline; gap: 14px; padding: 11px 14px;
+    border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-panel);
+  }
+  .dims .name { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); width: 130px; }
+  .dims .val  { font-family: var(--mono); font-size: 12px; color: var(--accent); width: 70px; }
+  .dims .desc { font-size: 12px; color: var(--text-3); flex: 1; }
+
+  .shadow-demo {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background:
+      linear-gradient(var(--bg-base), var(--bg-base)) padding-box,
+      repeating-linear-gradient(45deg, rgba(255,255,255,0.02) 0 8px, transparent 8px 16px);
+    padding: 44px; display: grid; place-items: center;
+  }
+  .shadow-card {
+    width: 220px; background: var(--bg-elevated); border: 1px solid var(--border-strong);
+    border-radius: 12px; box-shadow: var(--shadow-pop); padding: 18px;
+  }
+  .shadow-card b { font-size: 13px; font-weight: 600; }
+  .shadow-card p { margin: 6px 0 0; font-size: 12px; color: var(--text-3); }
+
+  .pad-scale { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .pad-scale div { text-align: center; }
+  .pad-scale .b { background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 4px; }
+  .pad-scale span { display:block; margin-top: 6px; font-family: var(--mono); font-size: 10.5px; color: var(--text-3); }
+</style>
+</head>
+<body class="ds">
+  <div class="ds-head"><span class="ds-kicker">Foundations</span></div>
+  <h1 class="ds-title">Spacing &amp; Geometry</h1>
+  <p class="ds-sub">Dense by default, like a real database client. Rounding is restrained, elevation is rare. Two tokens — corner radius and row height — flex per user preference; everything else holds steady.</p>
+
+  <div class="ds-section-label">Corner radius</div>
+  <div class="radii">
+    <div><div class="box" style="border-radius:4px;"></div><div class="lab"><b>Inline</b><span>4px · kbd, tags</span></div></div>
+    <div><div class="box" style="border-radius:var(--radius-sm);"></div><div class="lab"><b>Small</b><span>--radius-sm · 6px</span></div></div>
+    <div><div class="box" style="border-radius:var(--radius);"></div><div class="lab"><b>Default</b><span>--radius · 8px</span></div></div>
+    <div><div class="box" style="border-radius:12px;"></div><div class="lab"><b>Overlay</b><span>12px · palette, modals</span></div></div>
+    <div><div class="box" style="border-radius:99px;"></div><div class="lab"><b>Pill</b><span>--radius-pill · 99px</span></div></div>
+  </div>
+  <p class="ds-sub" style="margin:14px 0 0;font-size:12px;">Default radius is tweakable (0–14px); small radius tracks it at <span class="mono" style="color:var(--text-2)">radius − 2</span>.</p>
+
+  <div class="row" style="margin-top:30px;">
+    <div>
+      <div class="ds-section-label" style="margin-top:0;">Row density</div>
+      <div class="density">
+        <div class="drow" style="height:30px;"><span class="dn">compact</span><span class="dv">Tight scanning</span><span class="ds-num">30px</span></div>
+        <div class="drow" style="height:34px;"><span class="dn">regular ·default</span><span class="dv">Balanced</span><span class="ds-num">34px</span></div>
+        <div class="drow" style="height:42px;"><span class="dn">comfy</span><span class="dv">Breathing room</span><span class="ds-num">42px</span></div>
+      </div>
+      <p class="ds-sub" style="margin:14px 0 0;font-size:12px;">Grid row height switches with the density control. Result tables stay fixed at 32px.</p>
+    </div>
+    <div>
+      <div class="ds-section-label" style="margin-top:0;">Inset padding rhythm</div>
+      <div class="pad-scale">
+        <div><div class="b" style="width:32px;height:32px;"></div><span>5–6</span></div>
+        <div><div class="b" style="width:32px;height:32px;"></div><span>8</span></div>
+        <div><div class="b" style="width:32px;height:32px;"></div><span>10</span></div>
+        <div><div class="b" style="width:32px;height:32px;"></div><span>14</span></div>
+        <div><div class="b" style="width:32px;height:32px;"></div><span>16</span></div>
+        <div><div class="b" style="width:32px;height:32px;"></div><span>22–28</span></div>
+      </div>
+      <p class="ds-sub" style="margin:14px 0 0;font-size:12px;">Controls pad at 5–6px vertical / 9–13px horizontal. Panels and table cells use 14–16px. Detail views open up to 22–28px.</p>
+    </div>
+  </div>
+
+  <div class="ds-section-label">Fixed dimensions</div>
+  <div class="dims">
+    <div><span class="name">--sidebar-w</span><span class="val">256px</span><span class="desc">Sidebar width — tweakable 210–320px</span></div>
+    <div><span class="name">inspector</span><span class="val">360px</span><span class="desc">Right-hand row detail panel</span></div>
+    <div><span class="name">rails</span><span class="val">210–220px</span><span class="desc">Saved-queries & schema table lists</span></div>
+    <div><span class="name">topbar</span><span class="val">44px</span><span class="desc">Breadcrumb bar height</span></div>
+    <div><span class="name">toolbar</span><span class="val">38px</span><span class="desc">Grid header / column header row</span></div>
+    <div><span class="name">icon-btn</span><span class="val">28px</span><span class="desc">Square hit target for icon buttons</span></div>
+    <div><span class="name">palette</span><span class="val">560px</span><span class="desc">Command palette max width</span></div>
+  </div>
+
+  <div class="ds-section-label">Elevation</div>
+  <p class="ds-sub" style="margin-top:-4px;">Only floating surfaces lift off the page. A single pop shadow plus a strong border separates overlays from the flat layout beneath.</p>
+  <div class="shadow-demo">
+    <div class="shadow-card">
+      <b>Floating surface</b>
+      <p>--shadow-pop · 0 12px 40px −8px black/60 + 0 2px 8px black/40</p>
+    </div>
+  </div>
+</body>
+</html>

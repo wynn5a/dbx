@@ -1,0 +1,91 @@
+<!-- @dsCard group="Type" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Data Buddy — Typography</title>
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  .family-card {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg-panel); padding: 22px 24px; margin-bottom: 14px;
+  }
+  .family-card .glyphs { font-size: 46px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.1; }
+  .family-card .name { display:flex; align-items:baseline; gap:12px; margin-top: 16px; }
+  .family-card .name b { font-size: 14px; font-weight: 600; }
+  .family-card .name span { font-family: var(--mono); font-size: 11.5px; color: var(--text-3); }
+  .family-card .set { margin-top: 10px; font-size: 13px; color: var(--text-2); }
+
+  .scale div {
+    display: flex; align-items: baseline; gap: 20px;
+    padding: 11px 0; border-bottom: 1px solid var(--border-soft);
+  }
+  .scale .px { font-family: var(--mono); font-size: 11px; color: var(--text-3); width: 96px; flex-shrink: 0; }
+  .scale .sample { flex: 1; color: var(--text-1); min-width: 0; }
+
+  .weights { display: flex; gap: 12px; flex-wrap: wrap; }
+  .weights div {
+    flex: 1; min-width: 150px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg-panel); padding: 16px 18px;
+  }
+  .weights .w { font-size: 26px; letter-spacing: -0.01em; }
+  .weights .l { font-family: var(--mono); font-size: 11px; color: var(--text-3); margin-top: 8px; }
+
+  .principles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .principles div {
+    border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+    background: var(--bg-panel); padding: 14px 16px;
+  }
+  .principles b { font-size: 12.5px; font-weight: 500; display:block; margin-bottom: 5px; }
+  .principles p { margin: 0; font-size: 12px; color: var(--text-3); line-height: 1.5; }
+  .principles .mono { color: var(--t-int); }
+</style>
+</head>
+<body class="ds">
+  <div class="ds-head"><span class="ds-kicker">Foundations</span></div>
+  <h1 class="ds-title">Typography</h1>
+  <p class="ds-sub">Two families do all the work. Geist for the interface; Geist Mono for anything that is data — IDs, numbers, timestamps, SQL, type names, keys. Numerals are always tabular so columns align.</p>
+
+  <div class="ds-section-label">Families</div>
+  <div class="family-card">
+    <div class="glyphs" style="font-family:var(--font);">Ag Data Buddy 0123456789</div>
+    <div class="name"><b>Geist</b><span>--font · system-ui fallback</span></div>
+    <div class="set">Interface text: titles, labels, navigation, body. Weights 400 / 500 / 600. Tight tracking (−0.01em) at display sizes.</div>
+  </div>
+  <div class="family-card">
+    <div class="glyphs mono" style="font-family:var(--mono);">Ag uuid·48213 0123456789</div>
+    <div class="name"><b>Geist Mono</b><span>--mono · ui-monospace, 'SF Mono' fallback</span></div>
+    <div class="set">Data text: primary keys, row counts, latency, timestamps, SQL editor, type badges, keyboard hints. Weights 400 / 500 / 600.</div>
+  </div>
+
+  <div class="ds-section-label">Type scale</div>
+  <div class="scale">
+    <div><span class="px">22 / 600</span><span class="sample" style="font-size:22px;font-weight:600;letter-spacing:-0.01em;">Schema title — page heading</span></div>
+    <div><span class="px">19 / 600</span><span class="sample" style="font-size:19px;font-weight:600;">Table name in detail header</span></div>
+    <div><span class="px">16 / 600</span><span class="sample" style="font-size:16px;font-weight:600;">Inspector subject · toolbar table</span></div>
+    <div><span class="px">15 / 500</span><span class="sample" style="font-size:15px;font-weight:500;">Command palette input</span></div>
+    <div><span class="px">13.5 / 500</span><span class="sample" style="font-size:13.5px;font-weight:500;">Base UI · connection name · column</span></div>
+    <div><span class="px">13 / 450</span><span class="sample" style="font-size:13px;">Nav items, body, list rows</span></div>
+    <div><span class="px">12.5 / 500</span><span class="sample" style="font-size:12.5px;font-weight:500;">Buttons, chips, table headers</span></div>
+    <div><span class="px">11.5 / 500</span><span class="sample" style="font-size:11.5px;font-weight:500;">Enum pills, metadata captions</span></div>
+    <div><span class="px">11 / 600</span><span class="sample" style="font-size:11px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-3);">Section labels — uppercase</span></div>
+    <div><span class="px">10.5 mono</span><span class="sample mono" style="font-size:10.5px;color:var(--text-3);">type badges · kbd · row numbers</span></div>
+  </div>
+
+  <div class="ds-section-label">Weights</div>
+  <div class="weights">
+    <div><div class="w" style="font-weight:400;">Regular</div><div class="l">400 · body, inactive nav</div></div>
+    <div><div class="w" style="font-weight:500;">Medium</div><div class="l">500 · labels, active items, buttons</div></div>
+    <div><div class="w" style="font-weight:600;">Semibold</div><div class="l">600 · titles, section labels</div></div>
+  </div>
+
+  <div class="ds-section-label">Working rules</div>
+  <div class="principles">
+    <div><b>Tabular numerals</b><p><span class="mono">font-variant-numeric: tabular-nums</span> on every grid and result table so digits sit in fixed columns.</p></div>
+    <div><b>Uppercase labels</b><p>Group headers are 11px / 600, uppercase, <span class="mono">letter-spacing 0.05em</span>, in tertiary text.</p></div>
+    <div><b>Mono for data</b><p>If a value is machine-shaped — id, count, ms, hex, SQL — it is set in Geist Mono, never the UI font.</p></div>
+    <div><b>Negative tracking up top</b><p>Display sizes (16px+) tighten to −0.01em; body and mono stay at default tracking.</p></div>
+  </div>
+</body>
+</html>

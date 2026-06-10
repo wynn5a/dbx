@@ -3350,12 +3350,12 @@ function treeItemMenuItems(): ContextMenuItem[] {
     <div @contextmenu="onTreeItemContextMenu($event, onContextMenu)">
       <div
         ref="rowRef"
-        class="group flex items-center gap-1.5 py-1 px-2 cursor-pointer hover:bg-accent transition-colors relative outline-none"
+        class="tree-row group flex items-center gap-1.5 py-1 px-2 cursor-pointer relative outline-none"
         style="contain: layout style"
         :class="[
           rowWidthClass,
           {
-            'ring-1 ring-primary/50 bg-primary/5': showDropInside,
+            'ring-1 ring-[var(--ds-accent-line)] bg-[var(--ds-accent-soft)]': showDropInside,
             'opacity-50': isDragging,
             'tree-item-connection-tint': connectionColor,
             'rounded-none': connectionColor && !isSelected && !isMultiSelected,
@@ -3376,18 +3376,18 @@ function treeItemMenuItems(): ContextMenuItem[] {
       >
         <div
           v-if="showDropBefore"
-          class="absolute right-2 top-0 h-0.5 bg-primary rounded-full pointer-events-none"
+          class="absolute right-2 top-0 h-0.5 bg-[var(--ds-accent)] rounded-full pointer-events-none"
           :style="{ left: paddingLeft }"
         />
         <div
           v-if="showDropAfter"
-          class="absolute right-2 bottom-0 h-0.5 bg-primary rounded-full pointer-events-none"
+          class="absolute right-2 bottom-0 h-0.5 bg-[var(--ds-accent)] rounded-full pointer-events-none"
           :style="{ left: paddingLeft }"
         />
         <template v-if="canExpand">
           <button
             type="button"
-            class="-m-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+            class="tree-row-chevron -m-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm"
             @click.stop="toggle"
           >
             <Loader2 v-if="node.isLoading" class="w-3.5 h-3.5 animate-spin" />
@@ -3411,7 +3411,7 @@ function treeItemMenuItems(): ContextMenuItem[] {
           v-if="isRenamingGroup"
           ref="renameInputRef"
           v-model="renameInput"
-          class="min-w-0 flex-1 truncate bg-transparent border border-primary/50 rounded px-1 outline-none"
+          class="min-w-0 flex-1 truncate bg-transparent border border-[var(--ds-accent-line)] rounded px-1 outline-none"
           @blur="finishRenameGroup"
           @keydown.enter.prevent="finishRenameGroup"
           @keydown.escape.prevent="isRenamingGroup = false"
@@ -3431,24 +3431,22 @@ function treeItemMenuItems(): ContextMenuItem[] {
               node.type === 'group-partitions') &&
             node.objectCount != null
           "
-          class="text-muted-foreground text-[10px] shrink-0"
+          class="tree-row-count shrink-0"
           >{{ node.objectCount }}</span
         >
         <Badge v-if="isNodeDefaultDatabase" variant="secondary" class="h-4 px-1.5 text-[10px]">
           {{ t("editor.defaultDatabase") }}
         </Badge>
-        <span v-if="columnComment" class="truncate text-muted-foreground/60 text-[10px] max-w-[40%]">{{
-          columnComment
-        }}</span>
+        <span v-if="columnComment" class="tree-row-comment truncate text-[10px] max-w-[40%]">{{ columnComment }}</span>
         <span
           v-if="tableComment && !settingsStore.editorSettings.sidebarHideTableComments"
-          class="truncate text-muted-foreground/60 text-[10px] max-w-[25%] group-hover:hidden"
+          class="tree-row-comment truncate text-[10px] max-w-[25%] group-hover:hidden"
           :title="tableComment"
           >{{ tableComment }}</span
         >
         <span
           v-if="node.type === 'connection' && node.connectionId && connectionStore.connectedIds.has(node.connectionId)"
-          class="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0"
+          class="tree-row-status-dot shrink-0"
         />
         <ConnectionErrorIndicator
           v-if="node.type === 'connection'"
@@ -3457,8 +3455,8 @@ function treeItemMenuItems(): ContextMenuItem[] {
         />
         <button
           v-if="canPin"
-          class="rounded p-0.5 text-muted-foreground hover:bg-muted-foreground/15 hover:text-foreground focus:opacity-100"
-          :class="isPinned ? 'opacity-100 text-primary' : 'opacity-0 group-hover:opacity-100'"
+          class="tree-row-pin rounded p-0.5 focus:opacity-100"
+          :class="isPinned ? 'opacity-100 tree-row-pin--pinned' : 'opacity-0 group-hover:opacity-100'"
           :title="isPinned ? t('contextMenu.unpin') : t('contextMenu.pin')"
           @click.stop="togglePin"
         >
@@ -3846,6 +3844,77 @@ function treeItemMenuItems(): ContextMenuItem[] {
 </template>
 
 <style>
+/* Nav row (design system): text-2 idle, hover fills --ds-bg-hover and steps
+   text up one ramp level; selection fills --ds-bg-active with text-1 / 500. */
+.tree-row {
+  color: var(--ds-text-2);
+  transition:
+    background-color var(--ds-speed) var(--ds-ease),
+    color var(--ds-speed) var(--ds-ease);
+}
+.tree-row:hover {
+  background-color: var(--ds-bg-hover);
+  color: var(--ds-text-1);
+}
+.tree-row.tree-item-active {
+  color: var(--ds-text-1);
+  font-weight: 500;
+}
+
+.tree-row-chevron {
+  color: var(--ds-text-3);
+  transition:
+    background-color var(--ds-speed) var(--ds-ease),
+    color var(--ds-speed) var(--ds-ease);
+}
+.tree-row-chevron:hover {
+  background-color: var(--ds-bg-active);
+  color: var(--ds-text-1);
+}
+
+/* micro type: mono counts, muted comments */
+.tree-row-count {
+  font-family: var(--ds-mono);
+  font-size: 10.5px;
+  color: var(--ds-text-4);
+}
+.tree-row-comment {
+  color: var(--ds-text-4);
+}
+
+/* Status dot: filled dot + 13%-tint halo; pulse = live connection */
+.tree-row-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--ds-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-green) 13%, transparent);
+  animation: tree-row-status-pulse 2.4s var(--ds-ease) infinite;
+}
+@keyframes tree-row-status-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-green) 13%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--ds-green) 7%, transparent);
+  }
+}
+
+.tree-row-pin {
+  color: var(--ds-text-3);
+  transition:
+    background-color var(--ds-speed) var(--ds-ease),
+    color var(--ds-speed) var(--ds-ease);
+}
+.tree-row-pin:hover {
+  background-color: var(--ds-bg-active);
+  color: var(--ds-text-1);
+}
+.tree-row-pin--pinned {
+  color: var(--ds-accent);
+}
+
 .tree-item-connection-tint {
   isolation: isolate;
   background-color: transparent !important;
@@ -3884,32 +3953,19 @@ function treeItemMenuItems(): ContextMenuItem[] {
   background-color: var(--tree-connection-active-focus-bg, var(--tree-connection-active-bg));
 }
 
-/* Unfocused: subtle gray */
+/* Unfocused selection: neutral active fill */
 .tree-item-active {
-  background-color: var(--tree-connection-active-bg, rgb(235 235 235)) !important;
-}
-:root.dark .tree-item-active {
-  background-color: var(--tree-connection-active-bg, rgb(36 36 36)) !important;
+  background-color: var(--tree-connection-active-bg, var(--ds-bg-active)) !important;
 }
 
-/* Focused: soft blue */
+/* Focused selection: accent-soft (data selection) */
 .tree-item-active:focus {
-  background-color: var(--tree-connection-active-focus-bg, rgb(211 227 245)) !important;
-}
-:root.dark .tree-item-active:focus {
-  background-color: var(--tree-connection-active-focus-bg, rgb(33 60 89)) !important;
+  background-color: var(--tree-connection-active-focus-bg, var(--ds-accent-soft)) !important;
 }
 
-/* Locate highlight: instant amber, then fade on removal */
+/* Locate highlight: instant amber tint, then fade on removal */
 .tree-item-highlight {
-  background-color: rgb(253 225 167) !important;
-  background-color: oklch(0.92 0.08 85) !important;
-  transition: background-color 0.8s ease-out 0.6s;
-}
-
-:root.dark .tree-item-highlight {
-  background-color: rgb(110 67 0) !important;
-  background-color: oklch(0.42 0.12 80) !important;
+  background-color: color-mix(in srgb, var(--ds-amber) 30%, transparent) !important;
   transition: background-color 0.8s ease-out 0.6s;
 }
 </style>

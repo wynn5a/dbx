@@ -20,7 +20,7 @@ const forwardedProps = useForwardProps(delegatedProps);
     v-bind="forwardedProps"
     :class="
       cn(
-        'bg-popover z-10 flex cursor-default items-center justify-center py-1 [&_svg:not([class*=size-])]:size-4',
+        'bg-[var(--ds-bg-popover)] text-[var(--ds-text-3)] z-10 flex cursor-default items-center justify-center py-1 [&_svg:not([class*=size-])]:size-4',
         props.class,
       )
     "

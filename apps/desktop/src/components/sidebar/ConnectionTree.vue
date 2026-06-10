@@ -452,31 +452,31 @@ defineExpose({ focusSearch, createNewGroup });
 </script>
 
 <template>
-  <div class="h-full min-h-0 flex flex-col text-sm select-none">
+  <div class="sidebar-tree-root h-full min-h-0 flex flex-col select-none">
     <div class="sticky top-0 z-10 bg-background px-2 py-1">
       <div class="relative flex items-center gap-1">
         <div class="relative flex-1">
-          <Search class="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+          <Search class="sidebar-search-icon absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3" />
           <input
             ref="searchInputRef"
             v-model="searchQuery"
             autocapitalize="off"
             autocorrect="off"
             spellcheck="false"
-            class="w-full h-6 pl-7 pr-6 text-xs rounded border border-border bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            class="sidebar-search-input w-full h-6 pl-7 pr-6 text-xs"
             :placeholder="t('grid.search')"
             @keydown="onSearchKeydown"
           />
           <button
             v-if="searchQuery"
-            class="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            class="sidebar-search-clear absolute right-1.5 top-1/2 -translate-y-1/2"
             @click="searchQuery = ''"
           >
             <X class="h-3 w-3" />
           </button>
         </div>
         <button
-          class="shrink-0 h-6 w-6 flex items-center justify-center rounded border border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+          class="sidebar-tool-button shrink-0 h-6 w-6 flex items-center justify-center"
           :title="t('sidebar.locateActiveTab')"
           @click="locateActiveTabInSidebar"
         >
@@ -493,15 +493,17 @@ defineExpose({ focusSearch, createNewGroup });
           :trigger-icon="ListFilter"
           :trigger-class="
             [
-              'shrink-0 h-6 w-6 flex items-center justify-center rounded border border-border hover:bg-accent',
-              hasSearchScopeFilter ? 'text-primary bg-primary/10 border-primary/30' : 'text-muted-foreground',
+              'shrink-0 h-6 w-6 flex items-center justify-center rounded-sm border border-[var(--ds-border)] hover:bg-[var(--ds-bg-hover)] hover:border-[var(--ds-border-strong)]',
+              hasSearchScopeFilter
+                ? 'text-[var(--ds-accent)] bg-[var(--ds-accent-soft)] border-[var(--ds-accent-line)]'
+                : 'text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]',
             ].join(' ')
           "
           trigger-icon-class="h-3.5 w-3.5"
           item-icon-class="h-3.5 w-3.5"
           content-class="w-max min-w-0"
-          selected-item-class="bg-primary/10 text-primary"
-          selected-check-class="text-primary"
+          selected-item-class="bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+          selected-check-class="text-[var(--ds-accent)]"
           :show-trigger-label="false"
           :show-chevron="false"
           :close-on-select="false"
@@ -558,13 +560,71 @@ defineExpose({ focusSearch, createNewGroup });
         @rename-started="pendingRenameGroupId = null"
       />
     </div>
-    <div v-if="store.treeNodes.length === 0" class="px-3 py-8 text-center text-muted-foreground text-xs">
+    <div v-if="store.treeNodes.length === 0" class="sidebar-empty px-3 py-8 text-center">
       {{ t("sidebar.noConnections") }}
     </div>
   </div>
 </template>
 
 <style scoped>
+.sidebar-tree-root {
+  font-size: 13px;
+}
+
+.sidebar-search-icon {
+  color: var(--ds-text-3);
+}
+
+.sidebar-search-input {
+  border: 1px solid var(--ds-border);
+  border-radius: 6px;
+  background: var(--ds-bg-input);
+  color: var(--ds-text-1);
+  transition:
+    border-color var(--ds-speed) var(--ds-ease),
+    box-shadow var(--ds-speed) var(--ds-ease);
+}
+.sidebar-search-input::placeholder {
+  color: var(--ds-text-3);
+}
+.sidebar-search-input:hover {
+  border-color: var(--ds-border-strong);
+}
+.sidebar-search-input:focus {
+  outline: none;
+  border-color: transparent;
+  box-shadow: 0 0 0 2px var(--ds-accent-line);
+}
+
+.sidebar-search-clear {
+  color: var(--ds-text-3);
+  transition: color var(--ds-speed) var(--ds-ease);
+}
+.sidebar-search-clear:hover {
+  color: var(--ds-text-1);
+}
+
+.sidebar-tool-button {
+  border: 1px solid var(--ds-border);
+  border-radius: 6px;
+  color: var(--ds-text-3);
+  transition:
+    background-color var(--ds-speed) var(--ds-ease),
+    border-color var(--ds-speed) var(--ds-ease),
+    color var(--ds-speed) var(--ds-ease);
+}
+.sidebar-tool-button:hover {
+  background: var(--ds-bg-hover);
+  border-color: var(--ds-border-strong);
+  color: var(--ds-text-1);
+}
+
+.sidebar-empty {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--ds-text-3);
+}
+
 .connection-tree-scroller {
   will-change: scroll-position;
   contain: content;
