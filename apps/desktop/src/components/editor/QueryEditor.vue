@@ -74,7 +74,6 @@ import * as api from "@/lib/api";
 import {
   areSqlSemanticDiagnosticsEqual,
   buildSqlParserErrorDiagnostic,
-  buildSqlSemanticDiagnostics,
   shouldRunSqlSemanticDiagnostics,
   type SqlSemanticDiagnostic,
 } from "@/lib/sqlSemanticDiagnostics";
@@ -84,13 +83,7 @@ import type {
   SqlCompletionItem,
   SqlCompletionObject,
 } from "@/lib/sqlCompletion";
-import type {
-  DatabaseType,
-  ForeignKeyInfo,
-  SqlReferenceAnalysis,
-  SqlTableReference,
-  SqlTextSpan,
-} from "@/types/database";
+import type { DatabaseType, ForeignKeyInfo, SqlTextSpan } from "@/types/database";
 
 const props = defineProps<{
   modelValue: string;
@@ -696,38 +689,6 @@ function setSemanticDiagnostics(next: SqlSemanticDiagnostic[]) {
   reconfigureDiagnostics();
 }
 
-async function enrichSemanticDiagnosticTables(tables: SqlTableReference[]) {
-  if (!props.connectionId || props.database == null) return tables;
-
-  const enriched: SqlTableReference[] = [];
-  for (const table of tables) {
-    if (table.schema) {
-      enriched.push(table);
-      continue;
-    }
-    const cached = cachedTables.find((item) => item.name.toLowerCase() === table.name.toLowerCase());
-    if (cached?.schema) {
-      enriched.push({ ...table, schema: cached.schema });
-      continue;
-    }
-    try {
-      const matches = await connectionStore.listCompletionTables(
-        props.connectionId,
-        props.database,
-        table.name,
-        MAX_COMPLETION_TABLES,
-        props.schema,
-      );
-      cachedTables = [...cachedTables, ...matches];
-      const match = matches.find((item) => item.name.toLowerCase() === table.name.toLowerCase());
-      enriched.push(match?.schema ? { ...table, schema: match.schema } : table);
-    } catch {
-      enriched.push(table);
-    }
-  }
-  return enriched;
-}
-
 async function refreshSemanticDiagnostics() {
   const currentView = view.value;
   const runId = ++semanticDiagnosticRunId;
@@ -757,20 +718,14 @@ async function refreshSemanticDiagnostics() {
   }
 
   try {
-    const analysis = await api.analyzeSqlReferences(sql, props.formatDialect ?? props.dialect ?? "generic");
+    // Parse the SQL so genuine syntax errors still surface as diagnostics.
+    // Semantic "unknown column" warnings are intentionally disabled for all
+    // databases: the editor's schema view is often incomplete (aliases,
+    // computed columns, cross-schema refs), producing false positives on SQL
+    // that runs fine.
+    await api.analyzeSqlReferences(sql, props.formatDialect ?? props.dialect ?? "generic");
     if (runId !== semanticDiagnosticRunId) return;
-
-    const tables = await enrichSemanticDiagnosticTables(analysis.tables);
-    await Promise.all(tables.map((table) => ensureColumnsForTable(table)));
-    if (runId !== semanticDiagnosticRunId) return;
-
-    const enrichedAnalysis: SqlReferenceAnalysis = { ...analysis, tables };
-    setSemanticDiagnostics(
-      buildSqlSemanticDiagnostics(enrichedAnalysis, {
-        tables: cachedTables,
-        columnsByTable: cachedColumnsByTable,
-      }),
-    );
+    setSemanticDiagnostics([]);
   } catch (error) {
     if (runId === semanticDiagnosticRunId) {
       const diagnostic = buildSqlParserErrorDiagnostic(error, sql);

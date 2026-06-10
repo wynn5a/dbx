@@ -179,7 +179,7 @@ watch(
   <Teleport to="body">
     <div
       v-if="show"
-      class="pointer-events-none fixed z-50 rounded-md bg-foreground text-xs text-background"
+      class="pointer-events-none fixed z-50 rounded-md border border-border bg-popover text-xs text-popover-foreground shadow-md"
       :class="[
         slots.content ? '' : 'inline-flex w-fit max-w-xs items-center gap-1.5 px-3 py-1.5',
         tooltipTransformClass,
@@ -188,7 +188,10 @@ watch(
       role="tooltip"
     >
       <slot name="content">{{ text }}</slot>
-      <span :class="[arrowClass, 'size-2.5 rotate-45 rounded-[2px] bg-foreground']" aria-hidden="true" />
+      <span
+        :class="[arrowClass, 'size-2.5 rotate-45 rounded-[2px] border-b border-r border-border bg-popover']"
+        aria-hidden="true"
+      />
     </div>
   </Teleport>
 </template>
