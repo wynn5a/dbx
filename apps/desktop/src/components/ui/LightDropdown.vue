@@ -43,7 +43,7 @@ const props = withDefaults(
     ariaLabel: undefined,
     contentClass: "",
     triggerClass:
-      "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground",
+      "flex items-center gap-1 rounded-full border border-[var(--ds-border)] px-2 py-0.5 text-[11px] text-[var(--ds-text-2)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]",
     triggerTitle: undefined,
     triggerIcon: undefined,
     triggerLabel: undefined,
@@ -54,10 +54,10 @@ const props = withDefaults(
     triggerIconClass: "h-3 w-3",
     itemIconClass: "h-3 w-3",
     itemClass: "",
-    labelClass: "text-muted-foreground px-1.5 py-1 text-xs font-medium",
+    labelClass: "ds-menu-label px-2 pt-1.5 pb-1",
     selectedValues: undefined,
     highlightSelected: true,
-    selectedItemClass: "bg-accent",
+    selectedItemClass: "bg-[var(--ds-accent-soft)] text-[var(--ds-text-1)]",
     selectedCheckClass: "",
     closeOnSelect: true,
     label: undefined,
@@ -178,18 +178,17 @@ onBeforeUnmount(close);
     <div
       v-if="open"
       ref="menuRef"
-      class="fixed z-50 min-w-32 rounded-lg p-1 cn-menu-translucent text-popover-foreground"
+      class="ds-popover fixed z-50 min-w-32 p-1 text-[var(--ds-text-1)]"
       :class="contentClass"
       :style="menuStyle"
       role="menu"
     >
       <div v-if="label" :class="labelClass">{{ label }}</div>
-      <div v-if="label" class="bg-border -mx-1 my-1 h-px" />
       <template v-for="item in items" :key="item.value">
-        <div v-if="item.separatorBefore" class="bg-border -mx-1 my-1 h-px" />
+        <div v-if="item.separatorBefore" class="-mx-1 my-1 h-px bg-[var(--ds-border)]" />
         <button
           type="button"
-          class="flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-sm outline-hidden hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+          class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13.5px] leading-4 text-[var(--ds-text-2)] outline-hidden transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-accent-soft)] hover:text-[var(--ds-text-1)] disabled:pointer-events-none disabled:opacity-50"
           :class="[itemClass, highlightSelected && isItemSelected(item) ? selectedItemClass : '']"
           :disabled="item.disabled"
           :title="item.title"
@@ -199,23 +198,23 @@ onBeforeUnmount(close);
           <Check
             v-if="checkPosition === 'left'"
             class="h-3 w-3 shrink-0"
-            :class="[isItemSelected(item) ? selectedCheckClass : 'opacity-0']"
+            :class="[isItemSelected(item) ? ['text-[var(--ds-accent)]', selectedCheckClass] : 'opacity-0']"
           />
           <span
             v-if="item.leadingText"
-            class="inline-flex h-5 w-6 shrink-0 items-center justify-center text-sm font-medium leading-none"
+            class="inline-flex h-5 w-6 shrink-0 items-center justify-center text-[13.5px] font-medium leading-none"
           >
             {{ item.leadingText }}
           </span>
           <component
             :is="item.icon"
             v-if="item.icon"
-            :class="[itemIconClass, 'shrink-0 text-muted-foreground', item.iconClass]"
+            :class="[itemIconClass, 'shrink-0 text-[var(--ds-text-3)]', item.iconClass]"
           />
           <span class="truncate">{{ item.label }}</span>
           <Check
             v-if="checkPosition === 'right' && isItemSelected(item)"
-            class="ml-auto h-4 w-4 shrink-0"
+            class="ml-auto h-4 w-4 shrink-0 text-[var(--ds-accent)]"
             :class="selectedCheckClass"
           />
         </button>

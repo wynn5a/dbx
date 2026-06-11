@@ -1,0 +1,81 @@
+name: Tauri Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: macos-15-intel
+            target: x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './ -> target'
+          shared-key: tauri-build-${{ matrix.target }}
+
+      - name: Install system dependencies (Linux)
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev xdg-utils
+
+      # This workflow does not have the updater signing key, so skip
+      # generating updater artifacts (which would otherwise fail the build).
+      - name: Disable updater artifacts
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const path = 'src-tauri/tauri.conf.json';
+            const conf = JSON.parse(fs.readFileSync(path, 'utf8'));
+            conf.bundle.createUpdaterArtifacts = false;
+            fs.writeFileSync(path, JSON.stringify(conf, null, 2));
+          "
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'DBX ${{ github.ref_name }}'
+          releaseBody: 'DBX ${{ github.ref_name }}'
+          releaseDraft: false
+          prerelease: false
+          args: --target ${{ matrix.target }}

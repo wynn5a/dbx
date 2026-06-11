@@ -874,8 +874,8 @@ function resetTableSearchSplitWidth() {
           <Button
             variant="ghost"
             size="icon"
-            class="h-6 w-7 shrink-0 text-foreground hover:bg-accent"
-            :class="{ 'bg-accent text-foreground': dataGridRef?.nullColumnsHidden }"
+            class="h-6 w-7 shrink-0"
+            :class="{ 'bg-[var(--ds-bg-active)] text-[var(--ds-text-1)]': dataGridRef?.nullColumnsHidden }"
             :title="t('grid.viewOptions')"
             :aria-label="t('grid.viewOptions')"
           >
@@ -884,27 +884,29 @@ function resetTableSearchSplitWidth() {
         </PopoverTrigger>
         <PopoverContent
           align="end"
-          class="w-max min-w-44 max-w-[calc(100vw-2rem)] gap-0 overflow-hidden rounded-xl border bg-popover p-0 text-popover-foreground shadow-xl"
+          class="ds-popover w-max min-w-44 max-w-[calc(100vw-2rem)] gap-0 p-1"
           @click.stop
           @keydown.stop
         >
-          <div class="border-b bg-muted/40 px-3 py-2">
-            <div class="text-xs font-semibold">{{ t("grid.viewOptions") }}</div>
-          </div>
+          <div class="ds-menu-label px-2 pt-1.5 pb-1">{{ t("grid.viewOptions") }}</div>
           <label
-            class="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs hover:bg-accent"
-            :class="{ 'cursor-not-allowed opacity-60': !dataGridRef?.canToggleAllNullColumns }"
+            class="flex items-center gap-2 rounded-sm px-2 py-1.5 text-[13.5px] leading-4 transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)]"
+            :class="
+              dataGridRef?.canToggleAllNullColumns
+                ? 'cursor-pointer text-[var(--ds-text-2)] hover:bg-[var(--ds-accent-soft)] hover:text-[var(--ds-text-1)]'
+                : 'cursor-default text-[var(--ds-text-4)]'
+            "
           >
             <input
               type="checkbox"
-              class="h-3.5 w-3.5 shrink-0 accent-primary"
+              class="h-3.5 w-3.5 shrink-0 accent-[var(--ds-accent)]"
               :checked="!!dataGridRef?.nullColumnsHidden"
               :disabled="!dataGridRef?.canToggleAllNullColumns"
               @change="dataGridRef?.toggleAllNullColumns()"
             />
-            <span class="min-w-0 flex items-center gap-1 font-medium">
+            <span class="min-w-0 flex items-center gap-1">
               {{ t("grid.hideNullColumns") }}
-              <span v-if="(dataGridRef?.allNullColumnCount ?? 0) > 0" class="text-muted-foreground tabular-nums">
+              <span v-if="(dataGridRef?.allNullColumnCount ?? 0) > 0" class="text-[var(--ds-text-3)] tabular-nums">
                 ({{ dataGridRef?.allNullColumnCount }})
               </span>
             </span>

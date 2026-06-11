@@ -8227,23 +8227,23 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
           :model-value="String(pageSize)"
           :items="pageSizeMenuItems"
           :trigger-label="`${pageSize}${t('grid.rowsPerPageShort')}`"
-          trigger-class="inline-flex h-5 items-center justify-center rounded-md px-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
+          trigger-class="inline-flex h-5 items-center justify-center gap-0.5 rounded-sm px-1.5 text-xs text-[var(--ds-text-2)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)] aria-expanded:bg-[var(--ds-bg-active)] aria-expanded:text-[var(--ds-text-1)]"
           content-class="w-36"
           :highlight-selected="false"
           check-position="none"
           align="end"
           @update:model-value="selectPageSizeMenuItem"
         >
-          <div class="bg-border -mx-1 my-1 h-px" />
-          <div class="text-muted-foreground px-1.5 py-1 text-xs">{{ t("grid.customRowsPerPage") }}</div>
-          <div class="flex items-center gap-1 px-1.5 pb-1" @click.stop @keydown.stop>
+          <div class="-mx-1 my-1 h-px bg-[var(--ds-border)]" />
+          <div class="ds-menu-label px-2 pt-1.5 pb-1">{{ t("grid.customRowsPerPage") }}</div>
+          <div class="flex items-center gap-1 px-2 pb-1" @click.stop @keydown.stop>
             <Input
               v-model="customPageSizeInput"
               type="number"
               inputmode="numeric"
               :min="MIN_RESULT_PAGE_SIZE"
               :max="MAX_RESULT_PAGE_SIZE"
-              class="h-6 w-20 px-1.5 text-xs tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+              class="h-6 w-20 px-1.5 font-mono text-xs tabular-nums [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               @keydown.enter.prevent.stop="applyCustomPageSize"
             />
             <Tooltip>
@@ -8280,7 +8280,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
           :items="exportMenuItems"
           :aria-label="t('grid.export')"
           :trigger-icon="Download"
-          trigger-class="inline-flex h-6 w-6 items-center justify-center rounded-md text-foreground/80 hover:bg-accent hover:text-accent-foreground"
+          trigger-class="inline-flex h-6 w-6 items-center justify-center rounded-sm text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)] aria-expanded:bg-[var(--ds-bg-active)] aria-expanded:text-[var(--ds-text-1)]"
           trigger-icon-class="h-3.5 w-3.5"
           :show-trigger-label="false"
           :show-chevron="false"

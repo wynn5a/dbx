@@ -1,9 +1,9 @@
 name: Release
 
+# Disabled automatic tag-triggered releases in favor of the simpler
+# tauri-build.yml workflow. Can still be run manually if needed.
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
