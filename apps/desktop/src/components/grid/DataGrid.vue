@@ -7325,7 +7325,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                 <div class="relative" :style="{ width: `${totalWidth}px`, height: `${canvasContentHeight}px` }">
                   <canvas
                     ref="canvasRef"
-                    class="canvas-grid-surface sticky left-0 top-0 z-0 block text-xs font-sans font-normal"
+                    class="canvas-grid-surface sticky left-0 top-0 z-0 block text-xs font-mono font-normal"
                     :style="{ width: `${canvasViewportWidth}px`, height: `${canvasViewportHeight}px` }"
                     @mousemove="onCanvasMouseMove"
                     @mouseleave="onCanvasMouseLeave"

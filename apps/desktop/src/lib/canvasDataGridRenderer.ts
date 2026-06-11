@@ -90,7 +90,9 @@ function setCanvasNumericVariant(ctx: CanvasRenderingContext2D, value: "normal" 
 }
 
 function canvasTabularFontFamily(fontFamily: string): string {
-  return `"Geist Variable Tabular", ${fontFamily}`;
+  // IBM Plex Mono (the grid font) is monospaced, so digits are already tabular —
+  // the resolved family is used as-is and tabular-nums is applied via fontVariantNumeric.
+  return fontFamily;
 }
 
 const FIT_CANVAS_TEXT_CACHE_MAX = 10000;
@@ -172,7 +174,7 @@ function resolveCanvasRenderState(canvas: HTMLCanvasElement, isDark: boolean, st
 
   const canvasStyle = getComputedStyle(canvas);
   const fontFamily =
-    canvasStyle.fontFamily || `"Geist Variable", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif`;
+    canvasStyle.fontFamily || `"IBM Plex Mono", ui-monospace, "SF Mono", "Menlo", "Cascadia Mono", monospace`;
   const fontSize = Number.parseFloat(canvasStyle.fontSize) || 12;
   const lineHeight = canvasStyle.lineHeight;
   const normalFont = canvasFont({

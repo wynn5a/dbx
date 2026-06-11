@@ -1,0 +1,14 @@
+Bundled fonts
+=============
+
+Inter (inter-*.woff2)
+  Copyright The Inter Project Authors (https://github.com/rsms/inter)
+  Licensed under the SIL Open Font License, Version 1.1.
+  https://openfontlicense.org
+
+IBM Plex Mono (ibm-plex-mono-*.woff2)
+  Copyright IBM Corp. with Reserved Font Name "Plex"
+  Licensed under the SIL Open Font License, Version 1.1.
+  https://openfontlicense.org
+
+The full SIL OFL 1.1 text is available at https://openfontlicense.org.

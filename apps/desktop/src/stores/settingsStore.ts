@@ -295,6 +295,7 @@ export const EDITOR_THEMES: { value: EditorTheme; label: string; dark: boolean }
 const EDITOR_THEME_VALUES = new Set<EditorTheme>(EDITOR_THEMES.map((theme) => theme.value));
 
 export const FONT_FAMILIES: { value: string; label: string }[] = [
+  { value: "'IBM Plex Mono', monospace", label: "IBM Plex Mono" },
   { value: "'JetBrains Mono', 'Fira Code', monospace", label: "JetBrains Mono" },
   { value: "'Fira Code', monospace", label: "Fira Code" },
   { value: "'Cascadia Code', monospace", label: "Cascadia Code" },
@@ -305,7 +306,7 @@ export const FONT_FAMILIES: { value: string; label: string }[] = [
 ];
 
 export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
-  fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+  fontFamily: "'IBM Plex Mono', monospace",
   fontSize: 13,
   uiScale: 1,
   theme: "app",
