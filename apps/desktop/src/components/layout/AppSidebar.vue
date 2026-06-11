@@ -12,7 +12,6 @@ import { useToast } from "@/composables/useToast";
 
 defineProps<{
   sidebarWidth: number;
-  classicLayout?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -53,12 +52,11 @@ defineExpose({ focusSearch });
 
 <template>
   <div
-    class="h-full shrink-0 relative select-none"
-    :class="classicLayout ? '' : 'rounded-md border border-border/80 bg-background'"
+    class="h-full shrink-0 relative select-none rounded-md border border-border/80 bg-background"
     :style="{ width: sidebarWidth + 'px' }"
   >
     <div class="h-full flex flex-col overflow-hidden">
-      <div class="sidebar-panel-header flex items-center gap-0.5 px-3 border-b" :class="classicLayout ? 'h-9' : 'h-10'">
+      <div class="sidebar-panel-header flex items-center gap-0.5 px-3 border-b h-10">
         <span class="sidebar-section-label flex self-stretch items-center truncate" data-tauri-drag-region>{{
           t("sidebar.connections")
         }}</span>

@@ -774,10 +774,10 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
               <Button
                 variant="ghost"
                 size="sm"
-                class="h-5 text-xs px-1.5 shrink-0"
+                class="h-6 text-xs px-1.5 shrink-0"
                 :class="{ 'bg-accent text-foreground': (dataGridRef?.hiddenColumnCount ?? 0) > 0 }"
               >
-                <Columns3 class="h-3.5 w-3.5" />
+                <Columns3 class="size-3.5" />
                 {{ t("grid.columnVisibility") }}
                 <span v-if="(dataGridRef?.hiddenColumnCount ?? 0) > 0" class="tabular-nums">
                   {{ dataGridRef?.visibleColumnCount }}/{{ dataGridRef?.displayableColumnCount }}
@@ -868,11 +868,12 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
             v-if="activeTab.tableMeta && activeTab.connectionId"
             variant="ghost"
             size="sm"
-            class="h-5 text-xs px-1.5 shrink-0 text-[var(--ds-text-2)]"
+            class="h-6 text-xs px-1.5 shrink-0 text-[var(--ds-text-2)]"
             :class="{ 'bg-[var(--ds-bg-active)] text-[var(--ds-text-1)]': dataGridRef?.showDdl }"
             @click="dataGridRef?.toggleDdl()"
           >
-            <TableProperties class="h-3.5 w-3.5" /> {{ t("grid.tableInfo") }}
+            <TableProperties class="size-3.5" />
+            {{ t("grid.tableInfo") }}
           </Button>
           <Popover v-if="activeTab.result?.columns.length">
             <PopoverTrigger as-child>

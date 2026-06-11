@@ -6411,12 +6411,12 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                 v-if="props.context !== 'results'"
                 variant="ghost"
                 size="sm"
-                class="h-5 text-xs px-1.5 shrink-0"
+                class="h-6 text-xs px-1.5 shrink-0"
                 :disabled="isSaving"
                 @click="onToolbarRefresh"
               >
-                <Loader2 v-if="loading" class="w-3 h-3 mr-1 animate-spin" />
-                <RefreshCcw v-else class="w-3 h-3 mr-1" />
+                <Loader2 v-if="loading" class="size-3.5 animate-spin" />
+                <RefreshCcw v-else class="size-3.5" />
                 {{ t("grid.refresh") }}
               </Button>
               <Tooltip>
@@ -6424,11 +6424,11 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                   <Button
                     variant="ghost"
                     size="sm"
-                    class="h-5 text-xs px-1.5 shrink-0"
+                    class="h-6 text-xs px-1.5 shrink-0"
                     :class="dataGridRenderMode === 'canvas' ? 'text-primary bg-primary/10' : ''"
                     @click="toggleDataGridRenderMode"
                   >
-                    <SquareDashed class="w-3 h-3 mr-1" />
+                    <SquareDashed class="size-3.5" />
                     {{ dataGridRenderMode === "canvas" ? t("grid.canvasRenderMode") : t("grid.domRenderMode") }}
                   </Button>
                 </TooltipTrigger>
@@ -6440,20 +6440,21 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                 v-if="editable && (tableMeta || customSave)"
                 variant="ghost"
                 size="sm"
-                class="h-5 text-xs px-1.5 shrink-0"
+                class="h-6 text-xs px-1.5 shrink-0"
                 @click="addRow"
               >
-                <Plus class="w-3 h-3 mr-1" /> {{ t("grid.addRow") }}
+                <Plus class="size-3.5" />
+                {{ t("grid.addRow") }}
               </Button>
               <Button
                 v-if="toolbarDeletableRowIds.length > 0"
                 variant="ghost"
                 size="sm"
-                class="h-5 text-xs px-1.5 shrink-0 text-destructive hover:text-destructive"
+                class="h-6 text-xs px-1.5 shrink-0 text-destructive hover:text-destructive"
                 :disabled="isSaving"
                 @click="deleteSelectedRows"
               >
-                <Trash2 class="w-3 h-3 mr-1" />
+                <Trash2 class="size-3.5" />
                 {{
                   toolbarDeletableRowIds.length > 1
                     ? t("grid.deleteRows", { count: toolbarDeletableRowIds.length })
@@ -6466,18 +6467,18 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     <Button
                       variant="default"
                       size="sm"
-                      class="h-5 text-xs px-1.5 shrink-0"
+                      class="h-6 text-xs px-1.5 shrink-0"
                       :disabled="saveToolbarState.actionsDisabled"
                       @click="onToolbarCommit"
                     >
-                      <Loader2 v-if="isSaving" class="w-3 h-3 mr-1 animate-spin" />
+                      <Loader2 v-if="isSaving" class="size-3.5 animate-spin" />
                       <span
                         v-else-if="pendingChangeCount > 0"
-                        class="mr-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-300 px-1 text-[9px] font-semibold leading-none text-amber-950 shadow-[0_0_0_1px_rgba(120,53,15,0.16)] dark:bg-amber-400 dark:text-amber-950"
+                        class="flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-300 px-1 text-[9px] font-semibold leading-none text-amber-950 shadow-[0_0_0_1px_rgba(120,53,15,0.16)] dark:bg-amber-400 dark:text-amber-950"
                       >
                         {{ pendingChangeCount }}
                       </span>
-                      <Save v-else class="w-3 h-3 mr-1" />
+                      <Save v-else class="size-3.5" />
                       {{ t(saveActionMode.labelKey, { count: pendingChangeCount }) }}
                     </Button>
                   </TooltipTrigger>
@@ -6488,11 +6489,11 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                 <Button
                   variant="outline"
                   size="sm"
-                  class="h-5 text-xs px-1.5 shrink-0"
+                  class="h-6 text-xs px-1.5 shrink-0"
                   :disabled="saveToolbarState.actionsDisabled"
                   @click="useTransaction ? onToolbarRollback() : discardChanges()"
                 >
-                  <RotateCcw class="w-3 h-3 mr-1" />
+                  <RotateCcw class="size-3.5" />
                   {{ t(saveActionMode.secondaryActionKey) }}
                 </Button>
               </template>

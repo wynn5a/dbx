@@ -173,23 +173,12 @@ watch(
 function tabColorStyle(tab: QueryTab) {
   const color = connectionColor(tab.connectionId);
   const isActive = tab.id === queryStore.activeTabId && !props.showDriverStore;
-  const isClassic = settingsStore.editorSettings.appLayout === "classic";
   if (!color) {
-    if (isClassic) {
-      return isActive ? { boxShadow: "0 1px 0 0 var(--color-background)" } : undefined;
-    }
     return isActive
       ? {
           borderColor: "var(--ring)",
         }
       : undefined;
-  }
-
-  if (isClassic) {
-    return {
-      backgroundColor: hexToRgba(color, isActive ? 0.16 : 0.07),
-      boxShadow: isActive ? `inset 0 -2px 0 ${color}` : undefined,
-    };
   }
 
   return {
@@ -265,11 +254,8 @@ const tabTailDragRegionClass = computed(() =>
   showTabOverflowControls.value ? "w-0 flex-none self-stretch" : "min-w-8 flex-1 self-stretch",
 );
 
-const tabOverflowControlClass = computed(() =>
-  settingsStore.editorSettings.appLayout === "classic"
-    ? "h-full w-8 border-r border-border/80 dark:border-border/45 bg-background/80 text-foreground/75 hover:bg-accent hover:text-foreground disabled:cursor-default disabled:opacity-40"
-    : "h-7 w-7 rounded-md border border-border/60 bg-background text-foreground/70 hover:border-border hover:text-foreground",
-);
+const tabOverflowControlClass =
+  "h-7 w-7 rounded-md border border-border/60 bg-background text-foreground/70 hover:border-border hover:text-foreground";
 
 function dispatchBeforeTabSwitch(tabId: string) {
   if (tabId === queryStore.activeTabId) return;
@@ -289,12 +275,7 @@ function activateTab(tabId: string) {
 <template>
   <div
     v-if="queryStore.tabs.length > 0 || showDriverStore"
-    class="relative flex border-b shrink-0"
-    :class="
-      settingsStore.editorSettings.appLayout === 'classic'
-        ? 'h-9 items-stretch bg-muted'
-        : 'h-10 items-center bg-background px-2'
-    "
+    class="relative flex border-b shrink-0 h-10 items-center bg-background px-2"
   >
     <button
       v-if="showTabOverflowControls"
@@ -310,8 +291,7 @@ function activateTab(tabId: string) {
     </button>
     <div
       ref="tabsContainerRef"
-      class="flex-1 flex items-center overflow-x-auto min-w-0"
-      :class="settingsStore.editorSettings.appLayout === 'classic' ? '' : 'gap-1.5'"
+      class="flex-1 flex items-center overflow-x-auto min-w-0 gap-1.5"
       :style="tabsContainerStyle"
       @scroll="updateScrollButtons"
       @wheel="onTabsWheel"
@@ -322,28 +302,18 @@ function activateTab(tabId: string) {
         :items="getTabMenuItems(tab)"
         v-slot="{ onContextMenu }"
       >
-        <div :class="settingsStore.editorSettings.appLayout === 'classic' ? 'h-full' : ''" @contextmenu="onContextMenu">
+        <div @contextmenu="onContextMenu">
           <Tooltip>
             <TooltipTrigger as-child>
               <div
                 class="group flex items-center gap-1 px-2 text-xs cursor-pointer transition-colors whitespace-nowrap select-none"
-                :class="
-                  settingsStore.editorSettings.appLayout === 'classic'
-                    ? [
-                        compactTabTitle ? 'min-w-24' : 'min-w-38',
-                        'h-full border-r border-border/80 dark:border-border/45',
-                        tab.id === queryStore.activeTabId && !showDriverStore
-                          ? 'bg-background text-foreground font-medium'
-                          : 'text-foreground/70 hover:text-foreground/90',
-                      ]
-                    : [
-                        compactTabTitle ? 'min-w-24' : 'min-w-38',
-                        'h-7 rounded-md border',
-                        tab.id === queryStore.activeTabId && !showDriverStore
-                          ? 'text-foreground font-medium'
-                          : 'border-border/60 text-foreground/70 hover:border-border hover:text-foreground/90',
-                      ]
-                "
+                :class="[
+                  compactTabTitle ? 'min-w-24' : 'min-w-38',
+                  'h-7 rounded-md border',
+                  tab.id === queryStore.activeTabId && !showDriverStore
+                    ? 'text-foreground font-medium'
+                    : 'border-border/60 text-foreground/70 hover:border-border hover:text-foreground/90',
+                ]"
                 :style="[tabColorStyle(tab), tabDropStyle(tab.id)]"
                 :data-active-tab="tab.id === queryStore.activeTabId && !showDriverStore"
                 @click="handleTabClick(tab)"
@@ -408,15 +378,7 @@ function activateTab(tabId: string) {
       <div
         v-if="showDriverStore"
         data-driver-store-tab
-        class="group flex min-w-38 items-center gap-1 px-2 text-xs cursor-pointer transition-colors whitespace-nowrap"
-        :class="
-          settingsStore.editorSettings.appLayout === 'classic'
-            ? ['h-full border-r border-border/80 dark:border-border/45 bg-background text-foreground font-medium']
-            : ['h-7 rounded-md border text-foreground font-medium', 'border-ring']
-        "
-        :style="
-          settingsStore.editorSettings.appLayout === 'classic' ? { boxShadow: '0 1px 0 0 var(--color-background)' } : {}
-        "
+        class="group flex min-w-38 items-center gap-1 px-2 text-xs cursor-pointer transition-colors whitespace-nowrap h-7 rounded-md border text-foreground font-medium border-ring"
         @click="emit('toggle-driver-store')"
       >
         <span class="shrink-0 text-amber-600 dark:text-amber-400">

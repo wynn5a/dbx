@@ -469,23 +469,6 @@ body.dbx-table-reference-dragging * {
   background: rgb(23 23 25);
   background: oklch(0.205 0.004 285);
 }
-.app-layout-classic .panel-resize-handle {
-  width: 3px;
-}
-.app-layout-classic .panel-resize-handle--right {
-  right: 0;
-  border-right: 1px solid var(--border);
-}
-.app-layout-classic .panel-resize-handle--left {
-  left: 0;
-  border-left: 1px solid var(--border);
-}
-.app-layout-classic .panel-resize-handle:hover,
-.app-layout-classic .panel-resize-handle:active {
-  background: rgb(39 132 213);
-  background: oklch(0.6 0.15 250);
-}
-
 .panel-resize-handle {
   position: absolute;
   top: 0;

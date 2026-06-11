@@ -718,10 +718,7 @@ const messageRenderer = computed(() => {
 
 <template>
   <div class="flex h-full min-h-0 flex-col overflow-hidden">
-    <div
-      class="flex items-center gap-2 border-b px-3 shrink-0"
-      :class="settings.editorSettings.appLayout === 'classic' ? 'h-9' : 'h-10'"
-    >
+    <div class="flex items-center gap-2 border-b px-3 shrink-0 h-10">
       <span class="flex flex-1 self-stretch items-center truncate text-xs font-medium" data-tauri-drag-region>
         {{ chatTitle }}
       </span>

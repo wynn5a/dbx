@@ -250,7 +250,6 @@ export interface EditorSettings {
   wordWrap: boolean;
   confirmDangerousSqlExecution: boolean;
   compactTabTitle: boolean;
-  appLayout: "separated" | "classic";
   pageSize: number;
   redisScanPageSize: number;
   mongoViewMode: "document" | "table";
@@ -317,7 +316,6 @@ export const DEFAULT_EDITOR_SETTINGS: EditorSettings = {
   wordWrap: false,
   confirmDangerousSqlExecution: true,
   compactTabTitle: false,
-  appLayout: "classic",
   pageSize: 100,
   redisScanPageSize: 1000,
   mongoViewMode: "document",
@@ -473,7 +471,6 @@ export function normalizeEditorSettings(settings: Partial<EditorSettings>, exist
     confirmDangerousSqlExecution:
       settings.confirmDangerousSqlExecution ?? DEFAULT_EDITOR_SETTINGS.confirmDangerousSqlExecution,
     compactTabTitle: settings.compactTabTitle ?? DEFAULT_EDITOR_SETTINGS.compactTabTitle,
-    appLayout: settings.appLayout ?? DEFAULT_EDITOR_SETTINGS.appLayout,
     pageSize: normalizeResultPageSize(settings.pageSize),
     redisScanPageSize: settings.redisScanPageSize ?? DEFAULT_EDITOR_SETTINGS.redisScanPageSize,
     mongoViewMode: settings.mongoViewMode === "table" ? "table" : DEFAULT_EDITOR_SETTINGS.mongoViewMode,
@@ -657,7 +654,6 @@ export const useSettingsStore = defineStore("settings", () => {
     if (partial.confirmDangerousSqlExecution !== undefined)
       editorSettings.value.confirmDangerousSqlExecution = partial.confirmDangerousSqlExecution;
     if (partial.compactTabTitle !== undefined) editorSettings.value.compactTabTitle = partial.compactTabTitle;
-    if (partial.appLayout !== undefined) editorSettings.value.appLayout = partial.appLayout;
     if (partial.pageSize !== undefined) editorSettings.value.pageSize = normalizeResultPageSize(partial.pageSize);
     if (partial.redisScanPageSize !== undefined) editorSettings.value.redisScanPageSize = partial.redisScanPageSize;
     if (partial.mongoViewMode !== undefined) editorSettings.value.mongoViewMode = partial.mongoViewMode;

@@ -229,7 +229,6 @@ const { setupTauriListeners, cleanupTauriListeners } = useTauriEvents({
 useVisibilityChange();
 
 const appVersion = ref("");
-const isClassicLayout = computed(() => settingsStore.editorSettings.appLayout === "classic");
 const updateNotificationsEnabled = computed(() => settingsStore.editorSettings.updateNotificationsEnabled);
 const toolbarAgentDriverUpdateCount = computed(() =>
   updateNotificationsEnabled.value ? agentDriverUpdateCount.value : 0,
@@ -1030,18 +1029,11 @@ onUnmounted(() => {
           @open-data-compare="dialogs.showDataCompareDialog.value = true"
         />
 
-        <div
-          :class="
-            isClassicLayout
-              ? 'app-layout-classic flex-1 flex min-h-0'
-              : 'app-panel-gutter flex-1 flex min-h-0 gap-1 p-1'
-          "
-        >
+        <div class="app-panel-gutter flex-1 flex min-h-0 gap-1 p-1">
           <AppSidebar
             v-show="sidebarOpen"
             ref="appSidebarRef"
             :sidebar-width="sidebarWidth"
-            :classic-layout="isClassicLayout"
             @import="dialogs.onImportClick"
             @export="dialogs.onExportClick"
             @start-resize="startSidebarResize"
@@ -1049,8 +1041,7 @@ onUnmounted(() => {
           />
           <div
             v-show="!sidebarOpen"
-            class="flex h-full w-8 shrink-0 items-start justify-center border-r bg-background/80 pt-2"
-            :class="isClassicLayout ? '' : 'rounded-md border border-border/80'"
+            class="flex h-full w-8 shrink-0 items-start justify-center border-r bg-background/80 pt-2 rounded-md border border-border/80"
           >
             <Button
               variant="ghost"
@@ -1063,13 +1054,7 @@ onUnmounted(() => {
             </Button>
           </div>
 
-          <div
-            :class="
-              isClassicLayout
-                ? 'flex-1 min-w-0 overflow-hidden'
-                : 'flex-1 min-w-0 overflow-hidden rounded-md border border-border/80 bg-background'
-            "
-          >
+          <div class="flex-1 min-w-0 overflow-hidden rounded-md border border-border/80 bg-background">
             <div class="h-full flex flex-col min-w-0">
               <AppTabBar
                 :show-driver-store="showDriverStore"
@@ -1187,11 +1172,7 @@ onUnmounted(() => {
 
           <div
             v-if="showAiPanel"
-            :class="
-              isClassicLayout
-                ? 'h-full shrink-0 relative z-30 isolate bg-background'
-                : 'h-full shrink-0 relative z-30 isolate rounded-md border border-border/80 bg-background'
-            "
+            class="h-full shrink-0 relative z-30 isolate rounded-md border border-border/80 bg-background"
             :style="{ width: aiPanelWidth + 'px' }"
           >
             <div class="panel-resize-handle panel-resize-handle--left" @mousedown="startAiPanelResize" />
@@ -1211,11 +1192,7 @@ onUnmounted(() => {
 
           <div
             v-if="showHistory"
-            :class="
-              isClassicLayout
-                ? 'h-full shrink-0 relative z-30 isolate bg-background'
-                : 'h-full shrink-0 relative z-30 isolate rounded-md border border-border/80 bg-background'
-            "
+            class="h-full shrink-0 relative z-30 isolate rounded-md border border-border/80 bg-background"
             :style="{ width: historyWidth + 'px' }"
           >
             <div class="panel-resize-handle panel-resize-handle--left" @mousedown="startHistoryResize" />
