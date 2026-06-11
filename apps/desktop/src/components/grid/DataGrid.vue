@@ -7686,11 +7686,18 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     <td class="px-3 py-2 font-mono text-[11px]" :class="typeColorClass(column.data_type)">
                       {{ column.data_type }}
                     </td>
-                    <td
-                      class="px-3 py-2"
-                      :class="column.is_nullable ? 'text-[var(--ds-text-3)]' : 'text-[var(--ds-text-2)]'"
-                    >
-                      {{ column.is_nullable ? "YES" : "NO" }}
+                    <td class="px-3 py-2">
+                      <span
+                        class="inline-flex h-4 items-center gap-1 rounded-full px-1.5 text-[10px] font-medium leading-none"
+                        :class="
+                          column.is_nullable
+                            ? 'bg-[color-mix(in_srgb,var(--ds-green)_14%,transparent)] text-[var(--ds-green)]'
+                            : 'bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]'
+                        "
+                      >
+                        <span class="h-[5px] w-[5px] rounded-full bg-current" />
+                        {{ column.is_nullable ? "YES" : "NO" }}
+                      </span>
                     </td>
                   </tr>
                 </tbody>
@@ -7727,7 +7734,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     >
                     <span
                       v-if="index.index_type"
-                      class="inline-flex h-4 items-center justify-center rounded font-mono text-[9.5px] font-semibold leading-none tracking-wide px-1.5 bg-[var(--ds-bg-elevated)] border border-[var(--ds-border)] text-[var(--ds-text-3)]"
+                      class="inline-flex h-4 items-center rounded-full px-1.5 text-[10px] font-medium leading-none bg-[color-mix(in_srgb,var(--ds-text-3)_14%,transparent)] text-[var(--ds-text-3)]"
                       >{{ index.index_type }}</span
                     >
                   </div>
