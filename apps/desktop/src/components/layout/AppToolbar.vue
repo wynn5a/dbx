@@ -8,7 +8,7 @@ import {
   Languages,
   Moon,
   Sun,
-  SunMoon,
+  Monitor,
   History,
   Bot,
   ArrowLeftRight,
@@ -64,7 +64,7 @@ const { isMac, isDesktop, showControls, isMaximized, isFullscreen, minimize, tog
 const themeItems = computed(() => [
   { value: "light", label: t("toolbar.themeLight"), icon: Sun },
   { value: "dark", label: t("toolbar.themeDark"), icon: Moon },
-  { value: "system", label: t("toolbar.themeSystem"), icon: SunMoon },
+  { value: "system", label: t("toolbar.themeSystem"), icon: Monitor },
 ]);
 const localeItems = computed(() =>
   LOCALE_OPTIONS.map((option) => ({
@@ -74,7 +74,7 @@ const localeItems = computed(() =>
   })),
 );
 const themeTriggerIcon = computed(() => {
-  if (props.themeMode === "system") return SunMoon;
+  if (props.themeMode === "system") return Monitor;
   return props.isDark ? Moon : Sun;
 });
 
@@ -157,7 +157,7 @@ function onToolbarDblClick(e: MouseEvent) {
       variant="ghost"
       size="sm"
       class="h-8 px-2 text-xs gap-1"
-      :class="{ 'bg-accent': showDriverStore }"
+      :class="{ 'bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]': showDriverStore }"
       @click="emit('open-driver-store')"
     >
       <Package class="h-3.5 w-3.5" />
@@ -175,18 +175,12 @@ function onToolbarDblClick(e: MouseEvent) {
 
     <Tooltip>
       <TooltipTrigger as-child>
-        <Button
-          variant="ghost"
-          size="icon"
-          class="relative h-8 w-8"
-          :disabled="checkingUpdates"
-          @click="emit('check-updates')"
-        >
-          <Loader2 v-if="checkingUpdates" class="h-4 w-4 animate-spin" />
-          <CloudDownload v-else class="h-4 w-4" />
+        <Button variant="ghost" size="icon" class="relative" :disabled="checkingUpdates" @click="emit('check-updates')">
+          <Loader2 v-if="checkingUpdates" class="animate-spin" />
+          <CloudDownload v-else />
           <span
             v-if="hasUpdateAvailable"
-            class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-background"
+            class="absolute right-1 top-1 h-[7px] w-[7px] rounded-full bg-[var(--ds-red)] ring-2 ring-background"
           />
         </Button>
       </TooltipTrigger>
@@ -200,11 +194,10 @@ function onToolbarDblClick(e: MouseEvent) {
         <Button
           variant="ghost"
           size="icon"
-          class="h-8 w-8"
-          :class="{ 'bg-accent': showHistory }"
+          :class="{ 'bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]': showHistory }"
           @click="emit('toggle-history')"
         >
-          <History class="h-4 w-4" />
+          <History />
         </Button>
       </TooltipTrigger>
       <TooltipContent>{{ t("history.title") }}</TooltipContent>
@@ -215,11 +208,10 @@ function onToolbarDblClick(e: MouseEvent) {
         <Button
           variant="ghost"
           size="icon"
-          class="h-8 w-8"
-          :class="{ 'bg-accent': showAiPanel }"
+          :class="{ 'bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]': showAiPanel }"
           @click="emit('toggle-ai')"
         >
-          <Bot class="h-4 w-4" />
+          <Bot />
         </Button>
       </TooltipTrigger>
       <TooltipContent>AI</TooltipContent>
@@ -233,8 +225,8 @@ function onToolbarDblClick(e: MouseEvent) {
             :items="themeItems"
             :aria-label="t('toolbar.theme')"
             :trigger-icon="themeTriggerIcon"
-            trigger-class="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground"
-            trigger-icon-class="h-4 w-4"
+            trigger-class="inline-flex size-7 items-center justify-center rounded-sm text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]"
+            trigger-icon-class="size-[15px]"
             item-icon-class="h-4 w-4"
             :show-trigger-label="false"
             :show-chevron="false"
@@ -255,8 +247,8 @@ function onToolbarDblClick(e: MouseEvent) {
             :items="localeItems"
             :aria-label="t('common.language')"
             :trigger-icon="Languages"
-            trigger-class="inline-flex h-8 w-8 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground"
-            trigger-icon-class="h-4 w-4"
+            trigger-class="inline-flex size-7 items-center justify-center rounded-sm text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]"
+            trigger-icon-class="size-[15px]"
             :show-trigger-label="false"
             :show-chevron="false"
             check-position="none"
@@ -270,8 +262,8 @@ function onToolbarDblClick(e: MouseEvent) {
 
     <Tooltip>
       <TooltipTrigger as-child>
-        <Button variant="ghost" size="icon" class="h-8 w-8" @click="emit('open-settings')">
-          <Settings class="h-4 w-4" />
+        <Button variant="ghost" size="icon" @click="emit('open-settings')">
+          <Settings />
         </Button>
       </TooltipTrigger>
       <TooltipContent>{{ t("settings.title") }}</TooltipContent>

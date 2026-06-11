@@ -313,6 +313,24 @@
     0 0 0 0.5px rgb(255 255 255 / 0.06);
 }
 
+/* Design-system kbd hint (DESIGN-SYSTEM.md "Kbd hint" recipe) */
+.ds-kbd {
+  font-family: var(--ds-mono);
+  font-size: 10.5px;
+  padding: 1.5px 5px;
+  border-radius: 4px;
+  background: var(--ds-bg-elevated);
+  border: 1px solid var(--ds-border);
+  color: var(--ds-text-2);
+  line-height: 1;
+  box-shadow: 0 1px 1px rgb(0 0 0 / 0.08);
+}
+.dark .ds-kbd {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    0 1px 1px rgb(0 0 0 / 0.3);
+}
+
 /* Design-system menu group label (command-palette recipe) */
 .ds-menu-label {
   font-family: var(--ds-mono);

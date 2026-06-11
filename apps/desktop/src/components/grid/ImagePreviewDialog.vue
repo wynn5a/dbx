@@ -157,7 +157,7 @@ watch(
           <Button
             variant="ghost"
             size="icon"
-            class="h-7 w-7 text-white/75 hover:bg-white/10 hover:text-white"
+            class="text-white/75 hover:bg-white/10 hover:text-white"
             :title="t('grid.zoomOut')"
             @click="zoomOut"
           >
@@ -167,7 +167,7 @@ watch(
           <Button
             variant="ghost"
             size="icon"
-            class="h-7 w-7 text-white/75 hover:bg-white/10 hover:text-white"
+            class="text-white/75 hover:bg-white/10 hover:text-white"
             :title="t('grid.zoomIn')"
             @click="zoomIn"
           >
@@ -176,7 +176,7 @@ watch(
           <Button
             variant="ghost"
             size="icon"
-            class="h-7 w-7 text-white/75 hover:bg-white/10 hover:text-white"
+            class="text-white/75 hover:bg-white/10 hover:text-white"
             :title="t('grid.fitImage')"
             @click="fitImage"
           >
@@ -185,7 +185,7 @@ watch(
           <Button
             variant="ghost"
             size="icon"
-            class="h-7 w-7 text-white/75 hover:bg-white/10 hover:text-white"
+            class="text-white/75 hover:bg-white/10 hover:text-white"
             :title="t('grid.openImage')"
             @click="openExternal"
           >
@@ -195,7 +195,7 @@ watch(
         <Button
           variant="ghost"
           size="icon"
-          class="h-8 w-8 text-white/70 hover:bg-white/10 hover:text-white"
+          class="text-white/70 hover:bg-white/10 hover:text-white"
           :title="t('dangerDialog.cancel')"
           @click="close"
         >

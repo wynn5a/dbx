@@ -58,7 +58,7 @@ defineExpose({ focusSearch });
     :style="{ width: sidebarWidth + 'px' }"
   >
     <div class="h-full flex flex-col overflow-hidden">
-      <div class="sidebar-panel-header flex items-center gap-px px-3 border-b" :class="classicLayout ? 'h-9' : 'h-10'">
+      <div class="sidebar-panel-header flex items-center gap-0.5 px-3 border-b" :class="classicLayout ? 'h-9' : 'h-10'">
         <span class="sidebar-section-label flex self-stretch items-center truncate" data-tauri-drag-region>{{
           t("sidebar.connections")
         }}</span>
@@ -71,8 +71,8 @@ defineExpose({ focusSearch });
                 :items="importSourceItems"
                 :aria-label="t('sidebar.import')"
                 :trigger-icon="Download"
-                trigger-class="inline-flex h-6 w-5 items-center justify-center rounded-md outline-none hover:bg-muted hover:text-foreground focus-visible:ring-0"
-                trigger-icon-class="h-4 w-4"
+                trigger-class="inline-flex size-6 items-center justify-center rounded-sm text-[var(--ds-text-3)] outline-none transition-colors duration-[var(--ds-speed)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)] focus-visible:ring-0"
+                trigger-icon-class="size-3.5"
                 content-class="w-44"
                 :show-trigger-label="false"
                 :show-chevron="false"
@@ -87,32 +87,32 @@ defineExpose({ focusSearch });
         </Tooltip>
         <Tooltip>
           <TooltipTrigger as-child>
-            <Button variant="ghost" size="icon" class="h-5 w-5" @click="emit('export')">
-              <Upload class="h-3 w-3" />
+            <Button variant="ghost" size="icon-sm" @click="emit('export')">
+              <Upload />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t("sidebar.export") }}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger as-child>
-            <Button variant="ghost" size="icon" class="h-5 w-5" @click="createNewGroup">
-              <FolderPlus class="h-3 w-3" />
+            <Button variant="ghost" size="icon-sm" @click="createNewGroup">
+              <FolderPlus />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t("connectionGroup.createGroup") }}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger as-child>
-            <Button variant="ghost" size="icon" class="h-5 w-5" @click="refreshTree">
-              <RefreshCw class="h-3 w-3" />
+            <Button variant="ghost" size="icon-sm" @click="refreshTree">
+              <RefreshCw />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t("contextMenu.refreshChildren") }}</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger as-child>
-            <Button variant="ghost" size="icon" class="h-6 w-6" @click="emit('collapse')">
-              <ChevronsLeft class="h-3.5 w-3.5" />
+            <Button variant="ghost" size="icon-sm" @click="emit('collapse')">
+              <ChevronsLeft />
             </Button>
           </TooltipTrigger>
           <TooltipContent>{{ t("sidebar.collapse") }}</TooltipContent>

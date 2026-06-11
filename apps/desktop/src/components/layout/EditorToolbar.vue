@@ -124,8 +124,7 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
         <TooltipTrigger as-child>
           <Button
             :variant="activeTab.isExecuting ? 'destructive' : 'ghost'"
-            size="icon"
-            class="h-6 w-6"
+            size="icon-sm"
             :class="
               activeTab.isExecuting
                 ? ''
@@ -149,8 +148,7 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
         <TooltipTrigger as-child>
           <Button
             :variant="activeTab.isExplaining ? 'destructive' : 'ghost'"
-            size="icon"
-            class="h-6 w-6"
+            size="icon-sm"
             :class="
               activeTab.isExplaining
                 ? ''
@@ -171,8 +169,7 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
       <Button
         v-if="activeConnection?.db_type === 'dameng'"
         variant="ghost"
-        size="icon"
-        class="h-6 w-6"
+        size="icon-sm"
         :class="
           props.explainMode === 'autotrace'
             ? 'text-green-600 bg-green-100 dark:text-green-300 dark:bg-green-900/30'
@@ -187,8 +184,8 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
         <TooltipTrigger as-child>
           <Button
             variant="ghost"
-            size="icon"
-            class="h-6 w-6 text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-200"
+            size="icon-sm"
+            class="text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-200"
             :disabled="activeTab.isExecuting || activeTab.isExplaining || !activeTab.sql.trim()"
             @click="emit('formatSql')"
           >
@@ -201,8 +198,8 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
         <TooltipTrigger as-child>
           <Button
             variant="ghost"
-            size="icon"
-            class="h-6 w-6 text-blue-600 hover:bg-blue-500/10 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
+            size="icon-sm"
+            class="text-blue-600 hover:bg-blue-500/10 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
             :disabled="!activeTab.sql.trim()"
             @click="emit('saveSql')"
           >
@@ -215,8 +212,8 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
         <TooltipTrigger as-child>
           <Button
             variant="ghost"
-            size="icon"
-            class="h-6 w-6 text-sky-600 hover:bg-sky-500/10 hover:text-sky-700 dark:text-sky-300 dark:hover:text-sky-200"
+            size="icon-sm"
+            class="text-sky-600 hover:bg-sky-500/10 hover:text-sky-700 dark:text-sky-300 dark:hover:text-sky-200"
             @click="emit('openSql')"
           >
             <FolderOpen class="h-3.5 w-3.5" />

@@ -456,14 +456,14 @@ defineExpose({ focusSearch, createNewGroup });
     <div class="sticky top-0 z-10 bg-background px-2 py-1">
       <div class="relative flex items-center gap-1">
         <div class="relative flex-1">
-          <Search class="sidebar-search-icon absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3" />
+          <Search class="sidebar-search-icon absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5" />
           <input
             ref="searchInputRef"
             v-model="searchQuery"
             autocapitalize="off"
             autocorrect="off"
             spellcheck="false"
-            class="sidebar-search-input w-full h-6 pl-7 pr-6 text-xs"
+            class="sidebar-search-input w-full h-7 pl-8 pr-6 text-[12.5px]"
             :placeholder="t('grid.search')"
             @keydown="onSearchKeydown"
           />
@@ -476,11 +476,11 @@ defineExpose({ focusSearch, createNewGroup });
           </button>
         </div>
         <button
-          class="sidebar-tool-button shrink-0 h-6 w-6 flex items-center justify-center"
+          class="sidebar-tool-button shrink-0 size-7 flex items-center justify-center"
           :title="t('sidebar.locateActiveTab')"
           @click="locateActiveTabInSidebar"
         >
-          <Crosshair class="h-3.5 w-3.5" />
+          <Crosshair class="size-3.5" />
         </button>
         <LightDropdown
           v-if="searchScopeOptions.length > 0"
@@ -493,10 +493,10 @@ defineExpose({ focusSearch, createNewGroup });
           :trigger-icon="ListFilter"
           :trigger-class="
             [
-              'shrink-0 h-6 w-6 flex items-center justify-center rounded-sm border border-[var(--ds-border)] hover:bg-[var(--ds-bg-hover)] hover:border-[var(--ds-border-strong)]',
+              'shrink-0 size-7 flex items-center justify-center rounded-sm transition-colors duration-[var(--ds-speed)]',
               hasSearchScopeFilter
-                ? 'text-[var(--ds-accent)] bg-[var(--ds-accent-soft)] border-[var(--ds-accent-line)]'
-                : 'text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]',
+                ? 'text-[var(--ds-accent)] bg-[var(--ds-accent-soft)]'
+                : 'text-[var(--ds-text-3)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]',
             ].join(' ')
           "
           trigger-icon-class="h-3.5 w-3.5"
@@ -604,18 +604,16 @@ defineExpose({ focusSearch, createNewGroup });
   color: var(--ds-text-1);
 }
 
+/* DS icon button: transparent until hover, then --bg-active fill + text-3 → text-1 */
 .sidebar-tool-button {
-  border: 1px solid var(--ds-border);
   border-radius: 6px;
   color: var(--ds-text-3);
   transition:
     background-color var(--ds-speed) var(--ds-ease),
-    border-color var(--ds-speed) var(--ds-ease),
     color var(--ds-speed) var(--ds-ease);
 }
 .sidebar-tool-button:hover {
-  background: var(--ds-bg-hover);
-  border-color: var(--ds-border-strong);
+  background: var(--ds-bg-active);
   color: var(--ds-text-1);
 }
 

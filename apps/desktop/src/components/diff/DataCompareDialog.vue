@@ -1091,7 +1091,7 @@ watch(
           </div>
 
           <div class="flex items-center pt-6">
-            <Button variant="ghost" size="icon" class="h-7 w-7" :title="t('diff.swap')" @click="swapSourceTarget">
+            <Button variant="ghost" size="icon" :title="t('diff.swap')" @click="swapSourceTarget">
               <ArrowLeftRight class="w-3.5 h-3.5" />
             </Button>
           </div>

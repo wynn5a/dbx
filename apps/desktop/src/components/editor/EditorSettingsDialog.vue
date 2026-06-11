@@ -1990,7 +1990,7 @@ watch(
                         type="button"
                         variant="ghost"
                         size="icon"
-                        class="h-7 w-7 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                        class="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
                         :aria-label="t('settings.shortcutPressShortcut')"
                         @click="focusShortcutInput(definition.id)"
                       >
@@ -2011,7 +2011,7 @@ watch(
                         type="button"
                         variant="ghost"
                         size="icon"
-                        class="h-7 w-7 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                        class="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
                         :aria-label="t('settings.reset')"
                         @click="resetShortcut(definition.id)"
                       >
@@ -2489,7 +2489,7 @@ watch(
                         type="button"
                         variant="outline"
                         size="icon"
-                        class="absolute right-2 top-2 h-7 w-7"
+                        class="absolute right-2 top-2"
                         :title="t('common.copy')"
                         @click="copyMcpText('claude-config', mcpClaudeRecommendedConfig)"
                       >
@@ -2512,7 +2512,7 @@ watch(
                           type="button"
                           variant="outline"
                           size="icon"
-                          class="absolute right-2 top-2 h-7 w-7"
+                          class="absolute right-2 top-2"
                           :title="t('common.copy')"
                           @click="copyMcpText('codex-config', mcpCodexRecommendedConfig)"
                         >

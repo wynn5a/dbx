@@ -733,8 +733,8 @@ function resetTableSearchSplitWidth() {
       <div class="flex items-center border rounded-md overflow-hidden mr-2">
         <Button
           variant="ghost"
-          size="icon"
-          class="h-5 w-5 rounded-none"
+          size="icon-xs"
+          class="rounded-none"
           :class="{ 'bg-accent': viewMode === 'document' }"
           :title="t('mongo.documentView')"
           @click="viewMode = 'document'"
@@ -743,8 +743,8 @@ function resetTableSearchSplitWidth() {
         </Button>
         <Button
           variant="ghost"
-          size="icon"
-          class="h-5 w-5 rounded-none"
+          size="icon-xs"
+          class="rounded-none"
           :class="{ 'bg-accent': viewMode === 'table' }"
           :title="t('mongo.tableView')"
           @click="viewMode = 'table'"
@@ -755,25 +755,19 @@ function resetTableSearchSplitWidth() {
 
       <span class="shrink-0 ml-1">{{ t("mongo.documents", { count: total }) }}</span>
 
-      <Button v-if="viewMode === 'document'" variant="ghost" size="icon" class="h-5 w-5" @click="startNew"
+      <Button v-if="viewMode === 'document'" variant="ghost" size="icon-xs" @click="startNew"
         ><Plus class="h-3 w-3"
       /></Button>
-      <Button v-if="viewMode === 'document'" variant="ghost" size="icon" class="h-5 w-5" @click="load"
+      <Button v-if="viewMode === 'document'" variant="ghost" size="icon-xs" @click="load"
         ><RefreshCw class="h-3 w-3" :class="{ 'animate-spin': loading }"
       /></Button>
 
       <div v-if="viewMode === 'document'" class="flex items-center gap-1 ml-1">
-        <Button variant="ghost" size="icon" class="h-5 w-5" :disabled="page <= 0" @click="prevPage">
+        <Button variant="ghost" size="icon-xs" :disabled="page <= 0" @click="prevPage">
           <ChevronLeft class="h-3 w-3" />
         </Button>
         <span>{{ page + 1 }} / {{ Math.max(1, Math.ceil(total / pageSize)) }}</span>
-        <Button
-          variant="ghost"
-          size="icon"
-          class="h-5 w-5"
-          :disabled="(page + 1) * pageSize >= total"
-          @click="nextPage"
-        >
+        <Button variant="ghost" size="icon-xs" :disabled="(page + 1) * pageSize >= total" @click="nextPage">
           <ChevronRight class="h-3 w-3" />
         </Button>
       </div>
@@ -1015,8 +1009,8 @@ function resetTableSearchSplitWidth() {
                       </span>
                       <Button
                         variant="ghost"
-                        size="icon"
-                        class="h-6 w-6 text-muted-foreground hover:text-destructive"
+                        size="icon-sm"
+                        class="text-muted-foreground hover:text-destructive"
                         :title="t('grid.clearFilter')"
                         @click="clearLocalFilter(summary.columnIndex)"
                       >
@@ -1105,7 +1099,7 @@ function resetTableSearchSplitWidth() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        class="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                        class="shrink-0 text-muted-foreground hover:text-destructive"
                         :disabled="mongoFilterRules.length === 1"
                         @click="removeMongoFilterRule(rule.id)"
                       >
@@ -1217,8 +1211,8 @@ function resetTableSearchSplitWidth() {
               <span class="truncate flex-1">{{ docPreview(doc) }}</span>
               <Button
                 variant="ghost"
-                size="icon"
-                class="h-5 w-5 opacity-0 group-hover:opacity-100 text-destructive shrink-0"
+                size="icon-xs"
+                class="opacity-0 group-hover:opacity-100 text-destructive shrink-0"
                 @click.stop="requestDeleteDoc(idx)"
               >
                 <Trash2 class="w-3 h-3" />

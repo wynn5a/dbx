@@ -762,14 +762,14 @@ defineExpose({ focusSearch });
               <Asterisk class="h-3 w-3 mr-1" />
               {{ t("redis.fuzzyMatch") }}
             </Button>
-            <Button variant="ghost" size="icon" class="h-6 w-6 shrink-0" @click="loadKeys">
+            <Button variant="ghost" size="icon-sm" class="shrink-0" @click="loadKeys">
               <Loader2 v-if="loading" class="h-3 w-3 animate-spin" />
               <RefreshCw v-else class="h-3 w-3" />
             </Button>
             <Button
               variant="ghost"
-              size="icon"
-              class="h-6 w-6 shrink-0"
+              size="icon-sm"
+              class="shrink-0"
               :title="t('redis.createKey')"
               @click="openCreateKeyDialog"
             >
@@ -863,8 +863,8 @@ defineExpose({ focusSearch });
                   <Button
                     v-if="row.node.kind === 'group'"
                     variant="ghost"
-                    size="icon"
-                    class="h-5 w-5 shrink-0 text-destructive opacity-0 group-hover:opacity-100"
+                    size="icon-xs"
+                    class="shrink-0 text-destructive opacity-0 group-hover:opacity-100"
                     :title="t('redis.deleteGroup')"
                     @click="requestGroupDelete(row.node, $event)"
                   >

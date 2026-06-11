@@ -28,12 +28,21 @@ export const buttonVariants = cva(
         xs: "h-6 gap-1 px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*=size-])]:size-3",
         sm: "h-7 gap-1 px-2.5 text-[12.5px] in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*=size-])]:size-3.5",
         lg: "h-9 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        icon: "size-8",
-        "icon-xs": "size-6 in-data-[slot=button-group]:rounded-lg [&_svg:not([class*=size-])]:size-3",
-        "icon-sm": "size-7 in-data-[slot=button-group]:rounded-lg",
+        // DS icon button: 28×28, 6px radius, 15px icon (icons 11–17px range)
+        icon: "size-7 [&_svg:not([class*=size-])]:size-[15px]",
+        "icon-xs": "size-5 in-data-[slot=button-group]:rounded-lg [&_svg:not([class*=size-])]:size-3",
+        "icon-sm": "size-6 in-data-[slot=button-group]:rounded-lg [&_svg:not([class*=size-])]:size-3.5",
         "icon-lg": "size-9",
       },
     },
+    compoundVariants: [
+      // DS icon button: transparent, idle --text-3 resolving to --text-1 on hover
+      {
+        variant: "ghost",
+        size: ["icon", "icon-xs", "icon-sm", "icon-lg"],
+        class: "text-[var(--ds-text-3)]",
+      },
+    ],
     defaultVariants: {
       variant: "default",
       size: "default",

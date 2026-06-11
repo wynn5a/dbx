@@ -2081,8 +2081,8 @@ function openExternalUrl(url: string) {
                       <TooltipTrigger as-child>
                         <Button
                           variant="outline"
-                          size="icon"
-                          class="h-9 w-9 shrink-0"
+                          size="icon-lg"
+                          class="shrink-0"
                           :disabled="!connectionUrlInput.trim()"
                           :aria-label="t('connection.parseConnectionUrl')"
                           @click="applyConnectionUrl"
@@ -2292,8 +2292,8 @@ function openExternalUrl(url: string) {
                             <Button
                               type="button"
                               variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
+                              size="icon-lg"
+                              class="shrink-0"
                               @click="browseJdbcDriverPaths"
                             >
                               <FolderOpen class="h-4 w-4" />
@@ -2329,7 +2329,7 @@ function openExternalUrl(url: string) {
                         <Input v-model="form.host" class="flex-1" :placeholder="filePathPlaceholder" />
                         <Tooltip v-if="isDesktop">
                           <TooltipTrigger as-child>
-                            <Button variant="outline" size="icon" class="h-9 w-9 shrink-0" @click="browseDbFilePath">
+                            <Button variant="outline" size="icon-lg" class="shrink-0" @click="browseDbFilePath">
                               <FolderOpen class="h-4 w-4" />
                             </Button>
                           </TooltipTrigger>
@@ -2337,12 +2337,7 @@ function openExternalUrl(url: string) {
                         </Tooltip>
                         <Tooltip v-if="isDesktop && form.db_type === 'duckdb'">
                           <TooltipTrigger as-child>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
-                              @click="createDuckDbFilePath"
-                            >
+                            <Button variant="outline" size="icon-lg" class="shrink-0" @click="createDuckDbFilePath">
                               <FilePlus2 class="h-4 w-4" />
                             </Button>
                           </TooltipTrigger>
@@ -2368,8 +2363,8 @@ function openExternalUrl(url: string) {
                           <TooltipTrigger as-child>
                             <Button
                               variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
+                              size="icon-lg"
+                              class="shrink-0"
                               @click="browseSqliteExtensionPath"
                             >
                               <FolderOpen class="h-4 w-4" />
@@ -2771,12 +2766,7 @@ function openExternalUrl(url: string) {
                         />
                         <Tooltip v-if="isDesktop">
                           <TooltipTrigger as-child>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
-                              @click="browseEtcdTlsFile('ca')"
-                            >
+                            <Button variant="outline" size="icon-lg" class="shrink-0" @click="browseEtcdTlsFile('ca')">
                               <FolderOpen class="h-4 w-4" />
                             </Button>
                           </TooltipTrigger>
@@ -2804,8 +2794,8 @@ function openExternalUrl(url: string) {
                           <TooltipTrigger as-child>
                             <Button
                               variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
+                              size="icon-lg"
+                              class="shrink-0"
                               @click="browseEtcdTlsFile('cert')"
                             >
                               <FolderOpen class="h-4 w-4" />
@@ -2822,12 +2812,7 @@ function openExternalUrl(url: string) {
                         />
                         <Tooltip v-if="isDesktop">
                           <TooltipTrigger as-child>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
-                              @click="browseEtcdTlsFile('key')"
-                            >
+                            <Button variant="outline" size="icon-lg" class="shrink-0" @click="browseEtcdTlsFile('key')">
                               <FolderOpen class="h-4 w-4" />
                             </Button>
                           </TooltipTrigger>
@@ -2879,8 +2864,8 @@ function openExternalUrl(url: string) {
                           <TooltipTrigger as-child>
                             <Button
                               variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
+                              size="icon-lg"
+                              class="shrink-0"
                               :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
                               @click="browseCaCertPath"
                             >
@@ -2915,8 +2900,8 @@ function openExternalUrl(url: string) {
                           <TooltipTrigger as-child>
                             <Button
                               variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
+                              size="icon-lg"
+                              class="shrink-0"
                               :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
                               @click="browseMysqlTlsFile('cert')"
                             >
@@ -2937,8 +2922,8 @@ function openExternalUrl(url: string) {
                           <TooltipTrigger as-child>
                             <Button
                               variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
+                              size="icon-lg"
+                              class="shrink-0"
                               :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
                               @click="browseMysqlTlsFile('key')"
                             >
@@ -2991,8 +2976,8 @@ function openExternalUrl(url: string) {
                           <TooltipTrigger as-child>
                             <Button
                               variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
+                              size="icon-lg"
+                              class="shrink-0"
                               :disabled="postgresTlsMode === 'disable'"
                               @click="browsePostgresTlsFile('root')"
                             >
@@ -3027,8 +3012,8 @@ function openExternalUrl(url: string) {
                           <TooltipTrigger as-child>
                             <Button
                               variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
+                              size="icon-lg"
+                              class="shrink-0"
                               :disabled="postgresTlsMode === 'disable'"
                               @click="browsePostgresTlsFile('cert')"
                             >
@@ -3049,8 +3034,8 @@ function openExternalUrl(url: string) {
                           <TooltipTrigger as-child>
                             <Button
                               variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
+                              size="icon-lg"
+                              class="shrink-0"
                               :disabled="postgresTlsMode === 'disable'"
                               @click="browsePostgresTlsFile('key')"
                             >
@@ -3080,8 +3065,8 @@ function openExternalUrl(url: string) {
                       <TooltipTrigger as-child>
                         <Button
                           variant="outline"
-                          size="icon"
-                          class="h-9 w-9 shrink-0"
+                          size="icon-lg"
+                          class="shrink-0"
                           :disabled="!form.ssl"
                           @click="browseCaCertPath"
                         >
@@ -3176,7 +3161,6 @@ function openExternalUrl(url: string) {
                             <Button
                               variant="ghost"
                               size="icon"
-                              class="h-7 w-7"
                               :disabled="index === 0"
                               @click.stop="moveTransportLayer(hop.id, -1)"
                             >
@@ -3190,7 +3174,6 @@ function openExternalUrl(url: string) {
                             <Button
                               variant="ghost"
                               size="icon"
-                              class="h-7 w-7"
                               :disabled="index === transportLayers.length - 1"
                               @click.stop="moveTransportLayer(hop.id, 1)"
                             >
@@ -3308,8 +3291,8 @@ function openExternalUrl(url: string) {
                           <TooltipTrigger as-child>
                             <Button
                               variant="outline"
-                              size="icon"
-                              class="h-9 w-9 shrink-0"
+                              size="icon-lg"
+                              class="shrink-0"
                               :disabled="selectedSshLayer.enabled === false"
                               @click="browseSshKeyPath(selectedSshLayer)"
                             >
@@ -3438,7 +3421,7 @@ function openExternalUrl(url: string) {
               <Button
                 variant="ghost"
                 size="icon-xs"
-                class="h-5 w-5 shrink-0"
+                class="shrink-0"
                 :title="t('connection.copyTestResult')"
                 :aria-label="t('connection.copyTestResult')"
                 @click="copyTestResult"

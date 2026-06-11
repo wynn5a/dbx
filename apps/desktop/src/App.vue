@@ -1055,7 +1055,6 @@ onUnmounted(() => {
             <Button
               variant="ghost"
               size="icon"
-              class="h-7 w-7"
               :title="t('sidebar.expand')"
               :aria-label="t('sidebar.expand')"
               @click="setSidebarOpen(true)"

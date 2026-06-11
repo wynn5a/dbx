@@ -769,21 +769,17 @@ onBeforeUnmount(() => {
           <span class="dbx-editor-font-family min-w-0 flex-1 truncate text-sm font-semibold">{{
             data.key_display
           }}</span>
-          <Button variant="ghost" size="icon" class="h-7 w-7 shrink-0" @click="load"
-            ><RefreshCw class="h-3.5 w-3.5"
-          /></Button>
-          <Button variant="ghost" size="icon" class="h-7 w-7 shrink-0" @click="copyValue"
-            ><Copy class="h-3.5 w-3.5"
-          /></Button>
+          <Button variant="ghost" size="icon" class="shrink-0" @click="load"><RefreshCw class="h-3.5 w-3.5" /></Button>
+          <Button variant="ghost" size="icon" class="shrink-0" @click="copyValue"><Copy class="h-3.5 w-3.5" /></Button>
           <Button
             variant="ghost"
             size="icon"
-            class="h-7 w-7 shrink-0"
+            class="shrink-0"
             :title="t('redis.copyInsertStatement')"
             @click="copyInsertStatement"
             ><Terminal class="h-3.5 w-3.5"
           /></Button>
-          <Button variant="ghost" size="icon" class="h-7 w-7 shrink-0 text-destructive" @click="requestDeleteKey"
+          <Button variant="ghost" size="icon" class="shrink-0 text-destructive" @click="requestDeleteKey"
             ><Trash2 class="h-3.5 w-3.5"
           /></Button>
         </div>
@@ -818,7 +814,7 @@ onBeforeUnmount(() => {
               @keydown.enter="saveTtl"
               @keydown.escape="cancelEditTtl"
             />
-            <Button variant="ghost" size="icon" class="h-6 w-6" @click="saveTtl"><Save class="h-3 w-3" /></Button>
+            <Button variant="ghost" size="icon-sm" @click="saveTtl"><Save class="h-3 w-3" /></Button>
           </div>
         </div>
       </div>
@@ -932,24 +928,24 @@ onBeforeUnmount(() => {
               <div class="flex items-center justify-center gap-1">
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5 opacity-0 group-hover:opacity-100"
+                  size="icon-xs"
+                  class="opacity-0 group-hover:opacity-100"
                   :title="t('redis.viewMember')"
                   @click.stop="viewMember(`#${row.index}`, row.value, { kind: 'list', index: row.index })"
                   ><Eye class="w-3 h-3"
                 /></Button>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5 opacity-0 group-hover:opacity-100"
+                  size="icon-xs"
+                  class="opacity-0 group-hover:opacity-100"
                   :title="t('redis.copyMember')"
                   @click.stop="copyMember(row.value)"
                   ><Copy class="w-3 h-3"
                 /></Button>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5 opacity-0 group-hover:opacity-100 text-destructive"
+                  size="icon-xs"
+                  class="opacity-0 group-hover:opacity-100 text-destructive"
                   @click.stop="requestListRemove(row.index)"
                   ><Trash2 class="w-3 h-3"
                 /></Button>
@@ -1003,24 +999,24 @@ onBeforeUnmount(() => {
               <div class="flex items-center justify-center gap-1">
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5 opacity-0 group-hover:opacity-100"
+                  size="icon-xs"
+                  class="opacity-0 group-hover:opacity-100"
                   :title="t('redis.viewMember')"
                   @click.stop="viewMember(t('redis.member'), row.value, { kind: 'set', member: String(row.value) })"
                   ><Eye class="w-3 h-3"
                 /></Button>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5 opacity-0 group-hover:opacity-100"
+                  size="icon-xs"
+                  class="opacity-0 group-hover:opacity-100"
                   :title="t('redis.copyMember')"
                   @click.stop="copyMember(row.value)"
                   ><Copy class="w-3 h-3"
                 /></Button>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5 opacity-0 group-hover:opacity-100 text-destructive"
+                  size="icon-xs"
+                  class="opacity-0 group-hover:opacity-100 text-destructive"
                   @click.stop="requestSetRemove(String(row.value))"
                   ><Trash2 class="w-3 h-3"
                 /></Button>
@@ -1085,8 +1081,8 @@ onBeforeUnmount(() => {
               <div class="flex items-center justify-center gap-1">
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5 opacity-0 group-hover:opacity-100"
+                  size="icon-xs"
+                  class="opacity-0 group-hover:opacity-100"
                   :title="t('redis.viewMember')"
                   @click.stop="
                     viewMember(String(row.value.field), row.value.value, {
@@ -1098,16 +1094,16 @@ onBeforeUnmount(() => {
                 /></Button>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5 opacity-0 group-hover:opacity-100"
+                  size="icon-xs"
+                  class="opacity-0 group-hover:opacity-100"
                   :title="t('redis.copyMember')"
                   @click.stop="copyMember(row.value.value)"
                   ><Copy class="w-3 h-3"
                 /></Button>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5 opacity-0 group-hover:opacity-100 text-destructive"
+                  size="icon-xs"
+                  class="opacity-0 group-hover:opacity-100 text-destructive"
                   @click.stop="requestHashDel(String(row.value.field))"
                   ><Trash2 class="w-3 h-3"
                 /></Button>
@@ -1183,8 +1179,8 @@ onBeforeUnmount(() => {
               <div class="flex items-center justify-center gap-1">
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5 opacity-0 group-hover:opacity-100"
+                  size="icon-xs"
+                  class="opacity-0 group-hover:opacity-100"
                   :title="t('redis.viewMember')"
                   @click.stop="
                     viewMember(String(row.value.score), row.value.member, {
@@ -1197,16 +1193,16 @@ onBeforeUnmount(() => {
                 /></Button>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5 opacity-0 group-hover:opacity-100"
+                  size="icon-xs"
+                  class="opacity-0 group-hover:opacity-100"
                   :title="t('redis.copyMember')"
                   @click.stop="copyMember(row.value.member)"
                   ><Copy class="w-3 h-3"
                 /></Button>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5 opacity-0 group-hover:opacity-100 text-destructive"
+                  size="icon-xs"
+                  class="opacity-0 group-hover:opacity-100 text-destructive"
                   @click.stop="requestZsetRemove(String(row.value.member))"
                   ><Trash2 class="w-3 h-3"
                 /></Button>
@@ -1257,16 +1253,16 @@ onBeforeUnmount(() => {
                   <span class="flex justify-end gap-1">
                     <Button
                       variant="ghost"
-                      size="icon"
-                      class="h-5 w-5 opacity-0 group-hover:opacity-100"
+                      size="icon-xs"
+                      class="opacity-0 group-hover:opacity-100"
                       :title="t('redis.viewMember')"
                       @click.stop="viewMember(String(field), val, { kind: 'stream', field: String(field) })"
                       ><Eye class="w-3 h-3"
                     /></Button>
                     <Button
                       variant="ghost"
-                      size="icon"
-                      class="h-5 w-5 opacity-0 group-hover:opacity-100"
+                      size="icon-xs"
+                      class="opacity-0 group-hover:opacity-100"
                       :title="t('redis.copyMember')"
                       @click.stop="copyMember(val)"
                       ><Copy class="w-3 h-3"

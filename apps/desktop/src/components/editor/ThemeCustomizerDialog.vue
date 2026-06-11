@@ -470,13 +470,13 @@ function handleImport() {
                 <div v-else class="truncate">{{ theme.name }}</div>
               </div>
               <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button variant="ghost" size="icon" class="h-5 w-5" @click.stop="startRename(theme)">
+                <Button variant="ghost" size="icon-xs" @click.stop="startRename(theme)">
                   <Pencil class="h-3 w-3" />
                 </Button>
-                <Button variant="ghost" size="icon" class="h-5 w-5" @click.stop="handleDuplicateTheme(theme)">
+                <Button variant="ghost" size="icon-xs" @click.stop="handleDuplicateTheme(theme)">
                   <Copy class="h-3 w-3" />
                 </Button>
-                <Button variant="ghost" size="icon" class="h-5 w-5" @click.stop="handleDeleteTheme(theme.id)">
+                <Button variant="ghost" size="icon-xs" @click.stop="handleDeleteTheme(theme.id)">
                   <Trash2 class="h-3 w-3" />
                 </Button>
               </div>

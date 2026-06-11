@@ -202,13 +202,22 @@ function adjustSubPosition() {
   });
 }
 
+// DS command-palette item recipe: 13.5px, hover/active = accent-soft fill +
+// text-1 + accent icon; destructive = --ds-red with 14%-tint fill.
 function itemButtonClass(variant?: "default" | "destructive") {
   return [
-    "w-full gap-2 rounded-md px-2 py-1 text-[13px] leading-4 outline-hidden select-none text-left cursor-default flex items-center disabled:pointer-events-none disabled:opacity-50 transition-colors",
+    "group/ctx w-full gap-2 rounded-sm px-2 py-1.5 text-[13.5px] leading-4 outline-hidden select-none text-left cursor-default flex items-center disabled:pointer-events-none disabled:opacity-50 transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)]",
     variant === "destructive"
-      ? "text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
-      : "hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground",
+      ? "text-[var(--ds-red)] hover:bg-[color-mix(in_srgb,var(--ds-red)_14%,transparent)] focus-visible:bg-[color-mix(in_srgb,var(--ds-red)_14%,transparent)]"
+      : "text-[var(--ds-text-2)] hover:bg-[var(--ds-accent-soft)] hover:text-[var(--ds-text-1)] focus-visible:bg-[var(--ds-accent-soft)] focus-visible:text-[var(--ds-text-1)]",
   ];
+}
+
+function itemIconWrapClass(item: ContextMenuItem, active = false) {
+  if (item.variant === "destructive") return "";
+  return active
+    ? "text-[var(--ds-accent)]"
+    : "text-[var(--ds-text-3)] group-hover/ctx:text-[var(--ds-accent)] group-focus-visible/ctx:text-[var(--ds-accent)]";
 }
 
 function shortcutKeyLabel(part: string): string {
@@ -244,37 +253,37 @@ onBeforeUnmount(() => {
       v-if="show"
       ref="menuRef"
       :style="{ position: 'fixed', left: x + 'px', top: y + 'px', zIndex: 9999 }"
-      class="bg-popover text-popover-foreground min-w-40 rounded-xl p-1 overflow-x-hidden overflow-y-auto ring-1 ring-foreground/10 shadow-lg"
+      class="ds-popover min-w-40 p-1 overflow-x-hidden overflow-y-auto"
     >
       <template v-for="(item, index) in items" :key="index">
         <template v-if="item.visible !== false">
           <div v-if="item.separator" class="-mx-1 my-1 flex items-center px-1">
-            <div class="h-px flex-1 bg-border/70" />
+            <div class="h-px flex-1 bg-[var(--ds-border)]" />
           </div>
           <button
             v-else
             :disabled="item.disabled"
             :class="[
               ...itemButtonClass(item.variant),
-              activeSubIndex === index ? 'bg-accent text-accent-foreground' : '',
+              activeSubIndex === index ? 'bg-[var(--ds-accent-soft)] text-[var(--ds-text-1)]' : '',
             ]"
             @click="handleItemClick(item)"
             @mouseenter="(e) => onItemMouseEnter(index, e)"
             @mouseleave="onItemMouseLeave"
           >
-            <span class="flex size-4 shrink-0 items-center justify-center">
+            <span
+              class="flex size-4 shrink-0 items-center justify-center transition-colors duration-[var(--ds-speed)]"
+              :class="itemIconWrapClass(item, activeSubIndex === index)"
+            >
               <component :is="item.icon" v-if="item.icon" :class="['size-4', item.iconClass]" />
             </span>
             <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
-            <span v-if="item.shortcut" class="ml-8 inline-flex shrink-0 items-center gap-1 text-muted-foreground">
-              <kbd
-                v-for="key in shortcutKeys(item.shortcut)"
-                :key="key"
-                class="min-w-4 rounded border border-border/70 bg-muted/60 px-1 py-0.5 text-center font-mono text-[10px] leading-none text-muted-foreground shadow-xs"
-                >{{ key }}</kbd
-              >
+            <span v-if="item.shortcut" class="ml-8 inline-flex shrink-0 items-center gap-1">
+              <kbd v-for="key in shortcutKeys(item.shortcut)" :key="key" class="ds-kbd min-w-4 text-center">{{
+                key
+              }}</kbd>
             </span>
-            <ChevronRight v-if="item.children?.length" class="ml-auto size-4 text-muted-foreground/80" />
+            <ChevronRight v-if="item.children?.length" class="ml-auto size-4 text-[var(--ds-text-3)]" />
           </button>
         </template>
       </template>
@@ -286,14 +295,14 @@ onBeforeUnmount(() => {
       v-if="show && activeSubIndex !== null && items[activeSubIndex]?.children?.length"
       ref="subRef"
       :style="{ position: 'fixed', left: subX + 'px', top: subY + 'px', zIndex: 10000 }"
-      class="bg-popover text-popover-foreground min-w-40 rounded-xl p-1 overflow-x-hidden overflow-y-auto ring-1 ring-foreground/10 shadow-lg"
+      class="ds-popover min-w-40 p-1 overflow-x-hidden overflow-y-auto"
       @mouseenter="onSubMouseEnter"
       @mouseleave="onSubMouseLeave"
     >
       <template v-for="(child, ci) in items[activeSubIndex]!.children!" :key="ci">
         <template v-if="child.visible !== false">
           <div v-if="child.separator" class="-mx-1 my-1 flex items-center px-1">
-            <div class="h-px flex-1 bg-border/70" />
+            <div class="h-px flex-1 bg-[var(--ds-border)]" />
           </div>
           <button
             v-else
@@ -301,17 +310,17 @@ onBeforeUnmount(() => {
             :class="itemButtonClass(child.variant)"
             @click="handleSubItemClick(child)"
           >
-            <span class="flex size-4 shrink-0 items-center justify-center">
+            <span
+              class="flex size-4 shrink-0 items-center justify-center transition-colors duration-[var(--ds-speed)]"
+              :class="itemIconWrapClass(child)"
+            >
               <component :is="child.icon" v-if="child.icon" :class="['size-4', child.iconClass]" />
             </span>
             <span class="min-w-0 flex-1 truncate">{{ child.label }}</span>
-            <span v-if="child.shortcut" class="ml-8 inline-flex shrink-0 items-center gap-1 text-muted-foreground">
-              <kbd
-                v-for="key in shortcutKeys(child.shortcut)"
-                :key="key"
-                class="min-w-4 rounded border border-border/70 bg-muted/60 px-1 py-0.5 text-center font-mono text-[10px] leading-none text-muted-foreground shadow-xs"
-                >{{ key }}</kbd
-              >
+            <span v-if="child.shortcut" class="ml-8 inline-flex shrink-0 items-center gap-1">
+              <kbd v-for="key in shortcutKeys(child.shortcut)" :key="key" class="ds-kbd min-w-4 text-center">{{
+                key
+              }}</kbd>
             </span>
           </button>
         </template>

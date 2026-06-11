@@ -82,11 +82,11 @@ function toggleShowAll() {
       <Button
         variant="ghost"
         size="icon"
-        class="relative h-8 w-8"
+        class="relative"
         :title="t('exportProgress.tooltip')"
-        :class="{ 'bg-accent text-primary': hasActive }"
+        :class="{ 'bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]': hasActive }"
       >
-        <FileDown class="h-4 w-4" />
+        <FileDown />
         <span
           v-if="hasActive"
           class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium leading-none text-primary-foreground"

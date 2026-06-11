@@ -6103,8 +6103,8 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                             </span>
                             <Button
                               variant="ghost"
-                              size="icon"
-                              class="h-6 w-6 text-muted-foreground hover:text-destructive"
+                              size="icon-sm"
+                              class="text-muted-foreground hover:text-destructive"
                               :title="t('grid.clearFilter')"
                               @click="clearLocalFilter(summary.columnIndex)"
                             >
@@ -6197,7 +6197,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                             <Button
                               variant="ghost"
                               size="icon"
-                              class="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                              class="shrink-0 text-muted-foreground hover:text-destructive"
                               :disabled="structuredFilterRules.length === 1"
                               @click="removeStructuredFilterRule(rule.id)"
                             >
@@ -6555,25 +6555,18 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                   {{ multiRowTranspose ? t("grid.transposeMultiRow") : t("grid.transposeSingleRow") }}
                 </span>
                 <span class="flex-1" />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-5 w-5"
-                  :disabled="transposeRowIndex === 0"
-                  @click="transposeNav(-1)"
-                >
+                <Button variant="ghost" size="icon-xs" :disabled="transposeRowIndex === 0" @click="transposeNav(-1)">
                   <ChevronLeft class="w-3 h-3" />
                 </Button>
                 <Button
                   variant="ghost"
-                  size="icon"
-                  class="h-5 w-5"
+                  size="icon-xs"
                   :disabled="transposeRowIndex === displayItems.length - 1"
                   @click="transposeNav(1)"
                 >
                   <ChevronRight class="w-3 h-3" />
                 </Button>
-                <Button variant="ghost" size="icon" class="h-5 w-5" @click="closeTranspose">
+                <Button variant="ghost" size="icon-xs" @click="closeTranspose">
                   <X class="w-3 h-3" />
                 </Button>
               </div>
@@ -7598,14 +7591,13 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               <Button
                 v-if="activeTableInfoTab === 'ddl'"
                 variant="ghost"
-                size="icon"
-                class="h-5 w-5"
+                size="icon-xs"
                 :class="{ 'bg-accent': ddlWrap }"
                 @click="toggleDdlWrap"
               >
                 <WrapText class="w-3 h-3" />
               </Button>
-              <Button variant="ghost" size="icon" class="h-5 w-5" @click="showTableInfo = false">
+              <Button variant="ghost" size="icon-xs" @click="showTableInfo = false">
                 <X class="w-3 h-3" />
               </Button>
             </div>
@@ -7800,8 +7792,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               <span class="text-xs font-medium flex-1 min-w-0 truncate">{{ t("grid.cellDetails") }}</span>
               <Button
                 variant="ghost"
-                size="icon"
-                class="h-5 w-5"
+                size="icon-xs"
                 :title="cellDetailPanelIsBottom ? t('grid.cellDetailLayoutRight') : t('grid.cellDetailLayoutBottom')"
                 @click="toggleCellDetailPanelLayout"
               >
@@ -7810,8 +7801,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               </Button>
               <Button
                 variant="ghost"
-                size="icon"
-                class="h-5 w-5"
+                size="icon-xs"
                 :title="t('grid.openCellDetailsDialog')"
                 @click="openActiveCellDetailDialog"
               >
@@ -7819,8 +7809,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               </Button>
               <Button
                 variant="ghost"
-                size="icon"
-                class="h-5 w-5"
+                size="icon-xs"
                 :title="t('grid.openRowDetailsDialog')"
                 @click="openActiveRowDetailDialog"
               >
@@ -7828,14 +7817,13 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               </Button>
               <Button
                 variant="ghost"
-                size="icon"
-                class="h-5 w-5"
+                size="icon-xs"
                 :title="t('grid.openColumnDetailsDialog')"
                 @click="openActiveColumnDetailDialog"
               >
                 <TableProperties class="w-3 h-3" />
               </Button>
-              <Button variant="ghost" size="icon" class="h-5 w-5" @click="closeCellDetails">
+              <Button variant="ghost" size="icon-xs" @click="closeCellDetails">
                 <X class="w-3 h-3" />
               </Button>
             </div>
@@ -7952,8 +7940,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                         <Button
                           v-if="activeCellDetail.isEditable"
                           variant="ghost"
-                          size="icon"
-                          class="h-6 w-6"
+                          size="icon-sm"
                           :title="t('grid.editValue')"
                           @click="startDetailEdit"
                         >
@@ -7961,8 +7948,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                         </Button>
                         <Button
                           variant="ghost"
-                          size="icon"
-                          class="h-6 w-6"
+                          size="icon-sm"
                           :title="t('grid.copyValue')"
                           @click="copyDetailCurrentValue"
                         >
@@ -7970,7 +7956,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                         </Button>
                         <DropdownMenu v-if="canDownloadDetailBinaryValue(activeCellDetail)">
                           <DropdownMenuTrigger as-child>
-                            <Button variant="ghost" size="icon" class="h-6 w-6" :title="t('grid.downloadBinaryValue')">
+                            <Button variant="ghost" size="icon-sm" :title="t('grid.downloadBinaryValue')">
                               <Download class="h-3 w-3" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -7995,7 +7981,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                           v-model:open="sideGeometryPreviewOpen"
                         >
                           <PopoverTrigger as-child>
-                            <Button variant="ghost" size="icon" class="h-6 w-6" :title="t('grid.geometryPreview')">
+                            <Button variant="ghost" size="icon-sm" :title="t('grid.geometryPreview')">
                               <Eye class="h-3 w-3" />
                             </Button>
                           </PopoverTrigger>
@@ -8264,8 +8250,8 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               <TooltipTrigger as-child>
                 <Button
                   variant="outline"
-                  size="icon"
-                  class="h-6 w-6 shrink-0"
+                  size="icon-sm"
+                  class="shrink-0"
                   :aria-label="t('grid.applyPageSize')"
                   @click.stop="applyCustomPageSize"
                 >
@@ -8276,17 +8262,17 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
             </Tooltip>
           </div>
         </LightDropdown>
-        <Button variant="ghost" size="icon" class="h-5 w-5" :disabled="currentPage <= 1" @click="firstPage">
+        <Button variant="ghost" size="icon-xs" :disabled="currentPage <= 1" @click="firstPage">
           <ChevronsLeft class="h-3 w-3" />
         </Button>
-        <Button variant="ghost" size="icon" class="h-5 w-5" :disabled="currentPage <= 1" @click="prevPage">
+        <Button variant="ghost" size="icon-xs" :disabled="currentPage <= 1" @click="prevPage">
           <ChevronLeft class="h-3 w-3" />
         </Button>
         <span>{{ currentPage }}</span>
-        <Button variant="ghost" size="icon" class="h-5 w-5" :disabled="!canGoNextPage" @click="nextPage">
+        <Button variant="ghost" size="icon-xs" :disabled="!canGoNextPage" @click="nextPage">
           <ChevronRight class="h-3 w-3" />
         </Button>
-        <Button variant="ghost" size="icon" class="h-5 w-5" :disabled="!canJumpLastPage" @click="lastPage">
+        <Button variant="ghost" size="icon-xs" :disabled="!canJumpLastPage" @click="lastPage">
           <ChevronsRight class="h-3 w-3" />
         </Button>
         <LightDropdown
@@ -8362,25 +8348,18 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                 <Button
                   v-if="dialogCellDetail.isEditable"
                   variant="ghost"
-                  size="icon"
-                  class="h-6 w-6"
+                  size="icon-sm"
                   :title="t('grid.editValue')"
                   @click="openDialogCellInSidePanel"
                 >
                   <Pencil class="h-3 w-3" />
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="h-6 w-6"
-                  :title="t('grid.copyValue')"
-                  @click="copyDialogCellCurrentValue"
-                >
+                <Button variant="ghost" size="icon-sm" :title="t('grid.copyValue')" @click="copyDialogCellCurrentValue">
                   <Copy class="h-3 w-3" />
                 </Button>
                 <DropdownMenu v-if="canDownloadDetailBinaryValue(dialogCellDetail)">
                   <DropdownMenuTrigger as-child>
-                    <Button variant="ghost" size="icon" class="h-6 w-6" :title="t('grid.downloadBinaryValue')">
+                    <Button variant="ghost" size="icon-sm" :title="t('grid.downloadBinaryValue')">
                       <Download class="h-3 w-3" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -8404,7 +8383,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                   v-model:open="dialogGeometryPreviewOpen"
                 >
                   <PopoverTrigger as-child>
-                    <Button variant="ghost" size="icon" class="h-6 w-6" :title="t('grid.geometryPreview')">
+                    <Button variant="ghost" size="icon-sm" :title="t('grid.geometryPreview')">
                       <Eye class="h-3 w-3" />
                     </Button>
                   </PopoverTrigger>
@@ -8555,8 +8534,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                 <td class="px-2 py-2">
                   <Button
                     variant="ghost"
-                    size="icon"
-                    class="h-6 w-6"
+                    size="icon-sm"
                     :title="t('grid.copyValue')"
                     @click="copyRowDetailFieldValue(field)"
                   >
@@ -8689,8 +8667,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                 <td class="px-2 py-2">
                   <Button
                     variant="ghost"
-                    size="icon"
-                    class="h-6 w-6"
+                    size="icon-sm"
                     :title="t('grid.copyValue')"
                     @click="copyColumnDetailFieldValue(field)"
                   >

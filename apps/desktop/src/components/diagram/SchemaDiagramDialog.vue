@@ -785,7 +785,6 @@ onUnmounted(stopDrag);
         <Button
           variant="ghost"
           size="icon"
-          class="h-8 w-8"
           :disabled="loadingDiagram || visibleTables.length === 0"
           :title="t('diagram.exportSvg')"
           @click="exportSvg"
@@ -795,7 +794,6 @@ onUnmounted(stopDrag);
         <Button
           variant="ghost"
           size="icon"
-          class="h-8 w-8"
           :disabled="!diagramReady || loadingDiagram"
           :title="t('diagram.refresh')"
           @click="loadDiagram"
@@ -803,19 +801,13 @@ onUnmounted(stopDrag);
           <Loader2 v-if="loadingDiagram" class="h-4 w-4 animate-spin" />
           <RefreshCw v-else class="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('diagram.zoomOut')" @click="zoomOut">
+        <Button variant="ghost" size="icon" :title="t('diagram.zoomOut')" @click="zoomOut">
           <ZoomOut class="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('diagram.zoomIn')" @click="zoomIn">
+        <Button variant="ghost" size="icon" :title="t('diagram.zoomIn')" @click="zoomIn">
           <ZoomIn class="h-4 w-4" />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          class="h-8 w-8"
-          :title="t('diagram.resetLayout')"
-          @click="resetZoomAndLayout"
-        >
+        <Button variant="ghost" size="icon" :title="t('diagram.resetLayout')" @click="resetZoomAndLayout">
           <Maximize2 class="h-4 w-4" />
         </Button>
       </div>

@@ -212,7 +212,7 @@ onMounted(() => store.load());
       <Button v-if="store.entries.length > 0" variant="ghost" size="icon" class="h-5 w-5" @click="confirmClearHistory">
         <Trash2 class="h-3 w-3" />
       </Button>
-      <Button variant="ghost" size="icon" class="h-5 w-5" @click="emit('close')">
+      <Button variant="ghost" size="icon-xs" @click="emit('close')">
         <X class="h-3 w-3" />
       </Button>
     </div>

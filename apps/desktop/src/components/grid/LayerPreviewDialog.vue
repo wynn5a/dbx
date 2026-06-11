@@ -478,7 +478,7 @@ onBeforeUnmount(() => cleanupMap());
         <Button
           variant="ghost"
           size="icon"
-          class="h-7 w-7 shrink-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          class="shrink-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           title="导出图片"
           :disabled="isExporting"
           @click="saveAsImage"
@@ -491,7 +491,7 @@ onBeforeUnmount(() => cleanupMap());
         <Button
           variant="ghost"
           size="icon"
-          class="h-7 w-7 shrink-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          class="shrink-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           :title="isMaximized ? '还原' : '最大化'"
           @click="toggleMaximize"
         >
@@ -502,7 +502,7 @@ onBeforeUnmount(() => cleanupMap());
         <Button
           variant="ghost"
           size="icon"
-          class="h-7 w-7 shrink-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          class="shrink-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
           :title="t('dangerDialog.cancel')"
           @click="close"
         >

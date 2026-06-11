@@ -1298,7 +1298,7 @@ watch(driverStoreTab, (tab) => {
                   <Button
                     variant="ghost"
                     size="icon"
-                    class="h-8 w-8 shrink-0 rounded-full"
+                    class="shrink-0 rounded-full"
                     @click="deleteJdbcDriver(driver.path)"
                   >
                     <Trash2 class="h-4 w-4" />
@@ -1329,7 +1329,7 @@ watch(driverStoreTab, (tab) => {
                 <Button
                   variant="ghost"
                   size="icon"
-                  class="h-8 w-8 shrink-0 rounded-full text-muted-foreground"
+                  class="shrink-0 rounded-full text-muted-foreground"
                   :title="t('driverStore.refresh')"
                   :disabled="runtimeLoading"
                   @click="refreshDriverRuntime"
@@ -1420,7 +1420,7 @@ watch(driverStoreTab, (tab) => {
                         v-if="runtime.can_stop"
                         variant="ghost"
                         size="icon"
-                        class="h-7 w-7 rounded-full text-muted-foreground hover:text-destructive"
+                        class="rounded-full text-muted-foreground hover:text-destructive"
                         :title="t('driverStore.runtimeStop')"
                         :disabled="runtimeBusy === runtime.id"
                         @click="stopRuntime(runtime)"
@@ -1431,7 +1431,7 @@ watch(driverStoreTab, (tab) => {
                         v-if="runtime.can_restart"
                         variant="ghost"
                         size="icon"
-                        class="h-7 w-7 rounded-full text-muted-foreground"
+                        class="rounded-full text-muted-foreground"
                         :title="t('driverStore.runtimeRestart')"
                         :disabled="runtimeBusy === runtime.id"
                         @click="restartRuntime(runtime)"

@@ -725,15 +725,14 @@ const messageRenderer = computed(() => {
       <span class="flex flex-1 self-stretch items-center truncate text-xs font-medium" data-tauri-drag-region>
         {{ chatTitle }}
       </span>
-      <Button variant="ghost" size="icon" class="h-6 w-6" @click="startNewChat" :title="t('ai.newChat')">
+      <Button variant="ghost" size="icon-sm" @click="startNewChat" :title="t('ai.newChat')">
         <MessageSquarePlus class="h-3.5 w-3.5" />
       </Button>
       <Popover :open="showConversationList" @update:open="setConversationListOpen">
         <PopoverTrigger as-child>
           <Button
             variant="ghost"
-            size="icon"
-            class="h-6 w-6"
+            size="icon-sm"
             :class="{ 'bg-accent': showConversationList }"
             :title="t('history.title')"
           >
@@ -743,7 +742,7 @@ const messageRenderer = computed(() => {
         <PopoverContent align="end" class="w-72 gap-0 p-0" @click.stop>
           <div class="flex items-center border-b px-3 py-2">
             <span class="flex-1 text-xs font-medium">{{ t("history.title") }}</span>
-            <Button variant="ghost" size="icon" class="h-6 w-6" @click="startNewChat">
+            <Button variant="ghost" size="icon-sm" @click="startNewChat">
               <MessageSquarePlus class="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -769,10 +768,10 @@ const messageRenderer = computed(() => {
           </div>
         </PopoverContent>
       </Popover>
-      <Button variant="ghost" size="icon" class="h-6 w-6" @click="clearMessages" :title="t('ai.clear')">
+      <Button variant="ghost" size="icon-sm" @click="clearMessages" :title="t('ai.clear')">
         <Trash2 class="h-3.5 w-3.5" />
       </Button>
-      <Button variant="ghost" size="icon" class="h-6 w-6" @click="emit('close')">
+      <Button variant="ghost" size="icon-sm" @click="emit('close')">
         <X class="h-3.5 w-3.5" />
       </Button>
     </div>

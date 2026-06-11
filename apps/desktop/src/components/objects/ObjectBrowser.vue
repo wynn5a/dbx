@@ -1387,7 +1387,7 @@ function getObjectBrowserMenuItems(item: ObjectBrowserRow): ContextMenuItem[] {
           <SelectItem v-for="schema in schemas" :key="schema" :value="schema">{{ schema }}</SelectItem>
         </SelectContent>
       </Select>
-      <Button variant="ghost" size="icon" class="h-7 w-7" :disabled="loadingObjects" @click="reload">
+      <Button variant="ghost" size="icon" :disabled="loadingObjects" @click="reload">
         <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loadingObjects }" />
       </Button>
     </div>
@@ -1569,27 +1569,13 @@ function getObjectBrowserMenuItems(item: ObjectBrowserRow): ContextMenuItem[] {
           >
             {{ t("objects.cancelEdit") }}
           </Button>
-          <Button
-            v-if="!sourceEditing"
-            variant="ghost"
-            size="icon"
-            class="h-5 w-5"
-            :disabled="!sourceContent"
-            @click="copySource"
-          >
+          <Button v-if="!sourceEditing" variant="ghost" size="icon-xs" :disabled="!sourceContent" @click="copySource">
             <Copy class="h-3 w-3" />
           </Button>
-          <Button
-            v-if="!sourceEditing"
-            variant="ghost"
-            size="icon"
-            class="h-5 w-5"
-            :disabled="!sourceContent"
-            @click="editSource"
-          >
+          <Button v-if="!sourceEditing" variant="ghost" size="icon-xs" :disabled="!sourceContent" @click="editSource">
             <PencilLine class="h-3 w-3" />
           </Button>
-          <Button variant="ghost" size="icon" class="h-5 w-5" @click="closeSource">
+          <Button variant="ghost" size="icon-xs" @click="closeSource">
             <X class="h-3 w-3" />
           </Button>
         </div>
