@@ -257,6 +257,8 @@
   --ds-mono: ui-monospace, "SF Mono", "Menlo", "Cascadia Mono", monospace;
   --ds-speed: 120ms;
   --ds-ease: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ds-scrollbar-thumb: rgb(0 0 0 / 0.2);
+  --ds-scrollbar-thumb-hover: rgb(0 0 0 / 0.35);
 }
 .dark {
   --ds-accent-soft: rgba(110, 121, 214, 0.16);
@@ -273,6 +275,33 @@
   --ds-border-soft: rgba(255, 255, 255, 0.045);
   --ds-border: rgba(255, 255, 255, 0.07);
   --ds-border-strong: rgba(255, 255, 255, 0.12);
+  --ds-scrollbar-thumb: rgba(255, 255, 255, 0.14);
+  --ds-scrollbar-thumb-hover: rgba(255, 255, 255, 0.26);
+}
+
+/* Design-system scrollbars: slim rounded pill, no track. The transparent
+   border + padding-box clip keeps a 10px hit area around a 4px thumb.
+   Webkit-only on purpose — setting the standard scrollbar-width/-color
+   properties would disable these pseudo-element styles. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  min-width: 32px;
+  border: 3px solid transparent;
+  border-radius: 7px;
+  background-color: var(--ds-scrollbar-thumb);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--ds-scrollbar-thumb-hover);
 }
 
 /* Design-system primary button (DESIGN-SYSTEM.md "Primary button" recipe).

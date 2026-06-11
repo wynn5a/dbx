@@ -294,13 +294,7 @@ export function drawCanvasDataGrid(options: DrawCanvasDataGridOptions) {
     if (!item) continue;
     const y = rowIndex * CANVAS_DATA_GRID_ROW_HEIGHT - scrollTop;
     const rowIsActive = isRowActive(item.displayIndex);
-    const rowBase = item.isDeleted
-      ? theme.rowDeleted
-      : item.isNew && !rowIsActive
-        ? theme.rowNew
-        : item.displayIndex % 2 === 1 && !rowIsActive
-          ? theme.rowMuted
-          : theme.background;
+    const rowBase = item.isDeleted ? theme.rowDeleted : item.isNew && !rowIsActive ? theme.rowNew : theme.background;
     ctx.globalAlpha = item.isDeleted ? 0.7 : 1;
     ctx.fillStyle = rowBase;
     ctx.fillRect(0, y, width, CANVAS_DATA_GRID_ROW_HEIGHT);
@@ -342,7 +336,7 @@ export function drawCanvasDataGrid(options: DrawCanvasDataGridOptions) {
           : item.status === "deleted"
             ? theme.rowNumberTextDeleted
             : isRowSelected(item.id)
-              ? theme.primary
+              ? theme.selectedForeground
               : theme.rowNumberTextClean;
     ctx.fillStyle = rowNumberText;
     ctx.font = item.status === "new" || item.status === "edited" || isRowSelected(item.id) ? semiboldFont : normalFont;
@@ -352,7 +346,7 @@ export function drawCanvasDataGrid(options: DrawCanvasDataGridOptions) {
     ctx.font = normalFont;
 
     const rowBorderY = crispCanvasLine(y + CANVAS_DATA_GRID_ROW_HEIGHT - 1, dpr);
-    ctx.strokeStyle = theme.border;
+    ctx.strokeStyle = theme.borderSoft;
     ctx.beginPath();
     ctx.moveTo(0, rowBorderY);
     ctx.lineTo(width, rowBorderY);
@@ -423,7 +417,7 @@ export function drawCanvasDataGrid(options: DrawCanvasDataGridOptions) {
         ctx.clip();
         const value = item.data[actualColIdx];
         ctx.textAlign = "left";
-        ctx.fillStyle = value === null ? theme.mutedForeground : theme.foreground;
+        ctx.fillStyle = value === null ? theme.nullForeground : theme.foreground;
         ctx.font = value === null ? italicFont : typeof value === "number" ? tabularFont : normalFont;
         setCanvasNumericVariant(ctx, typeof value === "number" ? "tabular-nums" : "normal");
         const textLeft = alignCanvasPixel(x + 12, dpr);
@@ -446,7 +440,7 @@ export function drawCanvasDataGrid(options: DrawCanvasDataGridOptions) {
         setCanvasNumericVariant(ctx, "normal");
         ctx.font = normalFont;
 
-        ctx.strokeStyle = theme.border;
+        ctx.strokeStyle = theme.borderSoft;
         ctx.beginPath();
         const columnBorderX = crispCanvasLine(x + colWidth - 1, dpr);
         ctx.moveTo(columnBorderX, y);

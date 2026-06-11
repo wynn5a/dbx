@@ -1,9 +1,12 @@
 export interface DataGridPaintTheme {
   background: string;
   border: string;
+  borderSoft: string;
   foreground: string;
   mutedForeground: string;
+  nullForeground: string;
   primary: string;
+  selectedForeground: string;
   rowMuted: string;
   rowNew: string;
   rowDeleted: string;
@@ -246,12 +249,17 @@ export function resolveDataGridPaintTheme(options: {
   const rowNumberActive = activeSurface;
   const rowNumberSelected = cellSelected;
 
+  const baseBorder = cssVarColor(getVar, "--border", isDark ? "rgb(63, 63, 70)" : "rgb(229, 231, 235)");
+
   return {
     background,
-    border: cssVarColor(getVar, "--border", isDark ? "rgb(63, 63, 70)" : "rgb(229, 231, 235)"),
+    border: cssVarColor(getVar, "--ds-border", baseBorder),
+    borderSoft: cssVarColor(getVar, "--ds-border-soft", baseBorder),
     foreground,
     mutedForeground,
+    nullForeground: cssVarColor(getVar, "--ds-text-4", mutedForeground),
     primary,
+    selectedForeground: cssVarColor(getVar, "--ds-accent", primary),
     rowMuted: paintToken(getVar, "--data-grid-row-muted-bg", rowMuted),
     rowNew: paintToken(getVar, "--data-grid-row-new-bg", rowNew),
     rowDeleted: paintToken(getVar, "--data-grid-row-deleted-bg", rowDeleted),

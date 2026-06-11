@@ -406,11 +406,6 @@ export function buildSqlCompletionThemeRules(): CodeMirrorStyleSpec {
       minWidth: "min(280px, calc(100vw - 24px))",
       overflowX: "hidden",
       padding: "0 4px 0 !important",
-      scrollbarColor: colorMixValue(
-        "var(--muted-foreground) transparent",
-        "color-mix(in oklch, var(--muted-foreground) 44%, transparent) transparent",
-      ),
-      scrollbarWidth: "thin",
     },
     ".cm-tooltip.cm-tooltip-autocomplete > ul > li": {
       alignItems: "center",

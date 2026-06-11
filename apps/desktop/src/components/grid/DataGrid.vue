@@ -72,7 +72,7 @@ import { Input } from "@/components/ui/input";
 import LightDropdown from "@/components/ui/LightDropdown.vue";
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import DangerConfirmDialog from "@/components/editor/DangerConfirmDialog.vue";
@@ -4858,7 +4858,11 @@ function calcTransposeRecordWidth(recordIndex: number): number {
 }
 
 function getTransposeRecordWidth(recordIndex: number): number {
-  return transposeRecordWidths.value[recordIndex] ?? TRANSPOSE_RECORD_DEFAULT_WIDTH;
+  const base = transposeRecordWidths.value[recordIndex] ?? TRANSPOSE_RECORD_DEFAULT_WIDTH;
+  if (multiRowTranspose.value) return base;
+  // Single-record mode reads as a field/value detail sheet: stretch the value
+  // column to the viewport instead of leaving a dangling strip.
+  return Math.max(base, transposeViewportWidth.value - transposePinnedWidth.value);
 }
 
 function ensureTransposeRecordWidths(count: number) {
@@ -5117,16 +5121,20 @@ function transposeRecordIsSelected(rowIndex: number): boolean {
   return !!item && isRowSelected(item.id);
 }
 
+// Record-level fills/frames mark the anchored record among several; with a
+// single visible record they would paint the whole value column as selected.
 function transposeRecordUsesSelectionVisual(rowIndex: number): boolean {
-  return hasRowSelection.value && transposeRecordIsSelected(rowIndex);
+  return multiRowTranspose.value && hasRowSelection.value && transposeRecordIsSelected(rowIndex);
 }
 
 function transposeRecordUsesActiveHighlight(rowIndex: number): boolean {
-  return transposeRowIndex.value === rowIndex;
+  return multiRowTranspose.value && transposeRowIndex.value === rowIndex;
 }
 
 function transposeRecordUsesFramedHeader(rowIndex: number): boolean {
-  return hasRowSelection.value && transposeRecordIsSelected(rowIndex) && !hasCellSelection.value;
+  return (
+    multiRowTranspose.value && hasRowSelection.value && transposeRecordIsSelected(rowIndex) && !hasCellSelection.value
+  );
 }
 
 function moveTransposeRecordSelection(delta: number): boolean {
@@ -5142,8 +5150,32 @@ function transposeNav(delta: number) {
   moveTransposeRecordSelection(delta);
 }
 
+let transposeResizeObserver: ResizeObserver | null = null;
+
+function attachTransposeResizeObserver() {
+  transposeResizeObserver?.disconnect();
+  transposeResizeObserver = null;
+  const el = transposeScrollElement();
+  if (!el || typeof ResizeObserver === "undefined") return;
+  transposeResizeObserver = new ResizeObserver(updateTransposeViewport);
+  transposeResizeObserver.observe(el);
+}
+
 watch(isTransposeMode, (active) => {
-  if (active) nextTick(updateTransposeViewport);
+  if (active) {
+    nextTick(() => {
+      updateTransposeViewport();
+      attachTransposeResizeObserver();
+    });
+  } else {
+    transposeResizeObserver?.disconnect();
+    transposeResizeObserver = null;
+  }
+});
+
+onUnmounted(() => {
+  transposeResizeObserver?.disconnect();
+  transposeResizeObserver = null;
 });
 
 watch(
@@ -6545,14 +6577,14 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               <slot name="error-actions" :error-message="errorMessage" />
             </div>
             <div v-else-if="isTransposeMode" class="flex-1 flex flex-col min-h-0 overflow-hidden">
-              <div class="h-8 flex items-center gap-2 px-3 border-y shrink-0 bg-muted/20">
-                <Rows3 class="w-3.5 h-3.5 text-muted-foreground" />
-                <span class="text-xs font-medium">{{ t("grid.transpose") }}</span>
-                <span class="text-xs text-muted-foreground">
+              <div class="h-8 flex items-center gap-2 px-3 border-y border-[var(--ds-border-soft)] shrink-0">
+                <Rows3 class="w-3.5 h-3.5 text-[var(--ds-text-3)]" />
+                <span class="text-[12.5px] font-medium text-[var(--ds-text-1)]">{{ t("grid.transpose") }}</span>
+                <span class="font-mono text-[11px] tabular-nums text-[var(--ds-text-3)]">
                   {{ t("grid.rowNumber") }} {{ (transposeRowIndex ?? 0) + 1 }}
                 </span>
                 <span
-                  class="rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                  class="inline-flex h-[18px] items-center rounded border border-[var(--ds-border)] bg-[var(--ds-bg-elevated)] px-1.5 font-mono text-[10.5px] text-[var(--ds-text-3)]"
                 >
                   {{ multiRowTranspose ? t("grid.transposeMultiRow") : t("grid.transposeSingleRow") }}
                 </span>
@@ -6588,16 +6620,16 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               >
                 <template #before>
                   <div
-                    class="sticky top-0 z-20 flex h-7 border-b border-border bg-[rgb(239_239_239)] text-xs font-semibold text-muted-foreground dark:bg-muted"
+                    class="sticky top-0 z-20 flex h-7 border-b border-[var(--ds-border)] bg-[var(--ds-bg-elevated)] text-xs font-medium text-[var(--ds-text-2)]"
                     :style="{ width: `${transposeTotalWidth}px` }"
                   >
                     <div
-                      class="sticky left-0 z-30 shrink-0 border-r border-border px-3 py-1.5 bg-[rgb(239_239_239)] truncate dark:bg-muted relative"
+                      class="sticky left-0 z-30 shrink-0 border-r border-[var(--ds-border)] px-3 py-1.5 bg-[var(--ds-bg-elevated)] truncate relative"
                       :style="{ width: `${transposePinnedWidth}px` }"
                     >
                       {{ t("grid.columnName") }}
                       <div
-                        class="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/30"
+                        class="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-accent-line)]"
                         @mousedown.stop="onTransposePinnedResizeStart"
                       />
                     </div>
@@ -6605,14 +6637,14 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     <div
                       v-for="recordIndex in activeTransposeRecordIndexes"
                       :key="`transpose-head-${recordIndex}`"
-                      class="shrink-0 border-r border-border px-2 py-1.5 text-center tabular-nums relative"
+                      class="shrink-0 border-r border-[var(--ds-border)] px-2 py-1.5 text-center font-mono text-[11px] tabular-nums relative"
                       :class="{
-                        'transpose-record-header-selected text-primary font-semibold':
+                        'transpose-record-header-selected text-[var(--ds-accent)] font-semibold':
                           transposeRecordUsesFramedHeader(recordIndex),
-                        'transpose-record-header-active text-primary':
+                        'transpose-record-header-active text-[var(--ds-accent)]':
                           transposeRecordUsesActiveHighlight(recordIndex) &&
                           !transposeRecordUsesFramedHeader(recordIndex),
-                        'bg-[rgb(239_239_239)] dark:bg-muted':
+                        'bg-[var(--ds-bg-elevated)] text-[var(--ds-text-3)]':
                           !transposeRecordUsesActiveHighlight(recordIndex) &&
                           !transposeRecordUsesFramedHeader(recordIndex),
                       }"
@@ -6622,7 +6654,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     >
                       {{ recordIndex + 1 }}
                       <div
-                        class="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/30"
+                        class="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-accent-line)]"
                         @mousedown.stop="onTransposeRecordResizeStart(recordIndex, $event)"
                         @dblclick.stop="autoFitTransposeRecord(recordIndex)"
                       />
@@ -6632,11 +6664,11 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                 </template>
                 <template #default="{ item }">
                   <div
-                    class="flex border-b border-border/60 text-xs"
+                    class="flex border-b border-[var(--ds-border-soft)] text-xs"
                     :style="{ height: '30px', width: `${transposeTotalWidth}px` }"
                   >
                     <div
-                      class="sticky left-0 z-10 flex shrink-0 items-center border-r border-border bg-background px-3 py-0 font-medium truncate"
+                      class="sticky left-0 z-10 flex shrink-0 items-center border-r border-[var(--ds-border)] bg-[var(--ds-bg-elevated)] px-3 py-0 font-medium text-[var(--ds-text-2)] truncate"
                       :style="{ width: `${transposePinnedWidth}px` }"
                       :title="item.column"
                     >
@@ -6646,9 +6678,9 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     <div
                       v-for="cell in item.values"
                       :key="`${item.id}:${cell.recordIndex}`"
-                      class="relative flex shrink-0 items-center border-r border-border/70 px-2 py-0 font-mono truncate"
+                      class="relative flex shrink-0 items-center border-r border-[var(--ds-border-soft)] px-2 py-0 font-mono truncate"
                       :class="{
-                        'text-muted-foreground italic': cell.isNull,
+                        'text-[var(--ds-text-4)] italic': cell.isNull,
                         'cell-selected':
                           transposeCellIsSelected(cell.recordIndex, cell.valueIndex) &&
                           !displayItems[cell.recordIndex]?.isDirtyCol[cell.valueIndex],
@@ -6663,14 +6695,14 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                           transposeRecordUsesSelectionVisual(cell.recordIndex) &&
                           !transposeCellIsSelected(cell.recordIndex, cell.valueIndex) &&
                           displayItems[cell.recordIndex]?.isDirtyCol[cell.valueIndex],
-                        'bg-primary/15':
+                        'bg-[var(--data-grid-cell-active-bg)]':
                           transposeRecordUsesActiveHighlight(cell.recordIndex) &&
                           !transposeRecordUsesSelectionVisual(cell.recordIndex) &&
                           !displayItems[cell.recordIndex]?.isDirtyCol[cell.valueIndex] &&
                           !transposeCellIsSelected(cell.recordIndex, cell.valueIndex),
                         'bg-yellow-500/10 cell-dirty': displayItems[cell.recordIndex]?.isDirtyCol[cell.valueIndex],
                         'cursor-text': !isScrolling && canEditCellItem(displayItems[cell.recordIndex], cell.valueIndex),
-                        'hover:bg-accent/50':
+                        'hover:bg-[var(--ds-bg-hover)]':
                           !isScrolling &&
                           canEditCellItem(displayItems[cell.recordIndex], cell.valueIndex) &&
                           !transposeRecordUsesSelectionVisual(cell.recordIndex) &&
@@ -6769,11 +6801,14 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               <!-- Sticky header -->
               <div
                 ref="headerRef"
-                class="shrink-0 bg-[rgb(239_239_239)] dark:bg-muted/60 z-10 border-y border-border overflow-hidden"
+                class="shrink-0 bg-[var(--ds-bg-elevated)] z-10 border-y border-[var(--ds-border)] overflow-hidden"
               >
-                <div class="flex text-xs font-semibold text-foreground" :style="{ width: 'var(--header-total-w)' }">
+                <div
+                  class="flex text-xs font-medium text-[var(--ds-text-2)]"
+                  :style="{ width: 'var(--header-total-w)' }"
+                >
                   <div
-                    class="shrink-0 px-2 py-1.5 border-r border-border text-center text-muted-foreground select-none cursor-pointer hover:bg-accent/60 sticky left-0 z-20 bg-[rgb(239_239_239)] dark:bg-muted"
+                    class="shrink-0 px-2 py-1.5 border-r border-[var(--ds-border)] text-center text-[var(--ds-text-3)] select-none cursor-pointer hover:bg-[var(--ds-bg-hover)] sticky left-0 z-20 bg-[var(--ds-bg-elevated)]"
                     :style="{ width: 'var(--row-num-w)' }"
                     @click="selectAllCells"
                   >
@@ -6783,9 +6818,9 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                   <div
                     v-for="col in renderedGridColumns"
                     :key="`${col.name}-${col.actualColIdx}`"
-                    class="shrink-0 px-2 py-1.5 border-r border-border whitespace-nowrap hover:bg-accent/60 select-none relative overflow-hidden"
+                    class="shrink-0 px-2 py-1.5 border-r border-[var(--ds-border)] whitespace-nowrap hover:bg-[var(--ds-bg-hover)] select-none relative overflow-hidden"
                     :class="{
-                      'bg-primary/15 ring-1 ring-inset ring-primary/40':
+                      'bg-[var(--ds-accent-soft)] ring-1 ring-inset ring-[var(--ds-accent-line)]':
                         highlightedColumnIndex === col.actualColIdx || columnIsSelected(col.visibleColIdx),
                     }"
                     :style="renderedColumnStyle(col.visibleColIdx)"
@@ -6800,7 +6835,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                         </span>
                         <span
                           v-if="headerColumnType(col.name, col.actualColIdx)"
-                          class="min-w-0 truncate text-[10px] font-normal leading-3"
+                          class="min-w-0 truncate font-mono text-[10px] font-normal leading-3"
                           :class="typeColorClass(headerColumnType(col.name, col.actualColIdx))"
                           :title="headerColumnType(col.name, col.actualColIdx)"
                         >
@@ -6808,7 +6843,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                         </span>
                         <span
                           v-if="headerColumnComment(col.name)"
-                          class="min-w-0 truncate text-[10px] font-normal leading-3 text-muted-foreground"
+                          class="min-w-0 truncate text-[10px] font-normal leading-3 text-[var(--ds-text-3)]"
                           :title="headerColumnComment(col.name)"
                         >
                           {{ headerColumnComment(col.name) }}
@@ -6816,10 +6851,10 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                       </span>
                       <button
                         type="button"
-                        class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                        class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]"
                         :class="
                           sortCol === col.name && sortColIndex === col.actualColIdx
-                            ? 'text-primary opacity-100'
+                            ? 'text-[var(--ds-accent)] opacity-100'
                             : 'opacity-80'
                         "
                         :title="t('grid.sort')"
@@ -6845,10 +6880,10 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                         <DropdownMenuTrigger as-child>
                           <button
                             type="button"
-                            class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                            class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]"
                             :class="
                               columnHasFormatter(col.actualColIdx) || localFilterActive(col.actualColIdx)
-                                ? 'text-primary opacity-90'
+                                ? 'text-[var(--ds-accent)] opacity-90'
                                 : 'opacity-80'
                             "
                             :title="t('grid.columnActions')"
@@ -6890,8 +6925,12 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                         <PopoverTrigger v-else as-child>
                           <button
                             type="button"
-                            class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                            :class="columnHasFormatter(col.actualColIdx) ? 'text-primary opacity-100' : 'opacity-80'"
+                            class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]"
+                            :class="
+                              columnHasFormatter(col.actualColIdx)
+                                ? 'text-[var(--ds-accent)] opacity-100'
+                                : 'opacity-80'
+                            "
                             :disabled="!formatterKeyForColumn(col.name)"
                             :title="t('grid.columnFormatter')"
                             @click.stop
@@ -7110,8 +7149,10 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                         <PopoverTrigger v-else as-child>
                           <button
                             type="button"
-                            class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                            :class="localFilterActive(col.actualColIdx) ? 'text-primary opacity-100' : 'opacity-80'"
+                            class="flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]"
+                            :class="
+                              localFilterActive(col.actualColIdx) ? 'text-[var(--ds-accent)] opacity-100' : 'opacity-80'
+                            "
                             :title="t('grid.localFilter')"
                             @click.stop
                           >
@@ -7235,7 +7276,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                       </Popover>
                     </span>
                     <div
-                      class="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-primary/30"
+                      class="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-accent-line)]"
                       @mousedown.stop="onResizeStart(col.visibleColIdx, $event)"
                       @dblclick.stop="autoFitColumn(col.visibleColIdx)"
                     />
@@ -7243,7 +7284,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                   <div class="shrink-0" :style="{ width: `${horizontalColumnWindow.afterWidth}px` }" />
                   <div
                     v-if="gridScrollbarGutter > 0"
-                    class="shrink-0 border-l border-border"
+                    class="shrink-0 border-l border-[var(--ds-border)]"
                     :style="{ width: 'var(--grid-scrollbar-gutter)' }"
                   />
                 </div>
@@ -7258,16 +7299,16 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                   <div class="h-full min-h-[220px]" :style="{ width: 'max(100%, var(--total-w))' }" />
                 </div>
                 <div
-                  class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center text-muted-foreground"
+                  class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center"
                 >
                   <component
                     :is="hasActiveFilter ? SearchX : Inbox"
-                    class="h-8 w-8 text-muted-foreground/50"
+                    class="h-8 w-8 text-[var(--ds-text-4)]"
                     aria-hidden="true"
                   />
                   <div class="space-y-1">
-                    <div class="text-sm font-medium text-foreground">{{ emptyTitle }}</div>
-                    <div class="text-xs">{{ emptyDescription }}</div>
+                    <div class="text-[13px] font-medium text-[var(--ds-text-2)]">{{ emptyTitle }}</div>
+                    <div class="text-[11.5px] text-[var(--ds-text-3)]">{{ emptyDescription }}</div>
                   </div>
                 </div>
               </div>
@@ -7409,26 +7450,21 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               >
                 <template #default="{ item }">
                   <div
-                    class="flex text-xs border-b border-border"
+                    class="flex text-xs border-b border-[var(--ds-border-soft)]"
                     :class="{
                       'bg-destructive/5 opacity-70': item.isDeleted,
                       'bg-primary/5': item.isNew && !isRowActive(item.displayIndex),
-                      'bg-muted/30':
-                        !item.isNew &&
-                        !item.isDeleted &&
-                        !isRowActive(item.displayIndex) &&
-                        item.displayIndex % 2 === 1,
                       'active-row': isRowActive(item.displayIndex) && !item.isDeleted,
                     }"
                     :style="{ height: '26px', width: 'var(--total-w)' }"
                     :data-row-index="item.displayIndex"
                   >
                     <div
-                      class="data-grid-row-number shrink-0 px-2 py-1 border-r border-border text-center select-none cursor-default hover:bg-accent/50 sticky left-0 z-10 bg-[rgb(255_255_255)] dark:bg-[rgb(35_37_42)]"
+                      class="data-grid-row-number shrink-0 px-2 py-1 border-r border-[var(--ds-border)] text-center tabular-nums select-none cursor-default hover:bg-[var(--data-grid-cell-hover-bg)] sticky left-0 z-10 bg-[var(--data-grid-row-number-default-bg)]"
                       :class="[
                         rowNumberStatusClass(item),
                         {
-                          'text-primary font-semibold !bg-primary/25':
+                          'font-semibold text-[var(--ds-accent)] !bg-[var(--data-grid-row-number-selected-bg)]':
                             isRowSelected(item.id) &&
                             item.status !== 'new' &&
                             item.status !== 'edited' &&
@@ -7446,10 +7482,10 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     <div
                       v-for="col in renderedGridColumns"
                       :key="col.actualColIdx"
-                      class="group/cell shrink-0 px-3 py-1 border-r border-border whitespace-nowrap overflow-hidden text-ellipsis relative select-none flex items-center"
+                      class="group/cell shrink-0 px-3 py-1 border-r border-[var(--ds-border-soft)] whitespace-nowrap overflow-hidden text-ellipsis relative select-none flex items-center"
                       :style="renderedColumnStyle(col.visibleColIdx)"
                       :class="{
-                        'text-muted-foreground italic': isNull(item.data[col.actualColIdx]),
+                        'text-[var(--ds-text-4)] italic': isNull(item.data[col.actualColIdx]),
                         'bg-yellow-500/10 cell-dirty': item.isDirtyCol[col.actualColIdx],
                         'cell-selected':
                           cellIsSelected(item.displayIndex, col.visibleColIdx) && !item.isDirtyCol[col.actualColIdx],
@@ -7472,7 +7508,8 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                           col.actualColIdx,
                         ),
                         'tabular-nums': typeof item.data[col.actualColIdx] === 'number',
-                        'cursor-text hover:bg-accent/50': !isScrolling && canEditCellItem(item, col.actualColIdx),
+                        'cursor-text hover:bg-[var(--data-grid-cell-hover-bg)]':
+                          !isScrolling && canEditCellItem(item, col.actualColIdx),
                         'line-through': item.isDeleted,
                       }"
                       @mousedown="handleDataCellMousedown(item.displayIndex, col.visibleColIdx, item.id, $event)"
@@ -7828,24 +7865,28 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
             v-if="showCellDetail && activeCellDetail"
             class="relative flex flex-col bg-background min-w-0"
             :class="[
-              cellDetailPanelIsBottom ? 'col-start-1 row-start-2 border-t' : 'col-start-3 row-start-1 border-l',
+              cellDetailPanelIsBottom
+                ? 'col-start-1 row-start-2 border-t border-[var(--ds-border)]'
+                : 'col-start-3 row-start-1 border-l border-[var(--ds-border)]',
               { 'detail-drawer-resizing': isResizingDetail },
             ]"
             :style="detailPanelStyle"
           >
             <div
               v-if="!cellDetailPanelIsBottom"
-              class="absolute left-0 top-0 bottom-0 z-20 w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-primary/30"
+              class="absolute left-0 top-0 bottom-0 z-20 w-1.5 -translate-x-1/2 cursor-col-resize transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-accent-line)]"
               @mousedown.prevent="onDetailResizeStart"
             />
             <div
               v-else
-              class="absolute left-0 right-0 top-0 z-20 h-1.5 -translate-y-1/2 cursor-row-resize hover:bg-primary/30"
+              class="absolute left-0 right-0 top-0 z-20 h-1.5 -translate-y-1/2 cursor-row-resize transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-accent-line)]"
               @mousedown.prevent="onDetailResizeStart"
             />
-            <div class="h-9 flex items-center gap-2 px-3 border-b shrink-0 bg-muted/20">
-              <Info class="w-3.5 h-3.5 text-muted-foreground" />
-              <span class="text-xs font-medium flex-1 min-w-0 truncate">{{ t("grid.cellDetails") }}</span>
+            <div class="h-9 flex items-center gap-2 px-3 border-b border-[var(--ds-border-soft)] shrink-0">
+              <Info class="w-3.5 h-3.5 text-[var(--ds-text-3)]" />
+              <span class="text-[12.5px] font-medium text-[var(--ds-text-1)] flex-1 min-w-0 truncate">{{
+                t("grid.cellDetails")
+              }}</span>
               <Button
                 variant="ghost"
                 size="icon-xs"
@@ -7885,102 +7926,142 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
             </div>
 
             <Tabs v-model="activeCellDetailTab" class="flex-1 min-h-0 gap-0">
-              <div class="shrink-0 border-b px-3 py-2">
-                <TabsList
-                  class="grid h-7 w-full p-0.5"
-                  :class="activeCellDetailTabs.length > 1 ? 'grid-cols-2' : 'grid-cols-1'"
+              <div
+                class="grid shrink-0 border-b border-[var(--ds-border-soft)]"
+                :class="activeCellDetailTabs.length > 1 ? 'grid-cols-2' : 'grid-cols-1'"
+              >
+                <button
+                  class="h-8 min-w-0 truncate px-2 text-xs transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)]"
+                  :class="
+                    activeCellDetailTab === 'details'
+                      ? 'bg-[var(--ds-bg-active)] font-medium text-[var(--ds-accent)]'
+                      : 'text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]'
+                  "
+                  @click="activeCellDetailTab = 'details'"
                 >
-                  <TabsTrigger value="details" class="h-6 text-xs">{{ t("grid.cellDetails") }}</TabsTrigger>
-                  <TabsTrigger
-                    v-if="activeCellDetailTabs.includes('valueEditor')"
-                    value="valueEditor"
-                    class="h-6 text-xs"
-                  >
-                    {{ t("grid.valueEditor") }}
-                  </TabsTrigger>
-                </TabsList>
+                  {{ t("grid.cellDetails") }}
+                </button>
+                <button
+                  v-if="activeCellDetailTabs.includes('valueEditor')"
+                  class="h-8 min-w-0 truncate px-2 text-xs transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)]"
+                  :class="
+                    activeCellDetailTab === 'valueEditor'
+                      ? 'bg-[var(--ds-bg-active)] font-medium text-[var(--ds-accent)]'
+                      : 'text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]'
+                  "
+                  @click="activeCellDetailTab = 'valueEditor'"
+                >
+                  {{ t("grid.valueEditor") }}
+                </button>
               </div>
 
               <TabsContent value="details" class="m-0 min-h-0 flex-1 flex flex-col">
                 <div data-native-clipboard class="flex-1 min-h-0 overflow-auto p-3 text-xs space-y-3">
                   <div
                     v-if="cellDetailPanelIsBottom"
-                    class="grid grid-cols-[minmax(180px,1.6fr)_repeat(4,minmax(74px,0.55fr))_minmax(160px,1fr)] gap-3 rounded border bg-muted/20 p-2"
+                    class="grid grid-cols-[minmax(180px,1.6fr)_repeat(4,minmax(74px,0.55fr))_minmax(160px,1fr)] gap-3 border-b border-[var(--ds-border-soft)] pb-3"
                   >
                     <div class="min-w-0 space-y-1">
-                      <div class="text-muted-foreground">{{ t("grid.columnName") }}</div>
-                      <div class="truncate font-medium" :title="activeCellDetail.column">
+                      <div class="ds-menu-label">{{ t("grid.columnName") }}</div>
+                      <div
+                        class="truncate text-[12.5px] font-medium text-[var(--ds-text-1)]"
+                        :title="activeCellDetail.column"
+                      >
                         {{ activeCellDetail.column }}
                       </div>
                     </div>
                     <div class="space-y-1">
-                      <div class="text-muted-foreground">{{ t("grid.rowNumber") }}</div>
-                      <div>{{ activeCellDetail.rowNumber }}</div>
+                      <div class="ds-menu-label">{{ t("grid.rowNumber") }}</div>
+                      <div class="font-mono text-[11.5px] tabular-nums text-[var(--ds-text-1)]">
+                        {{ activeCellDetail.rowNumber }}
+                      </div>
                     </div>
                     <div class="min-w-0 space-y-1">
-                      <div class="text-muted-foreground">{{ t("grid.columnType") }}</div>
+                      <div class="ds-menu-label">{{ t("grid.columnType") }}</div>
                       <div
-                        class="truncate"
-                        :class="activeCellDetail.type ? typeColorClass(activeCellDetail.type) : 'text-muted-foreground'"
+                        class="truncate font-mono text-[11px]"
+                        :class="
+                          activeCellDetail.type ? typeColorClass(activeCellDetail.type) : 'text-[var(--ds-text-3)]'
+                        "
                         :title="activeCellDetail.type || '-'"
                       >
                         {{ activeCellDetail.type || "-" }}
                       </div>
                     </div>
                     <div class="space-y-1">
-                      <div class="text-muted-foreground">{{ t("grid.nullValue") }}</div>
-                      <div>{{ activeCellDetail.value === null ? "true" : "false" }}</div>
+                      <div class="ds-menu-label">{{ t("grid.nullValue") }}</div>
+                      <div class="font-mono text-[11.5px] text-[var(--ds-text-1)]">
+                        {{ activeCellDetail.value === null ? "true" : "false" }}
+                      </div>
                     </div>
                     <div class="space-y-1">
-                      <div class="text-muted-foreground">{{ t("grid.valueLength") }}</div>
-                      <div>{{ activeCellDetail.length }}</div>
+                      <div class="ds-menu-label">{{ t("grid.valueLength") }}</div>
+                      <div class="font-mono text-[11.5px] tabular-nums text-[var(--ds-text-1)]">
+                        {{ activeCellDetail.length }}
+                      </div>
                     </div>
                     <div class="min-w-0 space-y-1">
-                      <div class="text-muted-foreground">{{ t("grid.columnComment") }}</div>
-                      <div class="truncate" :title="activeCellDetail.comment || t('grid.noComment')">
+                      <div class="ds-menu-label">{{ t("grid.columnComment") }}</div>
+                      <div
+                        class="truncate"
+                        :class="activeCellDetail.comment ? 'text-[var(--ds-text-2)]' : 'text-[var(--ds-text-4)]'"
+                        :title="activeCellDetail.comment || t('grid.noComment')"
+                      >
                         {{ activeCellDetail.comment || t("grid.noComment") }}
                       </div>
                     </div>
                   </div>
                   <template v-else>
                     <div class="space-y-1">
-                      <div class="text-muted-foreground">{{ t("grid.columnName") }}</div>
-                      <div class="font-medium break-all">{{ activeCellDetail.column }}</div>
+                      <div class="ds-menu-label">{{ t("grid.columnName") }}</div>
+                      <div class="text-[12.5px] font-medium text-[var(--ds-text-1)] break-all">
+                        {{ activeCellDetail.column }}
+                      </div>
                     </div>
                     <div class="grid grid-cols-2 gap-3">
                       <div class="space-y-1">
-                        <div class="text-muted-foreground">{{ t("grid.rowNumber") }}</div>
-                        <div>{{ activeCellDetail.rowNumber }}</div>
+                        <div class="ds-menu-label">{{ t("grid.rowNumber") }}</div>
+                        <div class="font-mono text-[11.5px] tabular-nums text-[var(--ds-text-1)]">
+                          {{ activeCellDetail.rowNumber }}
+                        </div>
                       </div>
                       <div class="space-y-1">
-                        <div class="text-muted-foreground">{{ t("grid.columnType") }}</div>
+                        <div class="ds-menu-label">{{ t("grid.columnType") }}</div>
                         <div
+                          class="font-mono text-[11px]"
                           :class="
-                            activeCellDetail.type ? typeColorClass(activeCellDetail.type) : 'text-muted-foreground'
+                            activeCellDetail.type ? typeColorClass(activeCellDetail.type) : 'text-[var(--ds-text-3)]'
                           "
                         >
                           {{ activeCellDetail.type || "-" }}
                         </div>
                       </div>
                       <div class="space-y-1">
-                        <div class="text-muted-foreground">{{ t("grid.nullValue") }}</div>
-                        <div>{{ activeCellDetail.value === null ? "true" : "false" }}</div>
+                        <div class="ds-menu-label">{{ t("grid.nullValue") }}</div>
+                        <div class="font-mono text-[11.5px] text-[var(--ds-text-1)]">
+                          {{ activeCellDetail.value === null ? "true" : "false" }}
+                        </div>
                       </div>
                       <div class="space-y-1">
-                        <div class="text-muted-foreground">{{ t("grid.valueLength") }}</div>
-                        <div>{{ activeCellDetail.length }}</div>
+                        <div class="ds-menu-label">{{ t("grid.valueLength") }}</div>
+                        <div class="font-mono text-[11.5px] tabular-nums text-[var(--ds-text-1)]">
+                          {{ activeCellDetail.length }}
+                        </div>
                       </div>
                     </div>
                     <div class="space-y-1">
-                      <div class="text-muted-foreground">{{ t("grid.columnComment") }}</div>
-                      <div class="whitespace-pre-wrap break-words">
+                      <div class="ds-menu-label">{{ t("grid.columnComment") }}</div>
+                      <div
+                        class="whitespace-pre-wrap break-words"
+                        :class="activeCellDetail.comment ? 'text-[var(--ds-text-2)]' : 'text-[var(--ds-text-4)]'"
+                      >
                         {{ activeCellDetail.comment || t("grid.noComment") }}
                       </div>
                     </div>
                   </template>
                   <div class="space-y-1" :class="cellDetailPanelIsBottom ? 'min-h-0' : ''">
                     <div class="flex items-center justify-between gap-2">
-                      <div class="text-muted-foreground">{{ t("grid.cellValue") }}</div>
+                      <div class="ds-menu-label">{{ t("grid.cellValue") }}</div>
                       <div v-if="!isEditingDetail" class="flex items-center gap-1">
                         <Button
                           v-if="activeCellDetail.formattedJson"
@@ -8054,11 +8135,11 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                       </div>
                     </div>
                     <div v-if="activeCellDetail.imagePreviewUrl && !isEditingDetail" class="space-y-1.5">
-                      <div class="text-muted-foreground">{{ t("grid.imagePreview") }}</div>
+                      <div class="ds-menu-label">{{ t("grid.imagePreview") }}</div>
                       <a
                         :href="activeCellDetail.imagePreviewUrl"
                         role="button"
-                        class="block overflow-hidden rounded border bg-muted/20"
+                        class="block overflow-hidden rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)]"
                         @click.prevent="openImagePreview(activeCellDetail.imagePreviewUrl, activeCellDetail.column)"
                       >
                         <img
@@ -8085,7 +8166,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                         v-else
                         ref="detailsEditorContainer"
                         data-cell-detail-editor-root
-                        class="w-full rounded border overflow-hidden"
+                        class="w-full rounded-md border border-[var(--ds-border)] overflow-hidden"
                         :class="cellDetailPanelIsBottom ? 'h-28' : 'h-40'"
                       />
                       <div class="flex gap-1 mt-1">
@@ -8099,8 +8180,11 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     </template>
                     <pre
                       v-else
-                      class="overflow-auto rounded border bg-muted/20 p-2 font-mono text-xs whitespace-pre-wrap break-words cursor-pointer hover:border-primary/50"
-                      :class="{ 'cursor-text': activeCellDetail.isEditable }"
+                      class="overflow-auto rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-2 font-mono text-xs text-[var(--ds-text-1)] whitespace-pre-wrap break-words transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)]"
+                      :class="{
+                        'cursor-text': activeCellDetail.isEditable,
+                        'italic text-[var(--ds-text-4)]': activeCellDetail.value === null,
+                      }"
                       @dblclick="startDetailEdit"
                       >{{
                         sideDetailJsonView && activeCellDetail.formattedJson
@@ -8110,7 +8194,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     >
                     <div
                       v-if="activeCellDetail.isValuePreviewTruncated && !sideDetailJsonView"
-                      class="text-[11px] text-muted-foreground"
+                      class="text-[11px] text-[var(--ds-text-3)]"
                     >
                       {{
                         t("grid.largeValuePreviewHint", {
@@ -8122,7 +8206,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                 </div>
 
                 <div
-                  class="border-t p-2 grid gap-1"
+                  class="border-t border-[var(--ds-border-soft)] p-2 grid gap-1"
                   :class="cellDetailPanelIsBottom ? 'grid-cols-[repeat(3,max-content)] justify-end' : 'grid-cols-1'"
                 >
                   <Button
@@ -8168,7 +8252,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     v-else
                     ref="valueEditorContainer"
                     data-cell-detail-editor-root
-                    class="min-h-0 flex-1 w-full rounded border overflow-auto"
+                    class="min-h-0 flex-1 w-full rounded-md border border-[var(--ds-border)] overflow-auto"
                   />
                 </div>
                 <div class="flex gap-1 mt-2 shrink-0">
@@ -8352,43 +8436,55 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
       <DialogContent v-if="dialogCellDetail" class="sm:max-w-[840px] max-h-[85vh] flex flex-col overflow-hidden">
         <DialogHeader class="shrink-0 pr-8">
           <DialogTitle class="flex min-w-0 items-center gap-2 text-sm">
-            <Info class="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span class="min-w-0 truncate">{{ t("grid.cellDetails") }}</span>
+            <Info class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
+            <span class="min-w-0 truncate text-[var(--ds-text-1)]">{{ t("grid.cellDetails") }}</span>
           </DialogTitle>
         </DialogHeader>
 
         <div class="min-h-0 flex-1 overflow-auto pr-1 text-xs space-y-4">
-          <div class="grid gap-3 rounded border bg-muted/20 p-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div class="grid gap-3 border-b border-[var(--ds-border-soft)] pb-4 sm:grid-cols-2 lg:grid-cols-4">
             <div class="space-y-1">
-              <div class="text-muted-foreground">{{ t("grid.columnName") }}</div>
-              <div class="font-medium break-all">{{ dialogCellDetail.column }}</div>
+              <div class="ds-menu-label">{{ t("grid.columnName") }}</div>
+              <div class="text-[12.5px] font-medium text-[var(--ds-text-1)] break-all">
+                {{ dialogCellDetail.column }}
+              </div>
             </div>
             <div class="space-y-1">
-              <div class="text-muted-foreground">{{ t("grid.rowNumber") }}</div>
-              <div>{{ dialogCellDetail.rowNumber }}</div>
+              <div class="ds-menu-label">{{ t("grid.rowNumber") }}</div>
+              <div class="font-mono text-[11.5px] tabular-nums text-[var(--ds-text-1)]">
+                {{ dialogCellDetail.rowNumber }}
+              </div>
             </div>
             <div class="space-y-1">
-              <div class="text-muted-foreground">{{ t("grid.columnType") }}</div>
-              <div :class="dialogCellDetail.type ? typeColorClass(dialogCellDetail.type) : 'text-muted-foreground'">
+              <div class="ds-menu-label">{{ t("grid.columnType") }}</div>
+              <div
+                class="font-mono text-[11px]"
+                :class="dialogCellDetail.type ? typeColorClass(dialogCellDetail.type) : 'text-[var(--ds-text-3)]'"
+              >
                 {{ dialogCellDetail.type || "-" }}
               </div>
             </div>
             <div class="space-y-1">
-              <div class="text-muted-foreground">{{ t("grid.valueLength") }}</div>
-              <div>{{ dialogCellDetail.length }}</div>
+              <div class="ds-menu-label">{{ t("grid.valueLength") }}</div>
+              <div class="font-mono text-[11.5px] tabular-nums text-[var(--ds-text-1)]">
+                {{ dialogCellDetail.length }}
+              </div>
             </div>
           </div>
 
           <div class="space-y-1">
-            <div class="text-muted-foreground">{{ t("grid.columnComment") }}</div>
-            <div class="whitespace-pre-wrap break-words">
+            <div class="ds-menu-label">{{ t("grid.columnComment") }}</div>
+            <div
+              class="whitespace-pre-wrap break-words"
+              :class="dialogCellDetail.comment ? 'text-[var(--ds-text-2)]' : 'text-[var(--ds-text-4)]'"
+            >
               {{ dialogCellDetail.comment || t("grid.noComment") }}
             </div>
           </div>
 
           <div class="space-y-2">
             <div class="flex items-center justify-between gap-2">
-              <div class="text-muted-foreground">{{ t("grid.cellValue") }}</div>
+              <div class="ds-menu-label">{{ t("grid.cellValue") }}</div>
               <div class="flex items-center gap-1">
                 <Button
                   v-if="dialogCellDetail.formattedJson"
@@ -8459,7 +8555,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               v-if="dialogCellDetail.imagePreviewUrl"
               :href="dialogCellDetail.imagePreviewUrl"
               role="button"
-              class="block max-h-72 overflow-hidden rounded border bg-muted/20"
+              class="block max-h-72 overflow-hidden rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)]"
               @click.prevent="openImagePreview(dialogCellDetail.imagePreviewUrl, dialogCellDetail.column)"
             >
               <img
@@ -8472,8 +8568,8 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               />
             </a>
             <pre
-              class="max-h-[44vh] overflow-auto rounded border bg-muted/20 p-3 font-mono text-xs whitespace-pre-wrap break-words"
-              :class="{ 'italic text-muted-foreground': dialogCellDetail.value === null }"
+              class="max-h-[44vh] overflow-auto rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-3 font-mono text-xs text-[var(--ds-text-1)] whitespace-pre-wrap break-words"
+              :class="{ 'italic text-[var(--ds-text-4)]': dialogCellDetail.value === null }"
               >{{
                 cellDetailJsonView && dialogCellDetail.formattedJson
                   ? dialogCellDetail.formattedJson
@@ -8482,7 +8578,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
             >
             <div
               v-if="dialogCellDetail.isValuePreviewTruncated && !cellDetailJsonView"
-              class="text-[11px] text-muted-foreground"
+              class="text-[11px] text-[var(--ds-text-3)]"
             >
               {{ t("grid.largeValuePreviewHint", { count: dialogCellDetail.rawValuePreview.length }) }}
             </div>
@@ -8502,32 +8598,37 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
       <DialogContent v-if="rowDetail" class="sm:max-w-[960px] max-h-[85vh] flex flex-col overflow-hidden">
         <DialogHeader class="shrink-0 pr-8">
           <DialogTitle class="flex min-w-0 items-center gap-2 text-sm">
-            <ListTree class="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span class="min-w-0 truncate">{{ t("grid.rowDetailsFor", { row: rowDetail.rowNumber }) }}</span>
+            <ListTree class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
+            <span class="min-w-0 truncate text-[var(--ds-text-1)]">{{
+              t("grid.rowDetailsFor", { row: rowDetail.rowNumber })
+            }}</span>
           </DialogTitle>
         </DialogHeader>
 
-        <div class="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-          <span class="whitespace-nowrap">{{ t("grid.columnsCount", { count: rowDetail.fields.length }) }}</span>
+        <div class="flex shrink-0 items-center gap-2 text-xs text-[var(--ds-text-3)]">
+          <span class="whitespace-nowrap tabular-nums">{{
+            t("grid.columnsCount", { count: rowDetail.fields.length })
+          }}</span>
           <div class="relative ml-auto w-56 max-w-full">
             <Search
-              class="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+              class="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ds-text-3)]"
             />
-            <Input
+            <input
               v-model="rowDetailSearch"
               :placeholder="t('grid.detailSearchPlaceholder')"
-              class="h-7 pl-7 text-xs"
+              class="w-full h-7 pl-7 pr-2 text-xs rounded-md bg-[var(--ds-bg-input)] border border-[var(--ds-border)] text-[var(--ds-text-1)] placeholder:text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] focus:outline-none focus:border-[var(--ds-accent-line)]"
+              @keydown.escape="rowDetailSearch = ''"
             />
           </div>
         </div>
 
-        <div class="min-h-0 flex-1 overflow-auto rounded border">
+        <div class="min-h-0 flex-1 overflow-auto rounded-md border border-[var(--ds-border)]">
           <table class="w-full min-w-[640px] text-xs">
-            <thead class="sticky top-0 z-10 bg-muted/80 text-muted-foreground backdrop-blur">
-              <tr class="border-b">
-                <th class="w-16 px-3 py-2 text-left font-medium">{{ t("grid.fieldIndex") }}</th>
-                <th class="w-56 px-3 py-2 text-left font-medium">{{ t("grid.columnName") }}</th>
-                <th class="px-3 py-2 text-left font-medium">{{ t("grid.cellValue") }}</th>
+            <thead class="sticky top-0 z-10 bg-[var(--ds-bg-elevated)] text-[var(--ds-text-2)]">
+              <tr class="border-b border-[var(--ds-border)]">
+                <th class="w-16 px-3 py-2 text-left text-[11.5px] font-medium">{{ t("grid.fieldIndex") }}</th>
+                <th class="w-56 px-3 py-2 text-left text-[11.5px] font-medium">{{ t("grid.columnName") }}</th>
+                <th class="px-3 py-2 text-left text-[11.5px] font-medium">{{ t("grid.cellValue") }}</th>
                 <th class="w-10 px-2 py-2"></th>
               </tr>
             </thead>
@@ -8535,23 +8636,25 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               <tr
                 v-for="(field, fieldIndex) in filteredRowDetailFields"
                 :key="`${field.colIndex}:${field.column}`"
-                class="border-b align-top last:border-b-0"
+                class="border-b border-[var(--ds-border-soft)] align-top last:border-b-0 transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)]"
               >
-                <td class="px-3 py-2 text-muted-foreground tabular-nums">{{ fieldIndex + 1 }}</td>
+                <td class="px-3 py-2 font-mono text-[11px] tabular-nums text-[var(--ds-text-4)]">
+                  {{ fieldIndex + 1 }}
+                </td>
                 <td class="px-3 py-2">
-                  <div class="font-medium break-words">{{ field.column }}</div>
+                  <div class="font-medium text-[var(--ds-text-1)] break-words">{{ field.column }}</div>
                   <div
-                    :class="field.type ? typeColorClass(field.type) : 'text-muted-foreground'"
-                    class="mt-1 text-[11px]"
+                    class="mt-1 font-mono text-[11px]"
+                    :class="field.type ? typeColorClass(field.type) : 'text-[var(--ds-text-3)]'"
                   >
                     {{ field.type || "-" }}
                   </div>
-                  <div v-if="field.comment" class="mt-1 text-[11px] text-muted-foreground whitespace-pre-wrap">
+                  <div v-if="field.comment" class="mt-1 text-[11px] text-[var(--ds-text-3)] whitespace-pre-wrap">
                     {{ field.comment }}
                   </div>
                 </td>
                 <td class="w-full max-w-0 px-3 py-2">
-                  <div class="mb-1 text-[11px] text-muted-foreground">
+                  <div class="mb-1 text-[11px] text-[var(--ds-text-3)]">
                     {{ field.value === null ? t("grid.nullValue") : t("grid.valueLength") }}:
                     {{ field.value === null ? "true" : field.length }}
                   </div>
@@ -8559,7 +8662,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     v-if="field.imagePreviewUrl"
                     :href="field.imagePreviewUrl"
                     role="button"
-                    class="mb-2 block max-h-48 overflow-hidden rounded border bg-muted/20"
+                    class="mb-2 block max-h-48 overflow-hidden rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)]"
                     @click.prevent="openImagePreview(field.imagePreviewUrl, field.column)"
                   >
                     <img
@@ -8572,17 +8675,17 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     />
                   </a>
                   <pre
-                    class="max-h-44 overflow-auto rounded border bg-muted/20 p-2 font-mono text-xs whitespace-pre-wrap break-words"
-                    :class="{ 'italic text-muted-foreground': field.value === null }"
+                    class="max-h-44 overflow-auto rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-2 font-mono text-xs text-[var(--ds-text-1)] whitespace-pre-wrap break-words"
+                    :class="{ 'italic text-[var(--ds-text-4)]': field.value === null }"
                     >{{ field.rawValuePreview }}</pre
                   >
-                  <div v-if="field.isValuePreviewTruncated" class="mt-1 text-[11px] text-muted-foreground">
+                  <div v-if="field.isValuePreviewTruncated" class="mt-1 text-[11px] text-[var(--ds-text-3)]">
                     {{ t("grid.largeValuePreviewHint", { count: field.rawValuePreview.length }) }}
                   </div>
                   <div v-if="field.formattedJson" class="mt-2 space-y-1">
-                    <div class="text-muted-foreground">{{ t("grid.formattedJson") }}</div>
+                    <div class="ds-menu-label">{{ t("grid.formattedJson") }}</div>
                     <pre
-                      class="max-h-44 overflow-auto rounded border bg-muted/20 p-2 font-mono text-xs whitespace-pre-wrap break-words"
+                      class="max-h-44 overflow-auto rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-2 font-mono text-xs text-[var(--ds-text-1)] whitespace-pre-wrap break-words"
                       >{{ field.formattedJson }}</pre
                     >
                   </div>
@@ -8602,7 +8705,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
           </table>
           <div
             v-if="rowDetailSearch && !filteredRowDetailFields.length"
-            class="px-3 py-6 text-center text-xs text-muted-foreground"
+            class="px-3 py-6 text-center text-xs text-[var(--ds-text-3)]"
           >
             {{ t("grid.detailSearchNoMatch") }}
           </div>
@@ -8625,54 +8728,65 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
       <DialogContent v-if="columnDetail" class="sm:max-w-[900px] max-h-[85vh] flex flex-col overflow-hidden">
         <DialogHeader class="shrink-0 pr-8">
           <DialogTitle class="flex min-w-0 items-center gap-2 text-sm">
-            <TableProperties class="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span class="min-w-0 truncate">{{ t("grid.columnDetailsFor", { column: columnDetail.column }) }}</span>
+            <TableProperties class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
+            <span class="min-w-0 truncate text-[var(--ds-text-1)]">{{
+              t("grid.columnDetailsFor", { column: columnDetail.column })
+            }}</span>
           </DialogTitle>
         </DialogHeader>
 
-        <div class="grid shrink-0 gap-3 rounded border bg-muted/20 p-3 text-xs sm:grid-cols-3">
+        <div class="grid shrink-0 gap-3 border-b border-[var(--ds-border-soft)] pb-4 text-xs sm:grid-cols-3">
           <div class="space-y-1">
-            <div class="text-muted-foreground">{{ t("grid.columnName") }}</div>
-            <div class="font-medium break-all">{{ columnDetail.column }}</div>
+            <div class="ds-menu-label">{{ t("grid.columnName") }}</div>
+            <div class="text-[12.5px] font-medium text-[var(--ds-text-1)] break-all">{{ columnDetail.column }}</div>
           </div>
           <div class="space-y-1">
-            <div class="text-muted-foreground">{{ t("grid.columnType") }}</div>
-            <div :class="columnDetail.type ? typeColorClass(columnDetail.type) : 'text-muted-foreground'">
+            <div class="ds-menu-label">{{ t("grid.columnType") }}</div>
+            <div
+              class="font-mono text-[11px]"
+              :class="columnDetail.type ? typeColorClass(columnDetail.type) : 'text-[var(--ds-text-3)]'"
+            >
               {{ columnDetail.type || "-" }}
             </div>
           </div>
           <div class="space-y-1">
-            <div class="text-muted-foreground">{{ t("grid.rowCount") }}</div>
-            <div>{{ columnDetail.fields.length }}</div>
+            <div class="ds-menu-label">{{ t("grid.rowCount") }}</div>
+            <div class="font-mono text-[11.5px] tabular-nums text-[var(--ds-text-1)]">
+              {{ columnDetail.fields.length }}
+            </div>
           </div>
           <div class="space-y-1 sm:col-span-3">
-            <div class="text-muted-foreground">{{ t("grid.columnComment") }}</div>
-            <div class="whitespace-pre-wrap break-words">
+            <div class="ds-menu-label">{{ t("grid.columnComment") }}</div>
+            <div
+              class="whitespace-pre-wrap break-words"
+              :class="columnDetail.comment ? 'text-[var(--ds-text-2)]' : 'text-[var(--ds-text-4)]'"
+            >
               {{ columnDetail.comment || t("grid.noComment") }}
             </div>
           </div>
         </div>
 
-        <div class="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-          <span class="whitespace-nowrap">{{ t("grid.rowCount") }}: {{ columnDetail.fields.length }}</span>
+        <div class="flex shrink-0 items-center gap-2 text-xs text-[var(--ds-text-3)]">
+          <span class="whitespace-nowrap tabular-nums">{{ t("grid.rowCount") }}: {{ columnDetail.fields.length }}</span>
           <div class="relative ml-auto w-56 max-w-full">
             <Search
-              class="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+              class="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ds-text-3)]"
             />
-            <Input
+            <input
               v-model="columnDetailSearch"
               :placeholder="t('grid.detailSearchPlaceholder')"
-              class="h-7 pl-7 text-xs"
+              class="w-full h-7 pl-7 pr-2 text-xs rounded-md bg-[var(--ds-bg-input)] border border-[var(--ds-border)] text-[var(--ds-text-1)] placeholder:text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] focus:outline-none focus:border-[var(--ds-accent-line)]"
+              @keydown.escape="columnDetailSearch = ''"
             />
           </div>
         </div>
 
-        <div class="min-h-0 flex-1 overflow-auto rounded border">
+        <div class="min-h-0 flex-1 overflow-auto rounded-md border border-[var(--ds-border)]">
           <table class="w-full min-w-[500px] text-xs">
-            <thead class="sticky top-0 z-10 bg-muted/80 text-muted-foreground backdrop-blur">
-              <tr class="border-b">
-                <th class="w-24 px-3 py-2 text-left font-medium">{{ t("grid.rowNumber") }}</th>
-                <th class="px-3 py-2 text-left font-medium">{{ t("grid.cellValue") }}</th>
+            <thead class="sticky top-0 z-10 bg-[var(--ds-bg-elevated)] text-[var(--ds-text-2)]">
+              <tr class="border-b border-[var(--ds-border)]">
+                <th class="w-24 px-3 py-2 text-left text-[11.5px] font-medium">{{ t("grid.rowNumber") }}</th>
+                <th class="px-3 py-2 text-left text-[11.5px] font-medium">{{ t("grid.cellValue") }}</th>
                 <th class="w-10 px-2 py-2"></th>
               </tr>
             </thead>
@@ -8680,11 +8794,13 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               <tr
                 v-for="field in filteredColumnDetailFields"
                 :key="`${field.rowId}:${field.colIndex}`"
-                class="border-b align-top last:border-b-0"
+                class="border-b border-[var(--ds-border-soft)] align-top last:border-b-0 transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)]"
               >
-                <td class="px-3 py-2 tabular-nums">{{ field.rowNumber }}</td>
+                <td class="px-3 py-2 font-mono text-[11px] tabular-nums text-[var(--ds-text-3)]">
+                  {{ field.rowNumber }}
+                </td>
                 <td class="w-full max-w-0 px-3 py-2">
-                  <div class="mb-1 text-[11px] text-muted-foreground">
+                  <div class="mb-1 text-[11px] text-[var(--ds-text-3)]">
                     {{ field.value === null ? t("grid.nullValue") : t("grid.valueLength") }}:
                     {{ field.value === null ? "true" : field.length }}
                   </div>
@@ -8692,7 +8808,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     v-if="field.imagePreviewUrl"
                     :href="field.imagePreviewUrl"
                     role="button"
-                    class="mb-2 block max-h-40 overflow-hidden rounded border bg-muted/20"
+                    class="mb-2 block max-h-40 overflow-hidden rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)]"
                     @click.prevent="openImagePreview(field.imagePreviewUrl, field.column)"
                   >
                     <img
@@ -8705,17 +8821,17 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     />
                   </a>
                   <pre
-                    class="max-h-36 overflow-auto rounded border bg-muted/20 p-2 font-mono text-xs whitespace-pre-wrap break-words"
-                    :class="{ 'italic text-muted-foreground': field.value === null }"
+                    class="max-h-36 overflow-auto rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-2 font-mono text-xs text-[var(--ds-text-1)] whitespace-pre-wrap break-words"
+                    :class="{ 'italic text-[var(--ds-text-4)]': field.value === null }"
                     >{{ field.rawValuePreview }}</pre
                   >
-                  <div v-if="field.isValuePreviewTruncated" class="mt-1 text-[11px] text-muted-foreground">
+                  <div v-if="field.isValuePreviewTruncated" class="mt-1 text-[11px] text-[var(--ds-text-3)]">
                     {{ t("grid.largeValuePreviewHint", { count: field.rawValuePreview.length }) }}
                   </div>
                   <div v-if="field.formattedJson" class="mt-2 space-y-1">
-                    <div class="text-muted-foreground">{{ t("grid.formattedJson") }}</div>
+                    <div class="ds-menu-label">{{ t("grid.formattedJson") }}</div>
                     <pre
-                      class="max-h-36 overflow-auto rounded border bg-muted/20 p-2 font-mono text-xs whitespace-pre-wrap break-words"
+                      class="max-h-36 overflow-auto rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-2 font-mono text-xs text-[var(--ds-text-1)] whitespace-pre-wrap break-words"
                       >{{ field.formattedJson }}</pre
                     >
                   </div>
@@ -8735,7 +8851,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
           </table>
           <div
             v-if="columnDetailSearch && !filteredColumnDetailFields.length"
-            class="px-3 py-6 text-center text-xs text-muted-foreground"
+            class="px-3 py-6 text-center text-xs text-[var(--ds-text-3)]"
           >
             {{ t("grid.detailSearchNoMatch") }}
           </div>
@@ -8815,7 +8931,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
   --data-grid-cell-selected-bg: rgb(226 226 226);
   --data-grid-cell-selected-dirty-bg: rgb(244 229 186);
   --data-grid-cell-selected-border: rgb(90 90 90);
-  --data-grid-cell-hover-bg: rgb(245 245 245);
+  --data-grid-cell-hover-bg: var(--ds-bg-hover, rgb(245 245 245));
   --data-grid-cell-search-bg: rgb(253 245 184);
   --data-grid-cell-current-search-bg: rgb(253 224 71 / 52%);
   --data-grid-cell-current-search-border: rgb(234 179 8 / 82%);
@@ -8827,7 +8943,10 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
   --data-grid-row-number-selected-bg: rgb(226 226 226);
 }
 
-:global(.dark) [data-grid-root] {
+/* NOTE: do not write this as `:global(.dark) [data-grid-root]` — the SFC
+   compiler drops everything after the :global() wrapper, so the dark values
+   would land on `.dark` itself and be shadowed by the light block above. */
+.dark [data-grid-root] {
   --data-grid-row-muted-bg: rgb(32 32 34);
   --data-grid-row-new-bg: rgb(51 51 55);
   --data-grid-row-deleted-bg: rgb(55 31 32);
@@ -8836,7 +8955,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
   --data-grid-cell-selected-bg: rgb(66 67 70);
   --data-grid-cell-selected-dirty-bg: rgb(94 75 26);
   --data-grid-cell-selected-border: rgb(170 170 175);
-  --data-grid-cell-hover-bg: rgb(46 47 51);
+  --data-grid-cell-hover-bg: var(--ds-bg-hover, rgb(46 47 51));
   --data-grid-cell-search-bg: rgb(72 57 8);
   --data-grid-cell-current-search-bg: rgb(116 87 0);
   --data-grid-cell-current-search-border: rgb(239 177 0);
@@ -8849,34 +8968,33 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
 }
 
 @supports (background: color-mix(in oklab, white 50%, transparent)) {
-  [data-grid-root] {
+  /* The values below are theme-aware (they reference vars that flip with
+     `.dark`), so one block serves both modes — but it needs the `.dark`
+     variant in the selector list to outrank the dark literal block above. */
+  [data-grid-root],
+  .dark [data-grid-root] {
     --data-grid-row-muted-bg: color-mix(in oklab, var(--muted) 30%, transparent);
     --data-grid-row-new-bg: color-mix(in oklab, var(--primary) 5%, transparent);
     --data-grid-row-deleted-bg: color-mix(in oklab, var(--destructive) 5%, transparent);
-    --data-grid-cell-active-bg: color-mix(in oklab, var(--primary) 15%, transparent);
+    --data-grid-cell-active-bg: var(--ds-bg-active);
     --data-grid-cell-dirty-bg: color-mix(in oklab, rgb(240 177 0) 10%, transparent);
-    --data-grid-cell-selected-bg: color-mix(in oklab, var(--primary) 25%, transparent);
+    --data-grid-cell-selected-bg: var(--ds-accent-soft);
     --data-grid-cell-selected-dirty-bg: color-mix(
       in oklab,
       rgb(234 181 50) 30%,
-      color-mix(in oklab, var(--primary) 18%, transparent)
+      color-mix(in oklab, var(--ds-accent) 18%, transparent)
     );
-    --data-grid-cell-selected-border: color-mix(in oklab, var(--primary) 70%, transparent);
-    --data-grid-cell-hover-bg: color-mix(in oklab, var(--accent) 50%, transparent);
+    --data-grid-cell-selected-border: var(--ds-accent-line);
     --data-grid-row-number-new-bg: color-mix(in oklab, rgb(16 185 129) 15%, var(--background));
     --data-grid-row-number-edited-bg: color-mix(in oklab, rgb(245 158 11) 15%, var(--background));
     --data-grid-row-number-deleted-bg: color-mix(in oklab, var(--destructive) 15%, var(--background));
-    --data-grid-row-number-active-bg: color-mix(in oklab, var(--primary) 15%, var(--background));
-    --data-grid-row-number-selected-bg: color-mix(in oklab, var(--primary) 25%, var(--background));
+    --data-grid-row-number-active-bg: color-mix(in oklab, var(--foreground) 7%, var(--background));
+    --data-grid-row-number-selected-bg: color-mix(in oklab, var(--ds-accent) 22%, var(--background));
   }
 }
 
 .data-grid-topbar {
   min-width: 760px;
-}
-
-.data-grid-topbar-scroll {
-  scrollbar-width: thin;
 }
 
 .data-grid-scroller {
@@ -8958,6 +9076,14 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
 
 .transpose-record-header-active {
   background-color: var(--data-grid-row-number-selected-bg);
+}
+
+/* Transpose record selection reads as a flat accent wash — per-cell outlines
+   would ladder between the stacked field rows. Explicitly selected cells keep
+   their glass treatment. */
+.transpose-grid-scroller .row-cell-selected,
+.transpose-grid-scroller .row-cell-selected-dirty {
+  outline: none;
 }
 
 .cell-selected-dirty {
