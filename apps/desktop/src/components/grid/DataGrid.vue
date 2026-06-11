@@ -54,9 +54,11 @@ import {
   Link2,
   ListTree,
   Maximize2,
+  MoveRight,
   PanelBottom,
   PanelRight,
   TableProperties,
+  Zap,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import CustomContextMenu, { type ContextMenuItem } from "@/components/ui/CustomContextMenu.vue";
@@ -5383,7 +5385,7 @@ const tableInfoTabs = computed(
         icon: Link2,
         count: foreignKeys.value.length,
       },
-      { id: "triggers" as const, label: t("grid.tableInfoTriggers"), icon: RotateCcw, count: triggers.value.length },
+      { id: "triggers" as const, label: t("grid.tableInfoTriggers"), icon: Zap, count: triggers.value.length },
       { id: "ddl" as const, label: "DDL", icon: Code2 },
     ] satisfies Array<{ id: TableInfoTab; label: string; icon: Component; count?: number }>,
 );
@@ -7565,34 +7567,34 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
           <!-- Table Info Drawer -->
           <div
             v-if="showTableInfo"
-            class="relative col-start-2 row-start-1 border-l flex flex-col bg-background min-w-0"
+            class="relative col-start-2 row-start-1 border-l border-[var(--ds-border)] flex flex-col bg-background min-w-0"
             :class="[{ 'row-span-2': cellDetailPanelIsBottom }, { 'ddl-drawer-resizing': isResizingDdl }]"
             :style="ddlDrawerStyle"
           >
             <div
-              class="absolute left-0 top-0 bottom-0 z-20 w-1.5 -translate-x-1/2 cursor-col-resize hover:bg-primary/30"
+              class="absolute left-0 top-0 bottom-0 z-20 w-1.5 -translate-x-1/2 cursor-col-resize transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-accent-line)]"
               @mousedown.prevent="onDdlResizeStart"
             />
-            <div class="flex items-center gap-2 px-3 py-1.5 border-b shrink-0 bg-muted/20">
-              <TableProperties class="w-3.5 h-3.5 text-muted-foreground" />
-              <span class="text-xs font-medium flex-1 min-w-0 truncate">{{ tableMeta?.tableName }}</span>
+            <div class="h-9 flex items-center gap-2 px-3 border-b border-[var(--ds-border-soft)] shrink-0">
+              <TableProperties class="w-3.5 h-3.5 text-[var(--ds-text-3)]" />
+              <span class="text-[12.5px] font-medium text-[var(--ds-text-1)] flex-1 min-w-0 truncate">{{
+                tableMeta?.tableName
+              }}</span>
               <Button
                 v-if="activeTableInfoTab === 'ddl'"
                 variant="ghost"
-                size="sm"
-                class="h-6 px-2 text-xs"
+                size="icon-xs"
                 :title="t('grid.copyDdl')"
                 :aria-label="t('grid.copyDdl')"
                 @click="copyDdl"
               >
                 <Copy class="w-3 h-3" />
-                <span>{{ t("grid.copyDdl") }}</span>
               </Button>
               <Button
                 v-if="activeTableInfoTab === 'ddl'"
                 variant="ghost"
                 size="icon-xs"
-                :class="{ 'bg-accent': ddlWrap }"
+                :class="{ 'bg-[var(--ds-bg-active)] text-[var(--ds-text-1)]': ddlWrap }"
                 @click="toggleDdlWrap"
               >
                 <WrapText class="w-3 h-3" />
@@ -7601,32 +7603,40 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                 <X class="w-3 h-3" />
               </Button>
             </div>
-            <div class="grid grid-cols-5 border-b bg-background shrink-0">
-              <button
-                v-for="tab in tableInfoTabs"
-                :key="tab.id"
-                class="h-9 min-w-0 px-1.5 text-[11px] text-muted-foreground border-b-2 border-transparent hover:bg-muted/50 hover:text-foreground"
-                :class="{ 'border-primary text-foreground bg-muted/40': activeTableInfoTab === tab.id }"
-                :title="tab.label"
-                @click="selectTableInfoTab(tab.id)"
-              >
-                <component :is="tab.icon" class="mx-auto h-3.5 w-3.5" />
-                <span class="block truncate">{{ tab.label }}</span>
-              </button>
+            <div class="grid grid-cols-5 border-b border-[var(--ds-border-soft)] shrink-0">
+              <Tooltip v-for="tab in tableInfoTabs" :key="tab.id" :delay-duration="0">
+                <TooltipTrigger as-child>
+                  <button
+                    class="h-8 min-w-0 text-[var(--ds-text-3)] border-b-2 border-transparent transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]"
+                    :class="{
+                      'border-[var(--ds-accent)] bg-[var(--ds-bg-active)]': activeTableInfoTab === tab.id,
+                    }"
+                    :aria-label="tab.label"
+                    @click="selectTableInfoTab(tab.id)"
+                  >
+                    <component
+                      :is="tab.icon"
+                      class="mx-auto h-3.5 w-3.5 transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)]"
+                      :style="activeTableInfoTab === tab.id ? { color: 'var(--ds-accent)' } : undefined"
+                    />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" :side-offset="4">{{ tab.label }}</TooltipContent>
+              </Tooltip>
             </div>
 
-            <div class="px-2 py-1.5 border-b shrink-0 bg-background">
+            <div class="px-2 py-1.5 border-b border-[var(--ds-border-soft)] shrink-0">
               <div class="relative">
-                <Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                <Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--ds-text-3)]" />
                 <input
                   v-model="searchQuery"
                   :placeholder="t('grid.tableInfoSearch')"
-                  class="w-full h-7 pl-7 pr-6 text-xs bg-muted/50 rounded border border-border focus:outline-none focus:border-primary/50"
+                  class="w-full h-7 pl-7 pr-6 text-xs rounded-md bg-[var(--ds-bg-input)] border border-[var(--ds-border)] text-[var(--ds-text-1)] placeholder:text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] focus:outline-none focus:border-[var(--ds-accent-line)]"
                   @keydown.escape="searchQuery = ''"
                 />
                 <button
                   v-if="searchQuery"
-                  class="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  class="absolute right-1.5 top-1/2 -translate-y-1/2 text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:text-[var(--ds-text-1)]"
                   @click="searchQuery = ''"
                 >
                   <X class="w-3 h-3" />
@@ -7637,23 +7647,23 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
             <div v-if="activeTableInfoTab === 'columns'" class="flex-1 min-h-0 overflow-auto">
               <div
                 v-if="searchQuery && filteredColumns.length === 0"
-                class="p-6 text-center text-xs text-muted-foreground"
+                class="p-6 text-center text-xs text-[var(--ds-text-3)]"
               >
                 {{ t("grid.tableInfoNoResults") }}
               </div>
               <table v-else class="w-full text-xs">
-                <thead class="sticky top-0 bg-muted/80 backdrop-blur text-muted-foreground">
-                  <tr class="border-b">
-                    <th class="text-left font-medium px-3 py-2">{{ t("grid.columnName") }}</th>
-                    <th class="text-left font-medium px-3 py-2">{{ t("grid.columnType") }}</th>
-                    <th class="text-left font-medium px-3 py-2">{{ t("grid.tableInfoNullable") }}</th>
+                <thead class="sticky top-0 bg-[var(--ds-bg-elevated)] text-[var(--ds-text-2)]">
+                  <tr class="border-b border-[var(--ds-border)]">
+                    <th class="text-left text-[11.5px] font-medium px-3 py-2">{{ t("grid.columnName") }}</th>
+                    <th class="text-left text-[11.5px] font-medium px-3 py-2">{{ t("grid.columnType") }}</th>
+                    <th class="text-left text-[11.5px] font-medium px-3 py-2">{{ t("grid.tableInfoNullable") }}</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr
                     v-for="column in filteredColumns"
                     :key="column.name"
-                    class="border-b cursor-pointer hover:bg-muted/30"
+                    class="border-b border-[var(--ds-border-soft)] cursor-pointer transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)]"
                     role="button"
                     tabindex="0"
                     :title="column.name"
@@ -7661,17 +7671,27 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     @keydown.enter.prevent="scrollToTableInfoColumn(column.name)"
                     @keydown.space.prevent="scrollToTableInfoColumn(column.name)"
                   >
-                    <td class="px-3 py-2 font-medium">
+                    <td class="px-3 py-2 font-medium text-[var(--ds-text-1)]">
                       <span class="inline-flex items-center gap-1.5">
-                        <KeyRound v-if="column.is_primary_key" class="h-3 w-3 text-amber-500" />
+                        <KeyRound v-if="column.is_primary_key" class="h-3 w-3 text-[var(--ds-amber)]" />
                         {{ column.name }}
                       </span>
-                      <div v-if="column.comment" class="mt-0.5 text-[11px] text-muted-foreground truncate">
+                      <div
+                        v-if="column.comment"
+                        class="mt-0.5 text-[11px] font-normal text-[var(--ds-text-3)] truncate"
+                      >
                         {{ column.comment }}
                       </div>
                     </td>
-                    <td class="px-3 py-2 font-mono text-[11px] text-muted-foreground">{{ column.data_type }}</td>
-                    <td class="px-3 py-2">{{ column.is_nullable ? "YES" : "NO" }}</td>
+                    <td class="px-3 py-2 font-mono text-[11px]" :class="typeColorClass(column.data_type)">
+                      {{ column.data_type }}
+                    </td>
+                    <td
+                      class="px-3 py-2"
+                      :class="column.is_nullable ? 'text-[var(--ds-text-3)]' : 'text-[var(--ds-text-2)]'"
+                    >
+                      {{ column.is_nullable ? "YES" : "NO" }}
+                    </td>
                   </tr>
                 </tbody>
               </table>
@@ -7679,31 +7699,39 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
 
             <div v-else-if="activeTableInfoTab === 'indexes'" class="flex-1 min-h-0 overflow-auto">
               <div v-if="indexesLoading" class="h-full flex items-center justify-center">
-                <Loader2 class="w-4 h-4 animate-spin text-muted-foreground" />
+                <Loader2 class="w-4 h-4 animate-spin text-[var(--ds-text-3)]" />
               </div>
-              <div v-else-if="indexesError" class="p-3 text-xs text-destructive">{{ indexesError }}</div>
+              <div v-else-if="indexesError" class="p-3 text-xs text-[var(--ds-red)]">{{ indexesError }}</div>
               <div
                 v-else-if="searchQuery && filteredIndexes.length === 0"
-                class="p-6 text-center text-xs text-muted-foreground"
+                class="p-6 text-center text-xs text-[var(--ds-text-3)]"
               >
                 {{ t("grid.tableInfoNoResults") }}
               </div>
-              <div v-else-if="indexes.length === 0" class="p-6 text-center text-xs text-muted-foreground">
+              <div v-else-if="indexes.length === 0" class="p-6 text-center text-xs text-[var(--ds-text-3)]">
                 {{ t("grid.tableInfoEmpty") }}
               </div>
-              <div v-else class="divide-y">
+              <div v-else class="divide-y divide-[var(--ds-border-soft)]">
                 <div v-for="index in filteredIndexes" :key="index.name" class="p-3 text-xs">
-                  <div class="font-medium truncate">{{ index.name }}</div>
-                  <div class="mt-1 flex flex-wrap gap-1">
-                    <span v-if="index.is_primary" class="rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-600">PK</span>
-                    <span v-if="index.is_unique" class="rounded bg-emerald-500/10 px-1.5 py-0.5 text-emerald-600"
+                  <div class="font-medium text-[var(--ds-text-1)] truncate">{{ index.name }}</div>
+                  <div class="mt-1.5 flex flex-wrap gap-1">
+                    <span
+                      v-if="index.is_primary"
+                      class="inline-flex h-4 items-center justify-center rounded font-mono text-[9.5px] font-semibold leading-none tracking-wide px-1.5 bg-[color-mix(in_srgb,var(--ds-amber)_13%,transparent)] text-[var(--ds-amber)]"
+                      >PK</span
+                    >
+                    <span
+                      v-if="index.is_unique"
+                      class="inline-flex h-4 items-center justify-center rounded font-mono text-[9.5px] font-semibold leading-none tracking-wide px-1.5 bg-[color-mix(in_srgb,var(--ds-green)_13%,transparent)] text-[var(--ds-green)]"
                       >UNIQUE</span
                     >
-                    <span v-if="index.index_type" class="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{{
-                      index.index_type
-                    }}</span>
+                    <span
+                      v-if="index.index_type"
+                      class="inline-flex h-4 items-center justify-center rounded font-mono text-[9.5px] font-semibold leading-none tracking-wide px-1.5 bg-[var(--ds-bg-elevated)] border border-[var(--ds-border)] text-[var(--ds-text-3)]"
+                      >{{ index.index_type }}</span
+                    >
                   </div>
-                  <div class="mt-2 font-mono text-[11px] text-muted-foreground break-all">
+                  <div class="mt-2 font-mono text-[11px] text-[var(--ds-text-2)] break-all">
                     {{ index.columns.join(", ") }}
                   </div>
                 </div>
@@ -7712,23 +7740,42 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
 
             <div v-else-if="activeTableInfoTab === 'foreignKeys'" class="flex-1 min-h-0 overflow-auto">
               <div v-if="foreignKeysLoading" class="h-full flex items-center justify-center">
-                <Loader2 class="w-4 h-4 animate-spin text-muted-foreground" />
+                <Loader2 class="w-4 h-4 animate-spin text-[var(--ds-text-3)]" />
               </div>
-              <div v-else-if="foreignKeysError" class="p-3 text-xs text-destructive">{{ foreignKeysError }}</div>
+              <div v-else-if="foreignKeysError" class="p-3 text-xs text-[var(--ds-red)]">{{ foreignKeysError }}</div>
               <div
                 v-else-if="searchQuery && filteredForeignKeys.length === 0"
-                class="p-6 text-center text-xs text-muted-foreground"
+                class="p-6 text-center text-xs text-[var(--ds-text-3)]"
               >
                 {{ t("grid.tableInfoNoResults") }}
               </div>
-              <div v-else-if="foreignKeys.length === 0" class="p-6 text-center text-xs text-muted-foreground">
+              <div v-else-if="foreignKeys.length === 0" class="p-6 text-center text-xs text-[var(--ds-text-3)]">
                 {{ t("grid.tableInfoEmpty") }}
               </div>
-              <div v-else class="divide-y">
+              <div v-else class="divide-y divide-[var(--ds-border-soft)]">
                 <div v-for="fk in filteredForeignKeys" :key="`${fk.name}:${fk.column}`" class="p-3 text-xs">
-                  <div class="font-medium truncate">{{ fk.name }}</div>
-                  <div class="mt-1 font-mono text-[11px] text-muted-foreground break-all">
-                    {{ fk.column }} -> {{ fk.ref_table }}.{{ fk.ref_column }}
+                  <div class="flex items-center gap-1.5 min-w-0">
+                    <Link2 class="h-3 w-3 shrink-0 text-[var(--ds-text-4)]" />
+                    <span class="font-medium text-[var(--ds-text-1)] truncate" :title="fk.name">{{ fk.name }}</span>
+                  </div>
+                  <div class="mt-1.5 flex items-center gap-1.5 min-w-0">
+                    <span
+                      class="inline-flex h-[18px] min-w-0 items-center rounded border border-[var(--ds-border)] bg-[var(--ds-bg-elevated)] px-1.5 font-mono text-[10.5px] text-[var(--ds-text-1)]"
+                      :title="fk.column"
+                    >
+                      <span class="truncate">{{ fk.column }}</span>
+                    </span>
+                    <MoveRight class="h-3 w-3 shrink-0 text-[var(--ds-text-4)]" />
+                    <span
+                      class="inline-flex h-[18px] min-w-0 items-center rounded border border-[var(--ds-border)] bg-[var(--ds-bg-elevated)] px-1.5 font-mono text-[10.5px]"
+                      :title="`${fk.ref_schema ? `${fk.ref_schema}.` : ''}${fk.ref_table}.${fk.ref_column}`"
+                    >
+                      <span class="truncate">
+                        <span class="text-[var(--ds-text-3)]"
+                          >{{ fk.ref_schema ? `${fk.ref_schema}.` : "" }}{{ fk.ref_table }}.</span
+                        ><span class="text-[var(--ds-text-1)]">{{ fk.ref_column }}</span>
+                      </span>
+                    </span>
                   </div>
                 </div>
               </div>
@@ -7736,22 +7783,24 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
 
             <div v-else-if="activeTableInfoTab === 'triggers'" class="flex-1 min-h-0 overflow-auto">
               <div v-if="triggersLoading" class="h-full flex items-center justify-center">
-                <Loader2 class="w-4 h-4 animate-spin text-muted-foreground" />
+                <Loader2 class="w-4 h-4 animate-spin text-[var(--ds-text-3)]" />
               </div>
-              <div v-else-if="triggersError" class="p-3 text-xs text-destructive">{{ triggersError }}</div>
+              <div v-else-if="triggersError" class="p-3 text-xs text-[var(--ds-red)]">{{ triggersError }}</div>
               <div
                 v-else-if="searchQuery && filteredTriggers.length === 0"
-                class="p-6 text-center text-xs text-muted-foreground"
+                class="p-6 text-center text-xs text-[var(--ds-text-3)]"
               >
                 {{ t("grid.tableInfoNoResults") }}
               </div>
-              <div v-else-if="triggers.length === 0" class="p-6 text-center text-xs text-muted-foreground">
+              <div v-else-if="triggers.length === 0" class="p-6 text-center text-xs text-[var(--ds-text-3)]">
                 {{ t("grid.tableInfoEmpty") }}
               </div>
-              <div v-else class="divide-y">
+              <div v-else class="divide-y divide-[var(--ds-border-soft)]">
                 <div v-for="trigger in filteredTriggers" :key="trigger.name" class="p-3 text-xs">
-                  <div class="font-medium truncate">{{ trigger.name }}</div>
-                  <div class="mt-1 text-[11px] text-muted-foreground">{{ trigger.timing }} {{ trigger.event }}</div>
+                  <div class="font-medium text-[var(--ds-text-1)] truncate">{{ trigger.name }}</div>
+                  <div class="mt-1 font-mono text-[10.5px] text-[var(--ds-text-3)]">
+                    {{ trigger.timing }} {{ trigger.event }}
+                  </div>
                 </div>
               </div>
             </div>
@@ -7764,7 +7813,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
               v-html="filteredDdlContent"
             ></pre>
             <div v-else class="flex-1 flex items-center justify-center">
-              <Loader2 class="w-4 h-4 animate-spin text-muted-foreground" />
+              <Loader2 class="w-4 h-4 animate-spin text-[var(--ds-text-3)]" />
             </div>
           </div>
           <!-- Cell Detail Drawer -->

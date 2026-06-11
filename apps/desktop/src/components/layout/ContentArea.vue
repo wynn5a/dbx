@@ -868,8 +868,8 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
             v-if="activeTab.tableMeta && activeTab.connectionId"
             variant="ghost"
             size="sm"
-            class="h-5 text-xs px-1.5 shrink-0"
-            :class="{ 'bg-accent': dataGridRef?.showDdl }"
+            class="h-5 text-xs px-1.5 shrink-0 text-[var(--ds-text-2)]"
+            :class="{ 'bg-[var(--ds-bg-active)] text-[var(--ds-text-1)]': dataGridRef?.showDdl }"
             @click="dataGridRef?.toggleDdl()"
           >
             <TableProperties class="h-3.5 w-3.5" /> {{ t("grid.tableInfo") }}
