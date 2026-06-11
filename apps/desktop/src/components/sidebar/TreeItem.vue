@@ -149,7 +149,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import LightTooltip from "@/components/ui/LightTooltip.vue";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { flattenTree } from "@/composables/useFlatTree";
 
 const { t } = useI18n();
@@ -339,9 +339,9 @@ function visibleLabel(node: TreeNode): string {
   return displayLabel(node);
 }
 
-function isTooltipDisabled(): boolean {
-  return !isLabelTruncated();
-}
+// Updated on pointerenter of the label, before the tooltip's open logic
+// (pointermove-driven) evaluates `disabled` — so the measurement stays lazy.
+const labelTooltipEnabled = ref(false);
 
 async function toggle() {
   const node = props.node;
@@ -3417,9 +3417,14 @@ function treeItemMenuItems(): ContextMenuItem[] {
           @keydown.escape.prevent="isRenamingGroup = false"
           @click.stop
         />
-        <LightTooltip v-else :text="displayLabel(node)" :disabled="isTooltipDisabled" side="right" :side-offset="8">
-          <span ref="labelRef" :class="labelWidthClass">{{ visibleLabel(node) }}</span>
-        </LightTooltip>
+        <Tooltip v-else :disabled="!labelTooltipEnabled">
+          <TooltipTrigger as-child>
+            <span ref="labelRef" :class="labelWidthClass" @pointerenter="labelTooltipEnabled = isLabelTruncated()">{{
+              visibleLabel(node)
+            }}</span>
+          </TooltipTrigger>
+          <TooltipContent side="right" :side-offset="8">{{ displayLabel(node) }}</TooltipContent>
+        </Tooltip>
         <span
           v-if="
             (node.type === 'group-tables' ||

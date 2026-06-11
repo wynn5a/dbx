@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import LightTooltip from "@/components/ui/LightTooltip.vue";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { loadRoutineParameters } from "@/lib/routineParameters";
 import {
   acceptsRoutineInput,
@@ -190,15 +190,20 @@ function canEditParameter(parameter: RoutineParameterValue): boolean {
               <div>{{ t("contextMenu.parameterNull") }}</div>
               <div class="flex items-center gap-1">
                 {{ t("contextMenu.parameterDefault") }}
-                <LightTooltip :text="t('contextMenu.parameterDefaultHint')" side="top" :delay="150">
-                  <button
-                    type="button"
-                    class="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
-                    :aria-label="t('contextMenu.parameterDefaultHint')"
-                  >
-                    <CircleHelp class="h-3.5 w-3.5" />
-                  </button>
-                </LightTooltip>
+                <Tooltip :delay-duration="150">
+                  <TooltipTrigger as-child>
+                    <button
+                      type="button"
+                      class="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
+                      :aria-label="t('contextMenu.parameterDefaultHint')"
+                    >
+                      <CircleHelp class="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    {{ t("contextMenu.parameterDefaultHint") }}
+                  </TooltipContent>
+                </Tooltip>
               </div>
             </div>
             <div

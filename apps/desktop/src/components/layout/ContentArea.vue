@@ -2,8 +2,8 @@
 import { computed, ref, defineAsyncComponent, watch, nextTick, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import {
-  Check,
   Columns3,
+  Info,
   Loader2,
   Search,
   Square,
@@ -24,7 +24,7 @@ import "splitpanes/dist/splitpanes.css";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
-import LightTooltip from "@/components/ui/LightTooltip.vue";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import QueryEditor from "@/components/editor/QueryEditor.vue";
 import ColumnInfoPanel from "@/components/editor/ColumnInfoPanel.vue";
 import type { ColumnInfo } from "@/components/editor/ColumnInfoPanel.vue";
@@ -786,63 +786,66 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
             </PopoverTrigger>
             <PopoverContent
               align="end"
-              class="w-64 max-w-[calc(100vw-2rem)] gap-0 overflow-hidden rounded-xl border bg-popover p-0 text-popover-foreground shadow-xl"
+              class="ds-popover w-64 max-w-[calc(100vw-2rem)] gap-0 overflow-hidden p-0"
               @click.stop
               @keydown.stop
             >
-              <div class="border-b bg-muted/40 px-2 py-1.5">
-                <div class="flex items-center justify-between gap-2">
-                  <div class="text-xs font-semibold">{{ t("grid.columnVisibility") }}</div>
-                  <div class="text-[10px] text-muted-foreground tabular-nums">
-                    {{ dataGridRef?.visibleColumnCount ?? 0 }}/{{ dataGridRef?.displayableColumnCount ?? 0 }}
-                  </div>
+              <div class="flex items-center justify-between gap-2 px-2 pt-1.5 pb-1">
+                <div class="ds-menu-label">{{ t("grid.columnVisibility") }}</div>
+                <div class="font-mono text-[10.5px] tabular-nums text-[var(--ds-text-3)]">
+                  {{ dataGridRef?.visibleColumnCount ?? 0 }}/{{ dataGridRef?.displayableColumnCount ?? 0 }}
                 </div>
               </div>
-              <div class="flex items-center gap-1.5 border-b px-2 py-1.5">
-                <Search class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <div class="flex items-center gap-1.5 border-b border-[var(--ds-border-soft)] px-2 pb-1.5">
+                <Search class="h-3.5 w-3.5 shrink-0 text-[var(--ds-text-3)]" />
                 <input
                   v-model="columnVisibilitySearch"
                   autocapitalize="off"
                   autocorrect="off"
                   spellcheck="false"
-                  class="h-6 min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+                  class="h-6 min-w-0 flex-1 bg-transparent text-[12.5px] text-[var(--ds-text-1)] outline-none placeholder:text-[var(--ds-text-3)]"
                   :placeholder="t('grid.searchColumns')"
                 />
               </div>
-              <div class="max-h-72 overflow-auto py-0.5">
-                <button
+              <div class="max-h-72 overflow-auto p-1">
+                <label
                   v-for="option in columnVisibilityOptions"
                   :key="`${option.index}:${option.column}`"
-                  type="button"
-                  class="grid w-full grid-cols-[1.5rem_minmax(0,1fr)] items-center px-2 py-1 text-left text-xs hover:bg-accent"
-                  @click="dataGridRef?.toggleColumnVisibility(option.index)"
+                  class="flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left leading-4 text-[var(--ds-text-2)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-accent-soft)] hover:text-[var(--ds-text-1)]"
                 >
-                  <span
-                    class="flex h-4 w-4 items-center justify-center rounded border"
-                    :class="
-                      dataGridRef?.isColumnVisible(option.index)
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-border bg-background text-transparent'
-                    "
-                  >
-                    <Check class="h-3 w-3 stroke-[3]" />
-                  </span>
+                  <input
+                    type="checkbox"
+                    class="h-3.5 w-3.5 shrink-0 accent-[var(--ds-accent)]"
+                    :checked="dataGridRef?.isColumnVisible(option.index)"
+                    @change="dataGridRef?.toggleColumnVisibility(option.index)"
+                  />
                   <span class="truncate font-mono text-xs" :title="option.column">{{ option.column }}</span>
-                </button>
+                </label>
                 <div
                   v-if="columnVisibilityOptions.length === 0"
-                  class="px-2 py-6 text-center text-xs text-muted-foreground"
+                  class="px-2 py-6 text-center text-xs text-[var(--ds-text-3)]"
                 >
                   {{ t("grid.noSearchResults") }}
                 </div>
               </div>
-              <div class="flex items-center justify-between gap-2 border-t bg-muted/30 px-2 py-1.5">
-                <span class="text-[11px] text-muted-foreground">{{ t("grid.columnVisibilityHint") }}</span>
-                <div class="flex items-center gap-1">
+              <div class="flex items-center justify-between gap-2 border-t border-[var(--ds-border-soft)] p-1">
+                <Tooltip :delay-duration="0">
+                  <TooltipTrigger as-child>
+                    <span
+                      class="flex size-6 shrink-0 cursor-default items-center justify-center rounded-sm text-[var(--ds-text-4)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:text-[var(--ds-text-2)]"
+                    >
+                      <Info class="h-3.5 w-3.5" />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" :side-offset="6">
+                    {{ t("grid.columnVisibilityHint") }}
+                  </TooltipContent>
+                </Tooltip>
+                <div class="flex shrink-0 items-center gap-1">
                   <Button
                     variant="ghost"
-                    size="sm"
-                    class="h-7 px-2 text-xs"
+                    size="xs"
+                    class="text-[var(--ds-text-2)]"
                     :disabled="(dataGridRef?.displayableColumnCount ?? 0) <= 1"
                     @click="dataGridRef?.invertColumnVisibility()"
                   >
@@ -850,8 +853,8 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
-                    class="h-7 px-2 text-xs"
+                    size="xs"
+                    class="text-[var(--ds-text-2)]"
                     :disabled="(dataGridRef?.hiddenColumnCount ?? 0) === 0"
                     @click="dataGridRef?.showAllColumns()"
                   >
@@ -894,30 +897,31 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
               @keydown.stop
             >
               <div class="ds-menu-label px-2 pt-1.5 pb-1">{{ t("grid.viewOptions") }}</div>
-              <LightTooltip
-                :text="t('grid.transposeMultiRowHint')"
-                side="left"
-                :side-offset="6"
-                :delay="0"
-                :open-on-focus="false"
-              >
-                <label
-                  class="flex cursor-pointer items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-[13.5px] leading-4 text-[var(--ds-text-2)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-accent-soft)] hover:text-[var(--ds-text-1)]"
-                >
-                  <span class="min-w-0 flex items-center gap-1.5">
-                    {{ t("grid.transposeMultiRowToggle") }}
-                    <span class="text-[var(--ds-text-3)]">
-                      {{ dataGridRef?.multiRowTranspose ? t("grid.transposeMultiRow") : t("grid.transposeSingleRow") }}
+              <Tooltip :delay-duration="0">
+                <TooltipTrigger as-child>
+                  <label
+                    class="flex cursor-pointer items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-[13.5px] leading-4 text-[var(--ds-text-2)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-accent-soft)] hover:text-[var(--ds-text-1)]"
+                  >
+                    <span class="min-w-0 flex items-center gap-1.5">
+                      {{ t("grid.transposeMultiRowToggle") }}
+                      <span class="text-[var(--ds-text-3)]">
+                        {{
+                          dataGridRef?.multiRowTranspose ? t("grid.transposeMultiRow") : t("grid.transposeSingleRow")
+                        }}
+                      </span>
                     </span>
-                  </span>
-                  <Switch
-                    size="sm"
-                    :model-value="!!dataGridRef?.multiRowTranspose"
-                    :aria-label="t('grid.transposeMultiRow')"
-                    @update:model-value="(value: boolean) => dataGridRef?.setMultiRowTranspose(value)"
-                  />
-                </label>
-              </LightTooltip>
+                    <Switch
+                      size="sm"
+                      :model-value="!!dataGridRef?.multiRowTranspose"
+                      :aria-label="t('grid.transposeMultiRow')"
+                      @update:model-value="(value: boolean) => dataGridRef?.setMultiRowTranspose(value)"
+                    />
+                  </label>
+                </TooltipTrigger>
+                <TooltipContent side="left" :side-offset="6">
+                  {{ t("grid.transposeMultiRowHint") }}
+                </TooltipContent>
+              </Tooltip>
               <label
                 class="flex items-center gap-2 rounded-sm px-2 py-1.5 text-[13.5px] leading-4 transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)]"
                 :class="

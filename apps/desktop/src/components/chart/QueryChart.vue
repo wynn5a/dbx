@@ -52,6 +52,25 @@ function toggleYColumn(col: string) {
   }
 }
 
+// Mirror the .ds-tooltip surface (globals.css) — ECharts renders its tooltip
+// as inline-styled DOM, so the shared class can't be applied directly.
+const dsTooltipStyle = computed(() => ({
+  backgroundColor: "transparent",
+  borderWidth: 0,
+  padding: 0,
+  textStyle: { color: "var(--ds-text-1)" },
+  extraCssText: [
+    "background:var(--ds-bg-elevated)",
+    "border:1px solid var(--ds-border-strong)",
+    "border-radius:6px",
+    "padding:5px 10px",
+    "font-size:11.5px",
+    isDark.value
+      ? "box-shadow:0 4px 12px -2px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.35)"
+      : "box-shadow:0 4px 12px -2px rgb(0 0 0 / 0.12), 0 2px 4px -2px rgb(0 0 0 / 0.08)",
+  ].join(";"),
+}));
+
 const chartOption = computed(() => {
   const xIdx = props.result.columns.indexOf(xColumn.value);
   if (xIdx < 0 || yColumns.value.length === 0) return null;
@@ -62,7 +81,7 @@ const chartOption = computed(() => {
     const yIdx = props.result.columns.indexOf(yColumns.value[0]);
     if (yIdx < 0) return null;
     return {
-      tooltip: { trigger: "item" },
+      tooltip: { trigger: "item", ...dsTooltipStyle.value },
       legend: { bottom: 0, textStyle: { color: isDark.value ? "#ccc" : "#333" } },
       series: [
         {
@@ -80,7 +99,7 @@ const chartOption = computed(() => {
   const yIndices = yColumns.value.map((c) => props.result.columns.indexOf(c)).filter((i) => i >= 0);
 
   return {
-    tooltip: { trigger: "axis" },
+    tooltip: { trigger: "axis", ...dsTooltipStyle.value },
     legend: {
       bottom: 0,
       textStyle: { color: isDark.value ? "#ccc" : "#333" },

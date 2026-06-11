@@ -313,6 +313,24 @@
     0 0 0 0.5px rgb(255 255 255 / 0.06);
 }
 
+/* Design-system tooltip: compact overlay — elevated bg, strong hairline,
+   lighter shadow than .ds-popover. Unlayered so it wins over component
+   utility classes. The arrow reuses the same bg/border vars to match. */
+.ds-tooltip {
+  border: 1px solid var(--ds-border-strong);
+  border-radius: 6px;
+  background: var(--ds-bg-elevated);
+  box-shadow:
+    0 4px 12px -2px rgb(0 0 0 / 0.12),
+    0 2px 4px -2px rgb(0 0 0 / 0.08);
+}
+.dark .ds-tooltip {
+  box-shadow:
+    0 4px 12px -2px rgb(0 0 0 / 0.5),
+    0 2px 4px -2px rgb(0 0 0 / 0.35),
+    0 0 0 0.5px rgb(255 255 255 / 0.06);
+}
+
 /* Design-system kbd hint (DESIGN-SYSTEM.md "Kbd hint" recipe) */
 .ds-kbd {
   font-family: var(--ds-mono);

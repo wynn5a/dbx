@@ -518,7 +518,7 @@ function sqlDataTypeColorClass(dataType: string): string {
 
 function createHoverDom(kind: SqlHoverKind, title: string, typeInfo?: string, rows: string[] = []) {
   const dom = document.createElement("div");
-  dom.className = "rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md";
+  dom.className = "ds-tooltip px-2.5 py-1.5 text-xs text-[var(--ds-text-1)]";
 
   const heading = document.createElement("div");
   heading.className = "flex items-center gap-2";
@@ -537,14 +537,14 @@ function createHoverDom(kind: SqlHoverKind, title: string, typeInfo?: string, ro
 
   if (typeInfo) {
     const typeNode = document.createElement("div");
-    typeNode.className = `mt-1 font-mono ${kind === "column" ? sqlDataTypeColorClass(typeInfo) : "text-muted-foreground"}`;
+    typeNode.className = `mt-1 font-mono ${kind === "column" ? sqlDataTypeColorClass(typeInfo) : "text-[var(--ds-text-3)]"}`;
     typeNode.textContent = typeInfo;
     dom.appendChild(typeNode);
   }
 
   for (const row of rows) {
     const rowNode = document.createElement("div");
-    rowNode.className = "mt-1 font-mono text-muted-foreground";
+    rowNode.className = "mt-1 font-mono text-[var(--ds-text-3)]";
     rowNode.textContent = row;
     dom.appendChild(rowNode);
   }
@@ -554,33 +554,33 @@ function createHoverDom(kind: SqlHoverKind, title: string, typeInfo?: string, ro
 
 function createSignatureDom(signature: ReturnType<typeof getSqlFunctionSignatureHelp>) {
   const dom = document.createElement("div");
-  dom.className = "rounded-md border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md";
+  dom.className = "ds-tooltip px-2.5 py-1.5 text-xs text-[var(--ds-text-1)]";
   if (!signature) return dom;
 
   const signatureNode = document.createElement("div");
   signatureNode.className = "font-mono";
 
   const nameNode = document.createElement("span");
-  nameNode.className = "text-muted-foreground";
+  nameNode.className = "text-[var(--ds-text-3)]";
   nameNode.textContent = `${signature.name}(`;
   signatureNode.appendChild(nameNode);
 
   signature.parameters.forEach((parameter, index) => {
     if (index > 0) {
       const comma = document.createElement("span");
-      comma.className = "text-muted-foreground";
+      comma.className = "text-[var(--ds-text-3)]";
       comma.textContent = ", ";
       signatureNode.appendChild(comma);
     }
     const parameterNode = document.createElement("span");
     parameterNode.className =
-      index === signature.activeParameter ? "font-semibold text-foreground" : "text-muted-foreground";
+      index === signature.activeParameter ? "font-semibold text-[var(--ds-text-1)]" : "text-[var(--ds-text-3)]";
     parameterNode.textContent = parameter;
     signatureNode.appendChild(parameterNode);
   });
 
   const closeNode = document.createElement("span");
-  closeNode.className = "text-muted-foreground";
+  closeNode.className = "text-[var(--ds-text-3)]";
   closeNode.textContent = ")";
   signatureNode.appendChild(closeNode);
   dom.appendChild(signatureNode);
