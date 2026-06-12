@@ -1685,7 +1685,7 @@ mod tests {
 
         assert_eq!(
             config.connection_url(),
-            "mysql://root:secret@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/test?require_ssl=true&verify_ca=false&verify_identity=false&charset=utf8mb4"
+            "mysql://root:secret@gateway01.us-west-2.prod.aws.tidbcloud.com:4000/test?require_ssl=true&charset=utf8mb4&verify_ca=false&verify_identity=false"
         );
     }
 
