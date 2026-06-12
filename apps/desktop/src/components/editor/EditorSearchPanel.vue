@@ -229,11 +229,11 @@ defineExpose({ openSearch, openReplace, closeSearch });
   >
     <div
       v-if="searchVisible"
-      class="absolute top-1 right-4 z-[9999] isolate flex flex-col gap-1 rounded-md border bg-popover p-1.5 text-popover-foreground shadow-lg"
+      class="ds-popover absolute top-1 right-4 z-[9999] isolate flex flex-col gap-1 p-1.5 text-[var(--ds-text-1)]"
     >
       <div class="flex items-center gap-0.5">
         <button
-          class="w-5 h-5 flex items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          class="w-5 h-5 flex items-center justify-center rounded text-[var(--ds-text-3)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]"
           :title="showReplace ? t('editor.search.collapseReplace') : t('editor.search.expandReplace')"
           @click="showReplace = !showReplace"
         >
@@ -245,27 +245,27 @@ defineExpose({ openSearch, openReplace, closeSearch });
           autocapitalize="off"
           autocorrect="off"
           spellcheck="false"
-          class="w-48 h-6 text-xs bg-input border rounded px-2 outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground"
+          class="w-48 h-6 text-xs bg-[var(--ds-bg-input)] border border-[var(--ds-border)] rounded px-2 text-[var(--ds-text-1)] outline-none focus:border-[var(--ds-accent-line)] focus:ring-1 focus:ring-[var(--ds-accent-line)] placeholder:text-[var(--ds-text-3)]"
           :placeholder="t('editor.search.find')"
           @keydown="onSearchKeydown"
         />
         <button
-          class="w-6 h-6 flex items-center justify-center rounded text-xs font-mono hover:bg-accent"
-          :class="caseSensitive ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'"
+          class="w-6 h-6 flex items-center justify-center rounded text-xs font-mono hover:bg-[var(--ds-bg-hover)]"
+          :class="caseSensitive ? 'bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]' : 'text-[var(--ds-text-3)]'"
           :title="t('editor.search.caseSensitive')"
           @click="caseSensitive = !caseSensitive"
         >
           Aa
         </button>
         <button
-          class="w-6 h-6 flex items-center justify-center rounded text-xs font-mono hover:bg-accent"
-          :class="useRegex ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'"
+          class="w-6 h-6 flex items-center justify-center rounded text-xs font-mono hover:bg-[var(--ds-bg-hover)]"
+          :class="useRegex ? 'bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]' : 'text-[var(--ds-text-3)]'"
           :title="t('editor.search.regex')"
           @click="useRegex = !useRegex"
         >
           .*
         </button>
-        <span class="text-xs text-muted-foreground min-w-[3rem] text-center shrink-0">
+        <span class="text-xs font-mono tabular-nums text-[var(--ds-text-3)] min-w-[3rem] text-center shrink-0">
           {{
             searchText && matchCount > 0
               ? `${currentMatchIndex}/${matchCount}${matchCountLimited ? "+" : ""}`
@@ -273,21 +273,21 @@ defineExpose({ openSearch, openReplace, closeSearch });
           }}
         </span>
         <button
-          class="w-5 h-5 flex items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          class="w-5 h-5 flex items-center justify-center rounded text-[var(--ds-text-3)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]"
           :title="t('editor.search.prevMatch')"
           @click="prevMatch"
         >
           <ChevronUp class="w-3.5 h-3.5" />
         </button>
         <button
-          class="w-5 h-5 flex items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          class="w-5 h-5 flex items-center justify-center rounded text-[var(--ds-text-3)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]"
           :title="t('editor.search.nextMatch')"
           @click="nextMatch"
         >
           <ChevronDown class="w-3.5 h-3.5" />
         </button>
         <button
-          class="w-5 h-5 flex items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+          class="w-5 h-5 flex items-center justify-center rounded text-[var(--ds-text-3)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]"
           :title="t('editor.search.close')"
           @click="closeSearch"
         >
@@ -302,20 +302,20 @@ defineExpose({ openSearch, openReplace, closeSearch });
           autocapitalize="off"
           autocorrect="off"
           spellcheck="false"
-          class="w-48 h-6 text-xs bg-input border rounded px-2 outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground"
+          class="w-48 h-6 text-xs bg-[var(--ds-bg-input)] border border-[var(--ds-border)] rounded px-2 text-[var(--ds-text-1)] outline-none focus:border-[var(--ds-accent-line)] focus:ring-1 focus:ring-[var(--ds-accent-line)] placeholder:text-[var(--ds-text-3)]"
           :placeholder="t('editor.search.replace')"
           @keydown.enter.prevent="doReplace"
           @keydown.escape.prevent="closeSearch"
         />
         <button
-          class="h-6 px-1.5 flex items-center justify-center rounded text-xs text-muted-foreground hover:bg-accent hover:text-foreground border"
+          class="h-6 px-1.5 flex items-center justify-center rounded text-xs text-[var(--ds-text-2)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)] border border-[var(--ds-border)]"
           :title="t('editor.search.replace')"
           @click="doReplace"
         >
           {{ t("editor.search.replace") }}
         </button>
         <button
-          class="h-6 px-1.5 flex items-center justify-center rounded text-xs text-muted-foreground hover:bg-accent hover:text-foreground border"
+          class="h-6 px-1.5 flex items-center justify-center rounded text-xs text-[var(--ds-text-2)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)] border border-[var(--ds-border)]"
           :title="t('editor.search.replaceAll')"
           @click="doReplaceAll"
         >

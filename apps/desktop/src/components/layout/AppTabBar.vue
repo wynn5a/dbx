@@ -176,7 +176,7 @@ function tabColorStyle(tab: QueryTab) {
   if (!color) {
     return isActive
       ? {
-          borderColor: "var(--ring)",
+          borderColor: "var(--ds-accent-line)",
         }
       : undefined;
   }
@@ -188,9 +188,8 @@ function tabColorStyle(tab: QueryTab) {
 }
 
 function tabIconClass(tab: QueryTab) {
-  if (tab.mode === "data" || tab.mode === "objects" || tab.mode === "structure")
-    return "text-emerald-600 dark:text-emerald-400";
-  return "text-blue-600 dark:text-blue-400";
+  if (tab.mode === "data" || tab.mode === "objects" || tab.mode === "structure") return "text-[var(--ds-green)]";
+  return "text-[var(--ds-blue)]";
 }
 
 const showTabOverflowControls = computed(() =>
@@ -237,7 +236,7 @@ function tabDropStyle(tabId: string) {
   if (!tabDrag.state.active) return {};
   if (tabDrag.state.draggedId === tabId) return { opacity: 0.4 };
   if (tabDrag.state.targetId !== tabId) return {};
-  const dropColor = `var(--ring)`;
+  const dropColor = `var(--ds-accent)`;
   if (tabDrag.state.dropPosition === "before") {
     return { boxShadow: `inset 3px 0 0 0 ${dropColor}` };
   }
@@ -255,7 +254,7 @@ const tabTailDragRegionClass = computed(() =>
 );
 
 const tabOverflowControlClass =
-  "h-7 w-7 rounded-md border border-border/60 bg-background text-foreground/70 hover:border-border hover:text-foreground";
+  "h-7 w-7 rounded-md border border-[var(--ds-border)] bg-transparent text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]";
 
 function dispatchBeforeTabSwitch(tabId: string) {
   if (tabId === queryStore.activeTabId) return;
@@ -275,7 +274,7 @@ function activateTab(tabId: string) {
 <template>
   <div
     v-if="queryStore.tabs.length > 0 || showDriverStore"
-    class="relative flex border-b shrink-0 h-10 items-center bg-background px-2"
+    class="relative flex border-b border-[var(--ds-border)] shrink-0 h-10 items-center bg-[var(--ds-bg-canvas)] px-2"
   >
     <button
       v-if="showTabOverflowControls"
@@ -311,8 +310,8 @@ function activateTab(tabId: string) {
                   compactTabTitle ? 'min-w-24' : 'min-w-38',
                   'h-7 rounded-md border',
                   tab.id === queryStore.activeTabId && !showDriverStore
-                    ? 'text-foreground font-medium'
-                    : 'border-border/60 text-foreground/70 hover:border-border hover:text-foreground/90',
+                    ? 'text-[var(--ds-text-1)] font-medium'
+                    : 'border-[var(--ds-border)] text-[var(--ds-text-3)] hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]',
                 ]"
                 :style="[tabColorStyle(tab), tabDropStyle(tab.id)]"
                 :data-active-tab="tab.id === queryStore.activeTabId && !showDriverStore"
@@ -336,7 +335,7 @@ function activateTab(tabId: string) {
                   v-model="editingTitle"
                   :data-tab-title-input="tab.id"
                   :aria-label="t('contextMenu.renameTab')"
-                  class="h-5 min-w-0 flex-1 rounded border border-ring bg-background px-1.5 text-xs font-normal text-foreground outline-none"
+                  class="h-5 min-w-0 flex-1 rounded border border-[var(--ds-accent-line)] bg-[var(--ds-bg-input)] px-1.5 text-xs font-normal text-[var(--ds-text-1)] outline-none"
                   @click.stop
                   @mousedown.stop
                   @keydown.enter.prevent="commitRenameTab(tab)"
@@ -347,8 +346,8 @@ function activateTab(tabId: string) {
                 <Tooltip>
                   <TooltipTrigger as-child>
                     <button
-                      class="inline-flex rounded p-0.5 text-muted-foreground hover:bg-muted-foreground/20 hover:text-foreground focus:opacity-100"
-                      :class="tab.pinned ? 'visible text-primary' : 'invisible group-hover:visible'"
+                      class="inline-flex rounded p-0.5 text-[var(--ds-text-3)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)] focus:opacity-100"
+                      :class="tab.pinned ? 'visible text-[var(--ds-accent)]' : 'invisible group-hover:visible'"
                       @click.stop="queryStore.togglePinnedTab(tab.id)"
                     >
                       <Pin class="h-3 w-3" :class="{ 'fill-current': tab.pinned }" />
@@ -357,7 +356,7 @@ function activateTab(tabId: string) {
                   <TooltipContent>{{ tab.pinned ? t("contextMenu.unpin") : t("contextMenu.pin") }}</TooltipContent>
                 </Tooltip>
                 <button
-                  class="rounded hover:bg-muted-foreground/20 p-0.5 shrink-0"
+                  class="rounded p-0.5 shrink-0 text-[var(--ds-text-3)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]"
                   @click.stop="queryStore.closeTab(tab.id)"
                 >
                   <X class="h-3 w-3" />
@@ -366,7 +365,7 @@ function activateTab(tabId: string) {
             </TooltipTrigger>
             <TooltipContent side="bottom" class="text-xs grid grid-cols-[auto_1fr] gap-x-2">
               <template v-for="line in tabTooltipLines(tab, t)" :key="line.label">
-                <span class="text-muted-foreground">{{ line.label }}</span>
+                <span class="text-[var(--ds-text-3)]">{{ line.label }}</span>
                 <span>{{ line.value }}</span>
               </template>
             </TooltipContent>
@@ -378,21 +377,24 @@ function activateTab(tabId: string) {
       <div
         v-if="showDriverStore"
         data-driver-store-tab
-        class="group flex min-w-38 items-center gap-1 px-2 text-xs cursor-pointer transition-colors whitespace-nowrap h-7 rounded-md border text-foreground font-medium border-ring"
+        class="group flex min-w-38 items-center gap-1 px-2 text-xs cursor-pointer transition-colors whitespace-nowrap h-7 rounded-md border text-[var(--ds-text-1)] font-medium border-[var(--ds-accent-line)]"
         @click="emit('toggle-driver-store')"
       >
-        <span class="shrink-0 text-amber-600 dark:text-amber-400">
+        <span class="shrink-0 text-[var(--ds-amber)]">
           <Package class="h-3.5 w-3.5" />
         </span>
         <span class="min-w-0 truncate flex-1">{{ t("toolbar.driverManager") }}</span>
         <span
           v-if="(agentDriverUpdateCount ?? 0) > 0"
-          class="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-medium leading-none text-white"
+          class="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-[var(--ds-red)] px-1 text-[10px] font-medium leading-none text-white"
           :aria-label="t('toolbar.updatableDriverCount')"
         >
           {{ (agentDriverUpdateCount ?? 0) > 99 ? "99+" : agentDriverUpdateCount }}
         </span>
-        <button class="rounded hover:bg-muted-foreground/20 p-0.5 shrink-0" @click.stop="emit('close-driver-store')">
+        <button
+          class="rounded p-0.5 shrink-0 text-[var(--ds-text-3)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]"
+          @click.stop="emit('close-driver-store')"
+        >
           <X class="h-3 w-3" />
         </button>
       </div>

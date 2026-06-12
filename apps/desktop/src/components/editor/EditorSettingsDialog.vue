@@ -1497,8 +1497,6 @@ watch(
                 </div>
               </div>
 
-              <Separator />
-
               <!-- Font Size -->
               <div class="space-y-3">
                 <div class="flex items-center justify-between">

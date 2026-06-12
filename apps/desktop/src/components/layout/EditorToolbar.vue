@@ -116,7 +116,7 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
 
 <template>
   <div
-    class="h-9 shrink-0 border-b bg-background/80 px-3 flex items-center gap-1 text-xs text-muted-foreground relative z-10"
+    class="h-9 shrink-0 border-b border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] px-3 flex items-center gap-1 text-xs text-[var(--ds-text-3)] relative z-10"
     :style="toolbarStyle"
   >
     <div class="flex items-center gap-0.5">
@@ -128,7 +128,7 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
             :class="
               activeTab.isExecuting
                 ? ''
-                : 'bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200'
+                : 'bg-[color-mix(in_srgb,var(--ds-green)_12%,transparent)] text-[var(--ds-green)] hover:bg-[color-mix(in_srgb,var(--ds-green)_20%,transparent)]'
             "
             :disabled="
               activeTab.isCancelling || activeTab.isExplaining || (!activeTab.isExecuting && !executableSql.trim())
@@ -152,7 +152,7 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
             :class="
               activeTab.isExplaining
                 ? ''
-                : 'text-violet-600 hover:bg-violet-500/10 hover:text-violet-700 dark:text-violet-300 dark:hover:text-violet-200'
+                : 'text-[var(--ds-purple)] hover:bg-[color-mix(in_srgb,var(--ds-purple)_14%,transparent)]'
             "
             :disabled="activeTab.isExecuting || (!activeTab.isExplaining && !executableSql.trim())"
             @click="activeTab.isExplaining ? emit('cancel') : emit('explain')"
@@ -172,8 +172,8 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
         size="icon-sm"
         :class="
           props.explainMode === 'autotrace'
-            ? 'text-green-600 bg-green-100 dark:text-green-300 dark:bg-green-900/30'
-            : 'text-muted-foreground/50'
+            ? 'text-[var(--ds-green)] bg-[color-mix(in_srgb,var(--ds-green)_14%,transparent)]'
+            : 'text-[var(--ds-text-4)]'
         "
         :disabled="activeTab.isExecuting"
         @click="emit('update:explainMode', props.explainMode === 'autotrace' ? 'explain' : 'autotrace')"
@@ -185,7 +185,7 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
           <Button
             variant="ghost"
             size="icon-sm"
-            class="text-amber-600 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-200"
+            class="text-[var(--ds-amber)] hover:bg-[color-mix(in_srgb,var(--ds-amber)_14%,transparent)]"
             :disabled="activeTab.isExecuting || activeTab.isExplaining || !activeTab.sql.trim()"
             @click="emit('formatSql')"
           >
@@ -199,7 +199,7 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
           <Button
             variant="ghost"
             size="icon-sm"
-            class="text-blue-600 hover:bg-blue-500/10 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
+            class="text-[var(--ds-blue)] hover:bg-[color-mix(in_srgb,var(--ds-blue)_14%,transparent)]"
             :disabled="!activeTab.sql.trim()"
             @click="emit('saveSql')"
           >
@@ -213,7 +213,7 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
           <Button
             variant="ghost"
             size="icon-sm"
-            class="text-sky-600 hover:bg-sky-500/10 hover:text-sky-700 dark:text-sky-300 dark:hover:text-sky-200"
+            class="text-[var(--ds-teal)] hover:bg-[color-mix(in_srgb,var(--ds-teal)_14%,transparent)]"
             @click="emit('openSql')"
           >
             <FolderOpen class="h-3.5 w-3.5" />
@@ -237,7 +237,7 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
           :search-placeholder="t('editor.searchConnection')"
           :empty-text="t('grid.noSearchResults')"
           :loading-text="t('common.loading')"
-          trigger-class="font-medium text-foreground"
+          trigger-class="font-medium text-[var(--ds-text-1)]"
           :display-name="connectionDisplayName"
           @update:model-value="(connectionId) => emit('changeConnection', connectionId)"
         >
@@ -246,7 +246,7 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
               <DatabaseIcon :db-type="connectionIconType(activeConnection)" class="h-3.5 w-3.5 shrink-0" />
               <span class="truncate">{{ label }}</span>
             </div>
-            <span v-else class="truncate text-muted-foreground">{{ t("editor.selectConnection") }}</span>
+            <span v-else class="truncate text-[var(--ds-text-3)]">{{ t("editor.selectConnection") }}</span>
           </template>
           <template #option-label="{ option, label }">
             <div class="flex min-w-0 items-center gap-2">

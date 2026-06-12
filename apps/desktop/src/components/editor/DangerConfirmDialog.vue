@@ -50,26 +50,26 @@ function onConfirm() {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-[480px]">
+    <DialogContent class="ds-dialog sm:max-w-[480px]">
       <DialogHeader>
-        <DialogTitle class="flex items-center gap-2 text-destructive">
+        <DialogTitle class="flex items-center gap-2 text-[var(--ds-red)]">
           <AlertTriangle class="h-5 w-5" />
           {{ title || t("dangerDialog.title") }}
         </DialogTitle>
       </DialogHeader>
 
       <div class="py-4 min-w-0">
-        <p class="text-sm text-muted-foreground mb-3">{{ message || t("dangerDialog.message") }}</p>
+        <p class="text-sm text-[var(--ds-text-2)] mb-3">{{ message || t("dangerDialog.message") }}</p>
         <pre
           v-if="code"
-          class="text-xs bg-muted p-3 rounded overflow-auto max-h-40 min-w-0 font-mono whitespace-pre"
+          class="text-xs bg-[var(--ds-bg-canvas)] border border-[var(--ds-border-soft)] text-[var(--ds-text-1)] p-3 rounded overflow-auto max-h-40 min-w-0 font-mono whitespace-pre"
           v-html="highlightedCode"
         />
         <div
           v-if="showSuppressToggle"
-          class="mt-3 flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2"
+          class="mt-3 flex items-center justify-between gap-4 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-active)] px-3 py-2"
         >
-          <Label for="danger-confirm-suppress" class="text-sm leading-5">{{
+          <Label for="danger-confirm-suppress" class="text-sm leading-5 text-[var(--ds-text-2)]">{{
             suppressToggleLabel || t("dangerDialog.suppressFuturePrompts")
           }}</Label>
           <Switch id="danger-confirm-suppress" v-model="suppressFuturePrompts" />
