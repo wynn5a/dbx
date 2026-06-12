@@ -1,24 +1,41 @@
 <script setup lang="ts">
-import { ref, watch, shallowRef, computed, onMounted } from "vue";
+import { ref, watch, shallowRef, computed, onMounted, type Component } from "vue";
 import type { EditorView as EditorViewType } from "@codemirror/view";
 import { useI18n } from "vue-i18n";
 import {
   AlertTriangle,
+  AlignLeft,
+  Braces,
   CheckCircle2,
   CircleHelp,
   Cloud,
+  Compass,
   Copy,
+  Database,
   Download,
   ExternalLink,
+  Eye,
+  FileCode2,
+  Info,
+  Keyboard,
   Loader2,
   PackageSearch,
+  Palette,
   Pencil,
+  Play,
   RefreshCw,
   RotateCcw,
+  Server,
   Settings,
+  Shield,
+  ShieldCheck,
+  Sparkles,
+  SquareChevronRight,
   Terminal,
   Trash2,
+  Type,
   Upload,
+  WrapText,
   X,
 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
@@ -128,7 +145,6 @@ const editShortcuts = ref(normalizeShortcutSettings(settingsStore.editorSettings
 const editSqlFormatter = ref<SqlFormatterSettings>(
   normalizeSqlFormatterSettings(settingsStore.editorSettings.sqlFormatter),
 );
-const sqlFormatterConfigValid = ref(true);
 const editingShortcutId = ref<ShortcutActionId | null>(null);
 const editSidebarActivation = ref(settingsStore.editorSettings.sidebarActivation);
 const editSidebarObjectDisplay = ref(settingsStore.editorSettings.sidebarObjectDisplay);
@@ -148,6 +164,12 @@ const systemFonts = ref<string[]>([]);
 const systemFontsLoading = ref(false);
 const systemFontsLoaded = ref(false);
 const uiScaleOptions = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+const FONT_SIZE_MIN = 10;
+const FONT_SIZE_MAX = 24;
+// Fill % for the .ds-range track gradient (WebKit reads it via the inline --range-fill var).
+const fontSizeFillPercent = computed(
+  () => ((editFontSize.value - FONT_SIZE_MIN) / (FONT_SIZE_MAX - FONT_SIZE_MIN)) * 100,
+);
 const disconnectTabHandlingModeDescriptionKey = computed(() => {
   switch (editDisconnectTabHandlingMode.value) {
     case "close-tabs":
@@ -290,7 +312,6 @@ watch(
       editRedisScanPageSize.value = settingsStore.editorSettings.redisScanPageSize;
       editShortcuts.value = normalizeShortcutSettings(settingsStore.editorSettings.shortcuts);
       editSqlFormatter.value = normalizeSqlFormatterSettings(settingsStore.editorSettings.sqlFormatter);
-      sqlFormatterConfigValid.value = true;
       editSidebarActivation.value = settingsStore.editorSettings.sidebarActivation;
       editSidebarObjectDisplay.value = settingsStore.editorSettings.sidebarObjectDisplay;
       editAutoSelectActiveSidebarNode.value = settingsStore.editorSettings.autoSelectActiveSidebarNode;
@@ -319,10 +340,7 @@ const shortcutsChanged = computed(
   () => JSON.stringify(editShortcuts.value) !== JSON.stringify(settingsStore.editorSettings.shortcuts),
 );
 const hasBlockingShortcutConflicts = computed(() => shortcutsChanged.value && hasShortcutConflicts.value);
-const hasBlockingFormatterConfig = computed(
-  () => activeSettingsTab.value === "formatter" && !sqlFormatterConfigValid.value,
-);
-const hasApplyBlocker = computed(() => hasBlockingShortcutConflicts.value || hasBlockingFormatterConfig.value);
+const hasApplyBlocker = computed(() => hasBlockingShortcutConflicts.value);
 
 function hasChanges(): boolean {
   return (
@@ -430,7 +448,6 @@ function resetDefaults() {
   editRedisScanPageSize.value = DEFAULT_EDITOR_SETTINGS.redisScanPageSize;
   editShortcuts.value = normalizeShortcutSettings(DEFAULT_EDITOR_SETTINGS.shortcuts);
   editSqlFormatter.value = normalizeSqlFormatterSettings(DEFAULT_EDITOR_SETTINGS.sqlFormatter);
-  sqlFormatterConfigValid.value = true;
   editSidebarActivation.value = DEFAULT_EDITOR_SETTINGS.sidebarActivation;
   editSidebarObjectDisplay.value = DEFAULT_EDITOR_SETTINGS.sidebarObjectDisplay;
   editAutoSelectActiveSidebarNode.value = DEFAULT_EDITOR_SETTINGS.autoSelectActiveSidebarNode;
@@ -603,21 +620,81 @@ type SettingsCategory =
   | "mcp"
   | "security"
   | "about";
-const settingsCategoryNav = computed<{ value: SettingsCategory; label: string }[]>(() => [
-  { value: "editor", label: t("settings.editorTab") },
-  { value: "formatter", label: t("settings.sqlFormatterTab") },
-  { value: "appearance", label: t("settings.appearanceTab") },
-  { value: "navigation", label: t("settings.navigationTab") },
-  { value: "data", label: t("settings.dataTab") },
-  { value: "redis", label: t("settings.redisTab") },
-  { value: "shortcuts", label: t("settings.shortcutsTab") },
-  { value: "snippets", label: t("settings.snippetsTab") },
-  ...(isWeb ? [] : [{ value: "sync" as const, label: t("settings.syncTab") }]),
-  { value: "ai", label: t("settings.aiTab") },
-  ...(isWeb ? [] : [{ value: "mcp" as const, label: t("settings.mcpTab") }]),
-  ...(isWeb ? [{ value: "security" as const, label: t("settings.securityTab") }] : []),
-  { value: "about", label: t("settings.aboutTab") },
+type SettingsCategoryNavItem = {
+  value: SettingsCategory;
+  label: string;
+  icon: Component;
+  subtitleKey: string;
+};
+const settingsCategoryNav = computed<SettingsCategoryNavItem[]>(() => [
+  { value: "editor", label: t("settings.editorTab"), icon: FileCode2, subtitleKey: "settings.editorSubtitle" },
+  {
+    value: "formatter",
+    label: t("settings.sqlFormatterTab"),
+    icon: AlignLeft,
+    subtitleKey: "settings.sqlFormatterSubtitle",
+  },
+  {
+    value: "appearance",
+    label: t("settings.appearanceTab"),
+    icon: Palette,
+    subtitleKey: "settings.appearanceSubtitle",
+  },
+  {
+    value: "navigation",
+    label: t("settings.navigationTab"),
+    icon: Compass,
+    subtitleKey: "settings.navigationSubtitle",
+  },
+  { value: "data", label: t("settings.dataTab"), icon: Database, subtitleKey: "settings.dataSubtitle" },
+  { value: "redis", label: t("settings.redisTab"), icon: Server, subtitleKey: "settings.redisSubtitle" },
+  { value: "shortcuts", label: t("settings.shortcutsTab"), icon: Keyboard, subtitleKey: "settings.shortcutsSubtitle" },
+  { value: "snippets", label: t("settings.snippetsTab"), icon: Braces, subtitleKey: "settings.snippetsDescription" },
+  ...(isWeb
+    ? []
+    : [
+        {
+          value: "sync" as const,
+          label: t("settings.syncTab"),
+          icon: Cloud,
+          subtitleKey: "settings.syncWebDavDescription",
+        },
+      ]),
+  { value: "ai", label: t("settings.aiTab"), icon: Sparkles, subtitleKey: "settings.aiSubtitle" },
+  ...(isWeb
+    ? []
+    : [
+        {
+          value: "mcp" as const,
+          label: t("settings.mcpTab"),
+          icon: PackageSearch,
+          subtitleKey: "settings.mcpDescription",
+        },
+      ]),
+  ...(isWeb
+    ? [
+        {
+          value: "security" as const,
+          label: t("settings.securityTab"),
+          icon: ShieldCheck,
+          subtitleKey: "auth.changePasswordDescription",
+        },
+      ]
+    : []),
+  { value: "about", label: t("settings.aboutTab"), icon: Info, subtitleKey: "settings.aboutDescription" },
 ]);
+const activeCategoryMeta = computed(
+  () =>
+    settingsCategoryNav.value.find((category) => category.value === activeSettingsTab.value) ??
+    settingsCategoryNav.value[0],
+);
+
+// DESIGN-SYSTEM grouped setting card: panel surface (.ds-card) with internal divide-y dividers.
+const dsSettingGroup = "ds-card overflow-hidden divide-y divide-[var(--ds-border-soft)]";
+const dsSettingRow = "flex items-center justify-between gap-4 px-3.5 py-3";
+const dsSettingDesc = "text-[11.5px] leading-relaxed text-[var(--ds-text-3)]";
+// DESIGN-SYSTEM section label (type-scale "label" role) — see .ds-section-label in globals.css.
+const dsSectionLabel = "ds-section-label";
 const settingsTabsWithApplyFooter = new Set<SettingsCategory>([
   "editor",
   "formatter",
@@ -633,12 +710,14 @@ function hasSettingsApplyFooter(value: SettingsCategory): boolean {
   return settingsTabsWithApplyFooter.has(value);
 }
 
+// DESIGN-SYSTEM "Nav row (sidebar)" recipe: neutral active fill (never accent),
+// idle text steps up one ramp level on hover.
 function settingsCategoryButton(value: SettingsCategory): string {
   return [
-    "w-full rounded-md px-3 py-2 text-left text-sm transition-colors",
+    "flex w-full items-center gap-2.5 rounded-md px-3 py-[7px] text-left text-[13px] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)]",
     value === activeSettingsTab.value
-      ? "bg-primary text-primary-foreground shadow-sm"
-      : "text-muted-foreground hover:bg-muted hover:text-foreground",
+      ? "bg-[var(--ds-bg-active)] font-medium text-[var(--ds-text-1)]"
+      : "text-[var(--ds-text-2)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]",
   ].join(" ");
 }
 
@@ -1208,24 +1287,27 @@ const previewSettings = computed<{
   customColors: getPreviewCustomThemeColors(),
 }));
 
-const previewSql = `SELECT u.id, u.name
+const previewSql = `SELECT u.id, u.name, u.mrr
 FROM users u
-ORDER BY u.id LIMIT 5;`;
+WHERE u.is_active = true  -- only active accounts
+ORDER BY u.mrr DESC LIMIT 5;`;
 
 let fontThemeComp: import("@codemirror/state").Compartment | null = null;
 let themeComp: import("@codemirror/state").Compartment | null = null;
+let wrapComp: import("@codemirror/state").Compartment | null = null;
 let editorViewModule: typeof import("@codemirror/view") | null = null;
 
 watch(
-  [previewSettings, editCustomThemes, editActiveCustomThemeId],
+  [previewSettings, editCustomThemes, editActiveCustomThemeId, editWordWrap],
   async ([ss]) => {
-    if (!previewView.value || !fontThemeComp || !themeComp || !editorViewModule) return;
+    if (!previewView.value || !fontThemeComp || !themeComp || !wrapComp || !editorViewModule) return;
 
     const themeExt = await loadEditorTheme(ss.theme, ss.appAppearance, ss.customColors);
     previewView.value.dispatch({
       effects: [
         themeComp.reconfigure(themeExt),
         fontThemeComp.reconfigure(editorFontTheme(editorViewModule.EditorView, ss.fontSize, ss.fontFamily)),
+        wrapComp.reconfigure(editWordWrap.value ? editorViewModule.EditorView.lineWrapping : []),
       ],
     });
   },
@@ -1241,6 +1323,7 @@ watch(activeSettingsTab, (tab) => {
     previewInitialized = false;
     fontThemeComp = null;
     themeComp = null;
+    wrapComp = null;
     editorViewModule = null;
   }
 });
@@ -1260,6 +1343,7 @@ watch(previewRef, async (el) => {
   editorViewModule = { EditorView } as typeof import("@codemirror/view");
   fontThemeComp = new Compartment();
   themeComp = new Compartment();
+  wrapComp = new Compartment();
 
   const ss = previewSettings.value;
   const themeExt = await loadEditorTheme(ss.theme, ss.appAppearance, ss.customColors);
@@ -1271,6 +1355,7 @@ watch(previewRef, async (el) => {
       sql({ dialect: MySQL }),
       themeComp.of(themeExt),
       fontThemeComp.of(editorFontTheme(EditorView, ss.fontSize, ss.fontFamily)),
+      wrapComp.of(editWordWrap.value ? EditorView.lineWrapping : []),
     ],
   });
 
@@ -1286,6 +1371,7 @@ watch(
       previewInitialized = false;
       fontThemeComp = null;
       themeComp = null;
+      wrapComp = null;
       editorViewModule = null;
     }
   },
@@ -1294,7 +1380,7 @@ watch(
 
 <template>
   <Dialog :open="open" @update:open="(v: boolean) => emit('update:open', v)">
-    <DialogContent class="sm:max-w-[860px] h-[min(660px,calc(100vh-80px))] flex flex-col overflow-hidden">
+    <DialogContent class="ds-dialog sm:max-w-[1040px] h-[min(820px,calc(100vh-48px))] flex flex-col overflow-hidden">
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2">
           <Settings class="h-4 w-4" />
@@ -1304,7 +1390,7 @@ watch(
 
       <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden sm:flex-row">
         <nav
-          class="settingsCategoryNav flex min-h-0 shrink-0 gap-1 overflow-x-auto border-b pb-3 sm:w-40 sm:flex-col sm:overflow-x-hidden sm:overflow-y-auto sm:border-b-0 sm:border-r sm:pb-0 sm:pr-3"
+          class="settingsCategoryNav flex min-h-0 shrink-0 gap-1 overflow-x-auto border-b border-[var(--ds-border)] pb-3 sm:w-48 sm:flex-col sm:overflow-x-hidden sm:overflow-y-auto sm:border-b-0 sm:border-r sm:pb-0 sm:pr-3"
         >
           <button
             v-for="category in settingsCategoryNav"
@@ -1313,17 +1399,31 @@ watch(
             :class="settingsCategoryButton(category.value)"
             @click="activeSettingsTab = category.value"
           >
-            {{ category.label }}
+            <component
+              :is="category.icon"
+              class="h-4 w-4 shrink-0"
+              :class="category.value === activeSettingsTab ? 'text-[var(--ds-accent)]' : 'text-[var(--ds-text-3)]'"
+            />
+            <span class="truncate">{{ category.label }}</span>
           </button>
         </nav>
 
         <div class="min-w-0 flex-1 overflow-hidden px-1 flex flex-col">
+          <header class="shrink-0 space-y-0.5 px-1 pb-3">
+            <h2 class="text-[15px] font-semibold text-[var(--ds-text-1)]">{{ activeCategoryMeta.label }}</h2>
+            <p class="text-[12px] leading-relaxed text-[var(--ds-text-3)]">
+              {{ t(activeCategoryMeta.subtitleKey) }}
+            </p>
+          </header>
           <div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1 pr-2">
             <section v-if="activeSettingsTab === 'editor'" class="flex flex-col gap-5 py-2">
-              <div class="grid gap-4 md:grid-cols-[1fr_auto]">
+              <div class="grid gap-4 md:grid-cols-[2fr_1fr]">
                 <!-- Font Family -->
-                <div class="space-y-2 min-w-0">
-                  <Label>{{ t("settings.fontFamily") }}</Label>
+                <div class="min-w-0 space-y-2">
+                  <div :class="dsSectionLabel">
+                    <Type class="h-3.5 w-3.5" />
+                    {{ t("settings.fontFamily") }}
+                  </div>
                   <SearchableSelect
                     :model-value="editFontFamily"
                     :options="systemFontOptions"
@@ -1335,7 +1435,7 @@ watch(
                     allow-custom
                     :display-name="displayFontFamily"
                     :normalize-custom="normalizeCustomFontFamilyInput"
-                    trigger-class="h-9 w-full max-w-none justify-between border bg-background px-3 text-sm shadow-xs hover:bg-accent"
+                    trigger-class="h-8 w-full max-w-none justify-between rounded-sm border border-[var(--ds-border)] bg-[var(--ds-bg-input)] py-2 pr-2 pl-2.5 text-[12.5px] font-medium hover:bg-[var(--ds-bg-hover)] hover:border-[var(--ds-border-strong)]"
                     content-class="w-[var(--reka-popover-trigger-width)] min-w-[260px]"
                     @update:model-value="onFontFamilyChange"
                     @update:open="(open: boolean) => open && loadSystemFontOptions()"
@@ -1357,34 +1457,38 @@ watch(
                 </div>
 
                 <!-- Theme + Custom Theme Button -->
-                <div class="flex gap-2 items-end">
-                  <div class="space-y-2">
-                    <Label>{{ t("settings.theme") }}</Label>
-                    <Select :model-value="themeSelectValue" @update:model-value="onThemeChange">
-                      <SelectTrigger class="min-w-[80px] max-w-[200px]">
-                        <SelectValue :placeholder="t('settings.selectTheme')" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem v-for="theme in themeSelectOptions" :key="theme.value" :value="theme.value">
-                          <div class="flex items-center gap-2">
-                            <span
-                              class="h-3 w-3 rounded-full border"
-                              :class="
-                                theme.dark
-                                  ? 'bg-foreground border-foreground/20'
-                                  : 'bg-muted-foreground/30 border-muted-foreground/40'
-                              "
-                            />
-                            {{ theme.label }}
-                          </div>
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
+                <div class="min-w-0 space-y-2">
+                  <div :class="dsSectionLabel">
+                    <Palette class="h-3.5 w-3.5" />
+                    {{ t("settings.theme") }}
                   </div>
+                  <Select :model-value="themeSelectValue" @update:model-value="onThemeChange">
+                    <SelectTrigger
+                      class="w-full data-[state=open]:ring-2 data-[state=open]:ring-[var(--ds-accent-line)]"
+                    >
+                      <SelectValue :placeholder="t('settings.selectTheme')" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem v-for="theme in themeSelectOptions" :key="theme.value" :value="theme.value">
+                        <div class="flex items-center gap-2">
+                          <span
+                            class="h-3 w-3 rounded-full border"
+                            :class="
+                              theme.dark
+                                ? 'bg-[var(--ds-text-1)] border-[var(--ds-border-strong)]'
+                                : 'bg-[var(--ds-text-4)] border-[var(--ds-border-strong)]'
+                            "
+                          />
+                          {{ theme.label }}
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                   <Button
                     v-if="editTheme === 'custom'"
                     variant="outline"
-                    class="h-9 w-auto px-4"
+                    size="sm"
+                    class="w-full"
                     @click="showThemeCustomizer = true"
                   >
                     <Settings class="mr-2 h-4 w-4" />
@@ -1393,35 +1497,82 @@ watch(
                 </div>
               </div>
 
+              <Separator />
+
               <!-- Font Size -->
-              <div class="space-y-2">
+              <div class="space-y-3">
                 <div class="flex items-center justify-between">
-                  <Label>{{ t("settings.fontSize") }}</Label>
-                  <span class="text-xs text-muted-foreground tabular-nums">{{ editFontSize }}px</span>
+                  <div :class="dsSectionLabel">{{ t("settings.fontSize") }}</div>
+                  <span
+                    class="rounded-md border border-[var(--ds-border)] px-2 py-0.5 font-mono text-[12px] tabular-nums text-[var(--ds-text-1)]"
+                    >{{ editFontSize }}px</span
+                  >
                 </div>
                 <input
                   type="range"
-                  min="10"
-                  max="24"
+                  :min="FONT_SIZE_MIN"
+                  :max="FONT_SIZE_MAX"
                   step="1"
                   :value="editFontSize"
+                  :style="{ '--range-fill': `${fontSizeFillPercent}%` }"
                   @input="editFontSize = Number(($event.target as HTMLInputElement).value)"
-                  class="w-full accent-primary"
+                  class="ds-range"
                 />
-                <div class="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>10px</span>
-                  <span class="flex-1 border-b border-dashed border-muted-foreground/30" />
-                  <span>24px</span>
+                <div class="flex items-center justify-between font-mono text-[11px] text-[var(--ds-text-4)]">
+                  <span>{{ FONT_SIZE_MIN }}px</span>
+                  <span>{{ FONT_SIZE_MAX }}px</span>
+                </div>
+              </div>
+
+              <!-- Live Preview -->
+              <div class="space-y-2">
+                <div :class="dsSectionLabel">
+                  <Eye class="h-3.5 w-3.5" />
+                  {{ t("settings.preview") }}
+                </div>
+                <div
+                  class="overflow-hidden rounded-md border"
+                  :class="
+                    editTheme === 'vscode-light' || editTheme === 'duotone-light' || editTheme === 'xcode'
+                      ? 'border-[var(--ds-border-strong)]'
+                      : 'border-[var(--ds-border)]'
+                  "
+                >
+                  <div
+                    class="flex items-center justify-between gap-3 border-b border-[var(--ds-border)] bg-[var(--ds-bg-hover)] px-3 py-2"
+                  >
+                    <div class="flex items-center gap-2 text-[var(--ds-text-3)]">
+                      <SquareChevronRight class="h-3.5 w-3.5 shrink-0" />
+                      <span class="font-mono text-[12px]">query.sql</span>
+                    </div>
+                    <span class="truncate font-mono text-[11px] text-[var(--ds-text-4)]">
+                      {{ displayFontFamily(editFontFamily) }} · {{ editFontSize }}px
+                    </span>
+                  </div>
+                  <div class="max-w-full overflow-auto">
+                    <div ref="previewRef" style="min-width: 100%" />
+                  </div>
                 </div>
               </div>
 
               <Separator />
 
-              <div class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                <div class="space-y-2">
-                  <Label>{{ t("settings.executeMode") }}</Label>
+              <!-- Editor behavior: Execute mode + Word wrap + Confirm in one grouped card -->
+              <div :class="dsSettingGroup">
+                <!-- Execute mode (select on the right) -->
+                <div class="flex items-center justify-between gap-4 px-4 py-4">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <Play class="h-3.5 w-3.5 shrink-0 fill-current text-[var(--ds-text-2)]" />
+                      <span class="text-[14px] font-semibold text-[var(--ds-text-1)]">{{
+                        t("settings.executeMode")
+                      }}</span>
+                      <span class="ds-kbd">⌘↵</span>
+                    </div>
+                    <p :class="[dsSettingDesc, 'mt-1']">{{ t("settings.executeModeDescription") }}</p>
+                  </div>
                   <Select :model-value="editExecuteMode" @update:model-value="onExecuteModeChange">
-                    <SelectTrigger>
+                    <SelectTrigger class="w-[280px] max-w-[50%] shrink-0">
                       <SelectValue :placeholder="t('settings.executeMode')" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1431,48 +1582,55 @@ watch(
                   </Select>
                 </div>
 
-                <div class="flex items-center justify-between gap-4 self-end rounded-md border bg-muted/20 px-3 py-2">
-                  <div class="space-y-1">
-                    <Label for="editor-word-wrap">{{ t("settings.wordWrap") }}</Label>
-                    <p class="text-xs text-muted-foreground">{{ t("settings.wordWrapDescription") }}</p>
+                <!-- Word wrap -->
+                <div class="flex items-center justify-between gap-4 px-4 py-4">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <WrapText class="h-4 w-4 shrink-0 text-[var(--ds-text-2)]" />
+                      <Label for="editor-word-wrap" class="text-[14px] font-semibold text-[var(--ds-text-1)]">{{
+                        t("settings.wordWrap")
+                      }}</Label>
+                    </div>
+                    <p :class="[dsSettingDesc, 'mt-1']">{{ t("settings.wordWrapDescription") }}</p>
                   </div>
-                  <Switch id="editor-word-wrap" v-model="editWordWrap" class="mt-0.5" />
+                  <Switch id="editor-word-wrap" v-model="editWordWrap" class="shrink-0" />
                 </div>
-              </div>
 
-              <div class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
-                <div class="space-y-1">
-                  <Label for="editor-confirm-dangerous-sql">{{ t("settings.confirmDangerousSqlExecution") }}</Label>
-                  <p class="text-xs text-muted-foreground">
-                    {{ t("settings.confirmDangerousSqlExecutionDescription") }}
-                  </p>
-                </div>
-                <Switch id="editor-confirm-dangerous-sql" v-model="editConfirmDangerousSqlExecution" class="mt-0.5" />
-              </div>
-
-              <Separator />
-
-              <!-- Live Preview -->
-              <div class="space-y-2">
-                <Label>{{ t("settings.preview") }}</Label>
-                <div
-                  class="rounded-md border overflow-auto max-w-full"
-                  :class="
-                    editTheme === 'vscode-light' || editTheme === 'duotone-light' || editTheme === 'xcode'
-                      ? 'border-border'
-                      : 'border-border/50'
-                  "
-                >
-                  <div ref="previewRef" style="min-width: 100%" />
+                <!-- Confirm before dangerous SQL -->
+                <div class="flex items-center justify-between gap-4 px-4 py-4">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <Shield class="h-4 w-4 shrink-0 text-[var(--ds-text-2)]" />
+                      <Label
+                        for="editor-confirm-dangerous-sql"
+                        class="text-[14px] font-semibold text-[var(--ds-text-1)]"
+                      >
+                        {{ t("settings.confirmDangerousSqlExecution") }}
+                      </Label>
+                    </div>
+                    <p class="mt-1 text-[11.5px] leading-relaxed text-[var(--ds-text-3)]">
+                      {{ t("settings.confirmDangerousSqlLead") }}
+                      <span class="font-mono font-medium text-[var(--ds-red)]">ALTER</span>
+                      <span class="text-[var(--ds-text-4)]">·</span>
+                      <span class="font-mono font-medium text-[var(--ds-red)]">DROP</span>
+                      <span class="text-[var(--ds-text-4)]">·</span>
+                      <span class="font-mono font-medium text-[var(--ds-red)]">DELETE</span>
+                      <span class="text-[var(--ds-text-4)]">·</span>
+                      <span class="font-mono font-medium text-[var(--ds-red)]">TRUNCATE</span>
+                      {{ t("settings.confirmDangerousSqlTrail") }}
+                    </p>
+                  </div>
+                  <Switch
+                    id="editor-confirm-dangerous-sql"
+                    v-model="editConfirmDangerousSqlExecution"
+                    class="shrink-0"
+                  />
                 </div>
               </div>
             </section>
 
             <section v-else-if="activeSettingsTab === 'formatter'" class="flex flex-col gap-5 py-2">
-              <SqlFormatterSettingsPanel
-                v-model="editSqlFormatter"
-                @validity-change="(value: boolean) => (sqlFormatterConfigValid = value)"
-              />
+              <SqlFormatterSettingsPanel v-model="editSqlFormatter" />
             </section>
 
             <section v-else-if="activeSettingsTab === 'appearance'" class="flex flex-col gap-5 py-2">
@@ -1519,7 +1677,7 @@ watch(
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                <p class="text-xs text-muted-foreground">{{ t("settings.uiScaleDescription") }}</p>
+                <p class="text-xs text-[var(--ds-text-3)]">{{ t("settings.uiScaleDescription") }}</p>
               </div>
 
               <div v-if="!isWeb" class="space-y-2">
@@ -1528,116 +1686,129 @@ watch(
                   <Button
                     type="button"
                     variant="outline"
-                    class="h-auto justify-start border p-3"
-                    :class="editIconTheme === 'default' ? 'border-blue-300 ring-2 ring-blue-300/50' : ''"
+                    class="h-auto justify-start border border-[var(--ds-border)] p-3"
+                    :class="
+                      editIconTheme === 'default' ? 'border-[var(--ds-accent-line)] bg-[var(--ds-accent-soft)]' : ''
+                    "
                     @click="setIconTheme('default')"
                   >
                     <div class="flex items-center gap-3 text-left">
                       <img src="/logo.png" alt="DBX" class="h-8 w-8 rounded-md" />
                       <div>
                         <div class="text-sm font-medium">{{ t("settings.iconThemeDefault") }}</div>
-                        <div class="text-xs text-muted-foreground">{{ t("settings.iconThemeDefaultDescription") }}</div>
+                        <div class="text-xs text-[var(--ds-text-3)]">
+                          {{ t("settings.iconThemeDefaultDescription") }}
+                        </div>
                       </div>
                     </div>
                   </Button>
                   <Button
                     type="button"
                     variant="outline"
-                    class="h-auto justify-start border p-3"
-                    :class="editIconTheme === 'black' ? 'border-blue-300 ring-2 ring-blue-300/50' : ''"
+                    class="h-auto justify-start border border-[var(--ds-border)] p-3"
+                    :class="
+                      editIconTheme === 'black' ? 'border-[var(--ds-accent-line)] bg-[var(--ds-accent-soft)]' : ''
+                    "
                     @click="setIconTheme('black')"
                   >
                     <div class="flex items-center gap-3 text-left">
                       <img src="/logo-black.png" alt="DBX" class="h-8 w-8 dark:invert" />
                       <div>
                         <div class="text-sm font-medium">{{ t("settings.iconThemeBlack") }}</div>
-                        <div class="text-xs text-muted-foreground">{{ t("settings.iconThemeBlackDescription") }}</div>
+                        <div class="text-xs text-[var(--ds-text-3)]">{{ t("settings.iconThemeBlackDescription") }}</div>
                       </div>
                     </div>
                   </Button>
                 </div>
               </div>
 
-              <div
-                v-if="!isWeb"
-                class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2"
-              >
-                <div class="space-y-1">
-                  <Label for="show-tray-icon">{{ t("settings.showTrayIcon") }}</Label>
-                  <p class="text-xs text-muted-foreground">{{ t("settings.showTrayIconDescription") }}</p>
+              <div :class="dsSettingGroup">
+                <div v-if="!isWeb" :class="dsSettingRow">
+                  <div class="min-w-0 space-y-0.5">
+                    <Label for="show-tray-icon">{{ t("settings.showTrayIcon") }}</Label>
+                    <p :class="dsSettingDesc">{{ t("settings.showTrayIconDescription") }}</p>
+                  </div>
+                  <Switch id="show-tray-icon" v-model="editShowTrayIcon" class="shrink-0" />
                 </div>
-                <Switch id="show-tray-icon" v-model="editShowTrayIcon" />
-              </div>
-
-              <div class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
-                <div class="space-y-1">
-                  <Label for="update-notifications-enabled">{{ t("settings.updateNotificationsEnabled") }}</Label>
-                  <p class="text-xs text-muted-foreground">
-                    {{ t("settings.updateNotificationsEnabledDescription") }}
-                  </p>
-                </div>
-                <Switch id="update-notifications-enabled" v-model="editUpdateNotificationsEnabled" />
-              </div>
-
-              <div v-if="!isWeb" class="flex flex-col gap-3 rounded-md border bg-muted/20 px-3 py-2">
-                <div class="flex items-center justify-between gap-4">
-                  <div class="space-y-1">
-                    <Label for="debug-logging-enabled">{{ t("settings.debugLoggingEnabled") }}</Label>
-                    <p class="text-xs text-muted-foreground">
-                      {{ t("settings.debugLoggingEnabledDescription") }}
+                <div :class="dsSettingRow">
+                  <div class="min-w-0 space-y-0.5">
+                    <Label for="update-notifications-enabled">{{ t("settings.updateNotificationsEnabled") }}</Label>
+                    <p :class="dsSettingDesc">
+                      {{ t("settings.updateNotificationsEnabledDescription") }}
                     </p>
                   </div>
-                  <Switch id="debug-logging-enabled" v-model="editDebugLoggingEnabled" />
+                  <Switch id="update-notifications-enabled" v-model="editUpdateNotificationsEnabled" class="shrink-0" />
                 </div>
-                <div class="flex justify-end gap-2">
-                  <Button type="button" variant="outline" size="sm" @click="clearDebugLogs">
-                    {{ t("settings.debugLogsClear") }}
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" @click="copyDebugLogs">
-                    {{ debugLogCopied ? t("settings.debugLogsCopied") : t("settings.debugLogsCopy") }}
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" @click="exportDebugLogs">
-                    {{ debugLogDownloaded ? t("settings.debugLogsDownloaded") : t("settings.debugLogsDownload") }}
-                  </Button>
+                <div v-if="!isWeb" class="flex flex-col gap-2.5 px-3 py-2.5">
+                  <div class="flex items-center justify-between gap-4">
+                    <div class="min-w-0 space-y-0.5">
+                      <Label for="debug-logging-enabled">{{ t("settings.debugLoggingEnabled") }}</Label>
+                      <p :class="dsSettingDesc">
+                        {{ t("settings.debugLoggingEnabledDescription") }}
+                      </p>
+                    </div>
+                    <Switch id="debug-logging-enabled" v-model="editDebugLoggingEnabled" class="shrink-0" />
+                  </div>
+                  <div class="flex justify-end gap-2">
+                    <Button type="button" variant="outline" size="sm" @click="clearDebugLogs">
+                      {{ t("settings.debugLogsClear") }}
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" @click="copyDebugLogs">
+                      {{ debugLogCopied ? t("settings.debugLogsCopied") : t("settings.debugLogsCopy") }}
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" @click="exportDebugLogs">
+                      {{ debugLogDownloaded ? t("settings.debugLogsDownloaded") : t("settings.debugLogsDownload") }}
+                    </Button>
+                  </div>
                 </div>
               </div>
 
               <Separator />
 
-              <div class="space-y-3">
-                <Label>{{ t("settings.dataGridDisplay") }}</Label>
-                <div class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
-                  <div class="space-y-1">
-                    <Label for="show-column-comments-in-header">
-                      {{ t("settings.showColumnCommentsInHeader") }}
-                    </Label>
-                    <p class="text-xs text-muted-foreground">
-                      {{ t("settings.showColumnCommentsInHeaderDescription") }}
-                    </p>
+              <div class="space-y-2">
+                <div class="ds-menu-label">{{ t("settings.dataGridDisplay") }}</div>
+                <div :class="dsSettingGroup">
+                  <div :class="dsSettingRow">
+                    <div class="min-w-0 space-y-0.5">
+                      <Label for="show-column-comments-in-header">
+                        {{ t("settings.showColumnCommentsInHeader") }}
+                      </Label>
+                      <p :class="dsSettingDesc">
+                        {{ t("settings.showColumnCommentsInHeaderDescription") }}
+                      </p>
+                    </div>
+                    <Switch
+                      id="show-column-comments-in-header"
+                      v-model="editShowColumnCommentsInHeader"
+                      class="shrink-0"
+                    />
                   </div>
-                  <Switch id="show-column-comments-in-header" v-model="editShowColumnCommentsInHeader" />
-                </div>
-                <div class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
-                  <div class="space-y-1">
-                    <Label for="show-column-types-in-header">
-                      {{ t("settings.showColumnTypesInHeader") }}
-                    </Label>
-                    <p class="text-xs text-muted-foreground">
-                      {{ t("settings.showColumnTypesInHeaderDescription") }}
-                    </p>
+                  <div :class="dsSettingRow">
+                    <div class="min-w-0 space-y-0.5">
+                      <Label for="show-column-types-in-header">
+                        {{ t("settings.showColumnTypesInHeader") }}
+                      </Label>
+                      <p :class="dsSettingDesc">
+                        {{ t("settings.showColumnTypesInHeaderDescription") }}
+                      </p>
+                    </div>
+                    <Switch id="show-column-types-in-header" v-model="editShowColumnTypesInHeader" class="shrink-0" />
                   </div>
-                  <Switch id="show-column-types-in-header" v-model="editShowColumnTypesInHeader" />
-                </div>
-                <div class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
-                  <div class="space-y-1">
-                    <Label for="compact-column-header-actions">
-                      {{ t("settings.compactColumnHeaderActions") }}
-                    </Label>
-                    <p class="text-xs text-muted-foreground">
-                      {{ t("settings.compactColumnHeaderActionsDescription") }}
-                    </p>
+                  <div :class="dsSettingRow">
+                    <div class="min-w-0 space-y-0.5">
+                      <Label for="compact-column-header-actions">
+                        {{ t("settings.compactColumnHeaderActions") }}
+                      </Label>
+                      <p :class="dsSettingDesc">
+                        {{ t("settings.compactColumnHeaderActionsDescription") }}
+                      </p>
+                    </div>
+                    <Switch
+                      id="compact-column-header-actions"
+                      v-model="editCompactColumnHeaderActions"
+                      class="shrink-0"
+                    />
                   </div>
-                  <Switch id="compact-column-header-actions" v-model="editCompactColumnHeaderActions" />
                 </div>
               </div>
             </section>
@@ -1649,13 +1820,17 @@ watch(
                   <Button
                     type="button"
                     variant="outline"
-                    class="h-auto justify-start border p-3"
-                    :class="editSidebarActivation === 'single' ? 'border-blue-300 ring-2 ring-blue-300/50' : ''"
+                    class="h-auto justify-start border border-[var(--ds-border)] p-3"
+                    :class="
+                      editSidebarActivation === 'single'
+                        ? 'border-[var(--ds-accent-line)] bg-[var(--ds-accent-soft)]'
+                        : ''
+                    "
                     @click="setSidebarActivation('single')"
                   >
                     <div class="text-left">
                       <div class="text-sm font-medium">{{ t("settings.sidebarActivationSingle") }}</div>
-                      <div class="text-xs text-muted-foreground">
+                      <div class="text-xs text-[var(--ds-text-3)]">
                         {{ t("settings.sidebarActivationSingleDescription") }}
                       </div>
                     </div>
@@ -1663,32 +1838,22 @@ watch(
                   <Button
                     type="button"
                     variant="outline"
-                    class="h-auto justify-start border p-3"
-                    :class="editSidebarActivation === 'double' ? 'border-blue-300 ring-2 ring-blue-300/50' : ''"
+                    class="h-auto justify-start border border-[var(--ds-border)] p-3"
+                    :class="
+                      editSidebarActivation === 'double'
+                        ? 'border-[var(--ds-accent-line)] bg-[var(--ds-accent-soft)]'
+                        : ''
+                    "
                     @click="setSidebarActivation('double')"
                   >
                     <div class="text-left">
                       <div class="text-sm font-medium">{{ t("settings.sidebarActivationDouble") }}</div>
-                      <div class="text-xs text-muted-foreground">
+                      <div class="text-xs text-[var(--ds-text-3)]">
                         {{ t("settings.sidebarActivationDoubleDescription") }}
                       </div>
                     </div>
                   </Button>
                 </div>
-              </div>
-              <div class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
-                <div class="flex items-center gap-2">
-                  <Label for="reuse-data-tab">{{ t("settings.reuseDataTab") }}</Label>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <CircleHelp class="h-3.5 w-3.5 cursor-help text-muted-foreground hover:text-foreground" />
-                    </TooltipTrigger>
-                    <TooltipContent class="max-w-[320px] text-xs leading-relaxed" side="top" align="start">
-                      {{ t("settings.reuseDataTabDescription") }}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <Switch id="reuse-data-tab" v-model="editReuseDataTab" />
               </div>
               <div class="space-y-2">
                 <Label>{{ t("settings.sidebarObjectDisplay") }}</Label>
@@ -1696,8 +1861,12 @@ watch(
                   <Button
                     type="button"
                     variant="outline"
-                    class="h-auto justify-start border p-3"
-                    :class="editSidebarObjectDisplay === 'grouped' ? 'border-blue-300 ring-2 ring-blue-300/50' : ''"
+                    class="h-auto justify-start border border-[var(--ds-border)] p-3"
+                    :class="
+                      editSidebarObjectDisplay === 'grouped'
+                        ? 'border-[var(--ds-accent-line)] bg-[var(--ds-accent-soft)]'
+                        : ''
+                    "
                     @click="setSidebarObjectDisplay('grouped')"
                   >
                     <div class="text-left">
@@ -1706,7 +1875,7 @@ watch(
                         <Tooltip :open="sidebarObjectDisplayHelp === 'grouped'">
                           <TooltipTrigger as-child>
                             <span
-                              class="inline-flex shrink-0 cursor-help text-muted-foreground hover:text-foreground"
+                              class="inline-flex shrink-0 cursor-help text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]"
                               @click.stop
                               @pointerdown.stop
                               @mouseenter="sidebarObjectDisplayHelp = 'grouped'"
@@ -1730,8 +1899,12 @@ watch(
                   <Button
                     type="button"
                     variant="outline"
-                    class="h-auto justify-start border p-3"
-                    :class="editSidebarObjectDisplay === 'simple' ? 'border-blue-300 ring-2 ring-blue-300/50' : ''"
+                    class="h-auto justify-start border border-[var(--ds-border)] p-3"
+                    :class="
+                      editSidebarObjectDisplay === 'simple'
+                        ? 'border-[var(--ds-accent-line)] bg-[var(--ds-accent-soft)]'
+                        : ''
+                    "
                     @click="setSidebarObjectDisplay('simple')"
                   >
                     <div class="text-left">
@@ -1740,7 +1913,7 @@ watch(
                         <Tooltip :open="sidebarObjectDisplayHelp === 'simple'">
                           <TooltipTrigger as-child>
                             <span
-                              class="inline-flex shrink-0 cursor-help text-muted-foreground hover:text-foreground"
+                              class="inline-flex shrink-0 cursor-help text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]"
                               @click.stop
                               @pointerdown.stop
                               @mouseenter="sidebarObjectDisplayHelp = 'simple'"
@@ -1763,26 +1936,14 @@ watch(
                   </Button>
                 </div>
               </div>
-              <div class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
-                <div class="flex items-center gap-2">
-                  <Label for="auto-select-active-sidebar-node">{{ t("settings.autoSelectActiveSidebarNode") }}</Label>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <CircleHelp class="h-3.5 w-3.5 cursor-help text-muted-foreground hover:text-foreground" />
-                    </TooltipTrigger>
-                    <TooltipContent class="max-w-[320px] text-xs leading-relaxed" side="top" align="start">
-                      {{ t("settings.autoSelectActiveSidebarNodeDescription") }}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-                <Switch id="auto-select-active-sidebar-node" v-model="editAutoSelectActiveSidebarNode" />
-              </div>
-              <div class="space-y-2 rounded-md border bg-muted/20 px-3 py-2">
+              <div class="space-y-2">
                 <div class="flex items-center gap-2">
                   <Label for="disconnect-tab-handling-mode">{{ t("settings.disconnectTabHandlingMode") }}</Label>
                   <Tooltip>
                     <TooltipTrigger as-child>
-                      <CircleHelp class="h-3.5 w-3.5 cursor-help text-muted-foreground hover:text-foreground" />
+                      <CircleHelp
+                        class="h-3.5 w-3.5 cursor-help text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]"
+                      />
                     </TooltipTrigger>
                     <TooltipContent class="max-w-[320px] text-xs leading-relaxed" side="top" align="start">
                       {{ t("settings.disconnectTabHandlingModeDescription") }}
@@ -1806,49 +1967,96 @@ watch(
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                <p class="text-xs text-muted-foreground">
+                <p class="text-xs text-[var(--ds-text-3)]">
                   {{ t(`settings.${disconnectTabHandlingModeDescriptionKey}`) }}
                 </p>
               </div>
-              <div class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
-                <div class="flex items-center gap-2">
-                  <Label for="sidebar-hide-table-comments">{{ t("settings.sidebarHideTableComments") }}</Label>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <CircleHelp class="h-3.5 w-3.5 cursor-help text-muted-foreground hover:text-foreground" />
-                    </TooltipTrigger>
-                    <TooltipContent class="max-w-[320px] text-xs leading-relaxed" side="top" align="start">
-                      {{ t("settings.sidebarHideTableCommentsDescription") }}
-                    </TooltipContent>
-                  </Tooltip>
+
+              <div :class="dsSettingGroup">
+                <div :class="dsSettingRow">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <Label for="reuse-data-tab">{{ t("settings.reuseDataTab") }}</Label>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <CircleHelp
+                          class="h-3.5 w-3.5 cursor-help text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent class="max-w-[320px] text-xs leading-relaxed" side="top" align="start">
+                        {{ t("settings.reuseDataTabDescription") }}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <Switch id="reuse-data-tab" v-model="editReuseDataTab" class="shrink-0" />
                 </div>
-                <Switch id="sidebar-hide-table-comments" v-model="editSidebarHideTableComments" />
-              </div>
-              <div class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
-                <div class="flex items-center gap-2">
-                  <Label for="sidebar-allow-horizontal-scroll">
-                    {{ t("settings.sidebarAllowHorizontalScroll") }}
-                  </Label>
-                  <Tooltip>
-                    <TooltipTrigger as-child>
-                      <CircleHelp class="h-3.5 w-3.5 cursor-help text-muted-foreground hover:text-foreground" />
-                    </TooltipTrigger>
-                    <TooltipContent class="max-w-[320px] text-xs leading-relaxed" side="top" align="start">
-                      {{ t("settings.sidebarAllowHorizontalScrollDescription") }}
-                    </TooltipContent>
-                  </Tooltip>
+                <div :class="dsSettingRow">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <Label for="auto-select-active-sidebar-node">{{ t("settings.autoSelectActiveSidebarNode") }}</Label>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <CircleHelp
+                          class="h-3.5 w-3.5 cursor-help text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent class="max-w-[320px] text-xs leading-relaxed" side="top" align="start">
+                        {{ t("settings.autoSelectActiveSidebarNodeDescription") }}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <Switch
+                    id="auto-select-active-sidebar-node"
+                    v-model="editAutoSelectActiveSidebarNode"
+                    class="shrink-0"
+                  />
                 </div>
-                <Switch id="sidebar-allow-horizontal-scroll" v-model="editSidebarAllowHorizontalScroll" />
+                <div :class="dsSettingRow">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <Label for="sidebar-hide-table-comments">{{ t("settings.sidebarHideTableComments") }}</Label>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <CircleHelp
+                          class="h-3.5 w-3.5 cursor-help text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent class="max-w-[320px] text-xs leading-relaxed" side="top" align="start">
+                        {{ t("settings.sidebarHideTableCommentsDescription") }}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <Switch id="sidebar-hide-table-comments" v-model="editSidebarHideTableComments" class="shrink-0" />
+                </div>
+                <div :class="dsSettingRow">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <Label for="sidebar-allow-horizontal-scroll">
+                      {{ t("settings.sidebarAllowHorizontalScroll") }}
+                    </Label>
+                    <Tooltip>
+                      <TooltipTrigger as-child>
+                        <CircleHelp
+                          class="h-3.5 w-3.5 cursor-help text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent class="max-w-[320px] text-xs leading-relaxed" side="top" align="start">
+                        {{ t("settings.sidebarAllowHorizontalScrollDescription") }}
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                  <Switch
+                    id="sidebar-allow-horizontal-scroll"
+                    v-model="editSidebarAllowHorizontalScroll"
+                    class="shrink-0"
+                  />
+                </div>
               </div>
               <div class="space-y-2">
                 <Label for="sidebar-hidden-table-prefixes">{{ t("settings.sidebarHiddenTablePrefixes") }}</Label>
                 <textarea
                   id="sidebar-hidden-table-prefixes"
                   v-model="editSidebarHiddenTablePrefixes"
-                  class="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  class="min-h-24 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-3 py-2 text-sm text-[var(--ds-text-1)] outline-none transition-colors placeholder:text-[var(--ds-text-3)] focus-visible:border-[var(--ds-accent-line)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--ds-accent-line)]"
                   :placeholder="t('settings.sidebarHiddenTablePrefixesPlaceholder')"
                 />
-                <p class="text-xs text-muted-foreground">
+                <p class="text-xs text-[var(--ds-text-3)]">
                   {{ t("settings.sidebarHiddenTablePrefixesDescription") }}
                 </p>
               </div>
@@ -1857,7 +2065,7 @@ watch(
             <!-- Data Tab -->
             <section v-else-if="activeSettingsTab === 'data'" class="flex flex-col gap-5 py-2">
               <div class="space-y-3">
-                <div class="text-sm font-medium text-muted-foreground">{{ t("settings.exportSection") }}</div>
+                <div class="ds-menu-label">{{ t("settings.exportSection") }}</div>
                 <div class="space-y-2">
                   <Label>{{ t("settings.exportBatchSize") }}</Label>
                   <div class="flex items-center gap-3">
@@ -1877,7 +2085,7 @@ watch(
                       <option value="5000" />
                       <option value="10000" />
                     </datalist>
-                    <span class="text-xs text-muted-foreground">{{ t("settings.exportBatchSizeDescription") }}</span>
+                    <span class="text-xs text-[var(--ds-text-3)]">{{ t("settings.exportBatchSizeDescription") }}</span>
                   </div>
                 </div>
               </div>
@@ -1896,23 +2104,23 @@ watch(
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                <p class="text-xs text-muted-foreground">{{ t("settings.redisScanPageSizeDescription") }}</p>
+                <p class="text-xs text-[var(--ds-text-3)]">{{ t("settings.redisScanPageSizeDescription") }}</p>
               </div>
             </section>
 
             <section v-else-if="activeSettingsTab === 'shortcuts'" class="flex flex-col gap-2 py-2">
-              <div class="overflow-hidden rounded-md border border-border/70 bg-background">
+              <div class="overflow-hidden rounded-md border border-[var(--ds-border)] bg-transparent">
                 <div
                   v-for="definition in SHORTCUT_DEFINITIONS"
                   :key="definition.id"
-                  class="group -mt-px grid gap-2 border-t border-border/70 px-3 py-2 transition-colors first:mt-0 first:border-t-0 hover:bg-muted/40 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+                  class="group -mt-px grid gap-2 border-t border-[var(--ds-border)] px-3 py-2 transition-colors first:mt-0 first:border-t-0 hover:bg-[var(--ds-bg-hover)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
                 >
                   <div class="min-w-0">
                     <div class="flex min-w-0 items-center gap-2">
                       <Label class="min-w-0 truncate leading-none">{{ t(definition.labelKey) }}</Label>
                       <Badge
                         variant="outline"
-                        class="h-5 shrink-0 rounded-md border-border/60 px-1.5 text-[11px] font-normal text-muted-foreground"
+                        class="h-5 shrink-0 rounded-md border-[var(--ds-border)] px-1.5 text-[11px] font-normal text-[var(--ds-text-3)]"
                       >
                         {{
                           t(`settings.shortcutScope${definition.scope[0].toUpperCase()}${definition.scope.slice(1)}`)
@@ -1936,10 +2144,10 @@ watch(
                         readonly
                         :aria-invalid="shortcutConflicts.includes(definition.id)"
                         :placeholder="t('settings.shortcutPressShortcut')"
-                        class="h-7 w-auto min-w-12 max-w-32 shrink-0 cursor-default rounded-full border border-transparent bg-muted px-2.5 text-center font-mono text-[13px] font-semibold text-foreground/75 shadow-inner outline-none selection:bg-transparent placeholder:text-muted-foreground aria-invalid:border-destructive/70 aria-invalid:text-destructive aria-invalid:ring-destructive/20"
+                        class="h-7 w-auto min-w-12 max-w-32 shrink-0 cursor-default rounded-full border border-transparent bg-[var(--ds-bg-active)] px-2.5 text-center font-mono text-[13px] font-semibold text-[var(--ds-text-2)] outline-none selection:bg-transparent placeholder:text-[var(--ds-text-3)] aria-invalid:border-[color-mix(in_srgb,var(--ds-red)_60%,transparent)] aria-invalid:text-[var(--ds-red)] aria-invalid:ring-[color-mix(in_srgb,var(--ds-red)_20%,transparent)]"
                         :class="
                           editingShortcutId === definition.id
-                            ? 'max-w-44 cursor-text border-border/80 bg-background text-left text-foreground shadow-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/35'
+                            ? 'max-w-44 cursor-text border-[var(--ds-border-strong)] bg-[var(--ds-bg-input)] text-left text-[var(--ds-text-1)] shadow-none focus-visible:border-[var(--ds-accent-line)] focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]'
                             : ''
                         "
                         @keydown="(event: KeyboardEvent) => onShortcutKeydown(definition.id, event)"
@@ -1949,7 +2157,7 @@ watch(
                         type="button"
                         variant="ghost"
                         size="icon"
-                        class="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                        class="shrink-0 text-[var(--ds-text-3)] opacity-0 transition-opacity hover:text-[var(--ds-text-1)] focus-visible:opacity-100 group-hover:opacity-100"
                         :aria-label="t('settings.shortcutPressShortcut')"
                         @click="focusShortcutInput(definition.id)"
                       >
@@ -1960,7 +2168,7 @@ watch(
                         type="button"
                         variant="ghost"
                         size="sm"
-                        class="h-7 shrink-0 px-2 text-sm font-medium text-muted-foreground hover:text-foreground"
+                        class="h-7 shrink-0 px-2 text-sm font-medium text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]"
                         @click="cancelShortcutEdit"
                       >
                         {{ t("settings.cancel") }}
@@ -1970,14 +2178,14 @@ watch(
                         type="button"
                         variant="ghost"
                         size="icon"
-                        class="shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                        class="shrink-0 text-[var(--ds-text-3)] opacity-0 transition-opacity hover:text-[var(--ds-text-1)] focus-visible:opacity-100 group-hover:opacity-100"
                         :aria-label="t('settings.reset')"
                         @click="resetShortcut(definition.id)"
                       >
                         <RotateCcw class="h-4 w-4" />
                       </Button>
                     </div>
-                    <p v-if="shortcutConflicts.includes(definition.id)" class="text-xs text-destructive">
+                    <p v-if="shortcutConflicts.includes(definition.id)" class="text-xs text-[var(--ds-red)]">
                       {{ t("settings.shortcutConflict") }}
                     </p>
                   </div>
@@ -1988,23 +2196,23 @@ watch(
             <!-- Snippets Tab -->
             <section v-else-if="activeSettingsTab === 'snippets'" class="flex flex-col gap-4 py-2">
               <div class="flex items-center justify-between">
-                <p class="text-sm text-muted-foreground">{{ t("settings.snippetsDescription") }}</p>
+                <p class="text-sm text-[var(--ds-text-3)]">{{ t("settings.snippetsDescription") }}</p>
                 <Button variant="outline" size="sm" @click="openAddSnippetDialog">
                   {{ t("settings.snippetsAdd") }}
                 </Button>
               </div>
 
-              <div class="rounded-md border">
+              <div class="overflow-hidden rounded-md border border-[var(--ds-border)]">
                 <table class="w-full text-sm">
                   <thead>
-                    <tr class="border-b bg-muted/50">
-                      <th class="px-3 py-2 text-left font-medium whitespace-nowrap">
+                    <tr class="border-b border-[var(--ds-border)] bg-[var(--ds-bg-hover)]">
+                      <th class="px-3 py-2 text-left text-[12px] font-medium whitespace-nowrap text-[var(--ds-text-2)]">
                         {{ t("settings.snippetsLabel") }}
                       </th>
-                      <th class="px-3 py-2 text-left font-medium whitespace-nowrap">
+                      <th class="px-3 py-2 text-left text-[12px] font-medium whitespace-nowrap text-[var(--ds-text-2)]">
                         {{ t("settings.snippetsPrefix") }}
                       </th>
-                      <th class="px-3 py-2 text-left font-medium whitespace-nowrap">
+                      <th class="px-3 py-2 text-left text-[12px] font-medium whitespace-nowrap text-[var(--ds-text-2)]">
                         {{ t("settings.snippetsBody") }}
                       </th>
                       <th class="px-3 py-2 w-20"></th>
@@ -2014,18 +2222,18 @@ watch(
                     <tr
                       v-for="snippet in editSnippets"
                       :key="snippet.id"
-                      class="border-b last:border-b-0 hover:bg-muted/30"
+                      class="border-b border-[var(--ds-border-soft)] last:border-b-0 transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)]"
                     >
-                      <td class="px-3 py-2">{{ snippet.label }}</td>
+                      <td class="px-3 py-2 text-[var(--ds-text-1)]">{{ snippet.label }}</td>
                       <td class="px-3 py-2">
                         <Badge
                           variant="outline"
-                          class="h-5 rounded-md px-1.5 text-[11px] font-mono text-muted-foreground"
+                          class="h-5 rounded-md px-1.5 text-[11px] font-mono text-[var(--ds-text-3)]"
                         >
                           {{ snippet.prefix }}
                         </Badge>
                       </td>
-                      <td class="px-3 py-2 font-mono text-xs text-muted-foreground max-w-[300px] truncate">
+                      <td class="px-3 py-2 font-mono text-xs text-[var(--ds-text-3)] max-w-[300px] truncate">
                         {{ snippet.body }}
                       </td>
                       <td class="px-3 py-2">
@@ -2045,14 +2253,6 @@ watch(
             </section>
 
             <section v-else-if="activeSettingsTab === 'sync'" class="flex flex-col gap-5 py-2">
-              <div class="space-y-1">
-                <div class="flex items-center gap-2 text-sm font-medium">
-                  <Cloud class="h-4 w-4 text-muted-foreground" />
-                  {{ t("settings.syncWebDavTitle") }}
-                </div>
-                <p class="text-xs text-muted-foreground">{{ t("settings.syncWebDavDescription") }}</p>
-              </div>
-
               <div class="grid gap-4 md:grid-cols-2">
                 <div class="space-y-2 md:col-span-2">
                   <Label for="webdav-endpoint">{{ t("settings.syncEndpoint") }}</Label>
@@ -2094,15 +2294,21 @@ watch(
                       <X class="size-3.5" />
                     </Button>
                   </div>
-                  <label class="flex items-center gap-2 text-xs text-muted-foreground">
-                    <input v-model="webdavRememberPassword" type="checkbox" class="h-4 w-4 shrink-0 accent-primary" />
+                  <label class="flex items-center gap-2 text-xs text-[var(--ds-text-3)]">
+                    <input
+                      v-model="webdavRememberPassword"
+                      type="checkbox"
+                      class="h-4 w-4 shrink-0 accent-[var(--ds-accent)]"
+                    />
                     <span>
                       {{ t("settings.syncRememberWebDavPassword") }}
                       <span v-if="webdavHasSavedPassword">{{ t("settings.syncSavedPassword") }}</span>
                     </span>
                     <Tooltip>
                       <TooltipTrigger as-child>
-                        <CircleHelp class="h-3.5 w-3.5 cursor-help text-muted-foreground hover:text-foreground" />
+                        <CircleHelp
+                          class="h-3.5 w-3.5 cursor-help text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]"
+                        />
                       </TooltipTrigger>
                       <TooltipContent class="max-w-[320px] text-xs leading-relaxed" side="top" align="start">
                         {{ t("settings.syncRememberWebDavPasswordDescription") }}
@@ -2113,19 +2319,21 @@ watch(
                 <div class="space-y-2 md:col-span-2">
                   <Label for="webdav-remote-path">{{ t("settings.syncRemotePath") }}</Label>
                   <Input id="webdav-remote-path" v-model="webdavRemotePath" autocomplete="off" />
-                  <p class="text-xs text-muted-foreground">{{ t("settings.syncRemotePathDescription") }}</p>
+                  <p class="text-xs text-[var(--ds-text-3)]">{{ t("settings.syncRemotePathDescription") }}</p>
                 </div>
               </div>
 
-              <div class="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              <div
+                class="rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-hover)] px-3 py-2 text-xs text-[var(--ds-text-3)]"
+              >
                 {{ t("settings.syncSecretNotice") }}
               </div>
 
-              <div class="space-y-3 rounded-md border bg-muted/20 px-3 py-3">
+              <div class="space-y-3 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-hover)] px-3 py-3">
                 <div class="flex items-center justify-between gap-4">
                   <div class="space-y-1">
                     <Label for="webdav-sync-secrets">{{ t("settings.syncSecrets") }}</Label>
-                    <p class="text-xs text-muted-foreground">{{ t("settings.syncSecretsDescription") }}</p>
+                    <p class="text-xs text-[var(--ds-text-3)]">{{ t("settings.syncSecretsDescription") }}</p>
                   </div>
                   <Switch id="webdav-sync-secrets" v-model="webdavSyncSecrets" />
                 </div>
@@ -2137,245 +2345,237 @@ watch(
                     type="password"
                     autocomplete="new-password"
                   />
-                  <p class="text-xs text-muted-foreground">{{ t("settings.syncSecretsPassphraseDescription") }}</p>
+                  <p class="text-xs text-[var(--ds-text-3)]">{{ t("settings.syncSecretsPassphraseDescription") }}</p>
                 </div>
               </div>
             </section>
 
             <!-- AI Settings Tab -->
             <section v-else-if="activeSettingsTab === 'ai'" class="flex flex-col gap-5 py-2">
-              <div class="space-y-3">
-                <div class="grid grid-cols-3 items-center gap-3">
-                  <Label class="text-right text-xs">{{ t("ai.provider") }}</Label>
-                  <Select :model-value="aiEditProvider" @update:model-value="(v: any) => aiSelectProvider(v)">
-                    <SelectTrigger class="col-span-2 h-8 text-xs">
-                      <SelectValue>
-                        <span class="flex items-center gap-2">
-                          <AiProviderLogo
-                            :provider="selectedAiProviderPreset.provider"
-                            :label="selectedAiProviderPreset.label"
-                            :icon-slug="selectedAiProviderPreset.iconSlug"
-                          />
-                          <span>{{ selectedAiProviderPreset.label }}</span>
-                        </span>
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem
-                        v-for="provider in aiProviderOptions"
-                        :key="provider.provider"
-                        :value="provider.provider"
-                      >
-                        <span class="flex items-center gap-2">
-                          <AiProviderLogo
-                            :provider="provider.provider"
-                            :label="provider.label"
-                            :icon-slug="provider.iconSlug"
-                          />
-                          <span>{{ provider.label }}</span>
-                        </span>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div class="grid grid-cols-3 items-center gap-3">
-                  <Label class="text-right text-xs">API Key</Label>
-                  <Input
-                    v-model="aiEditApiKey"
-                    type="password"
-                    autocomplete="off"
-                    class="col-span-2 h-8 text-xs"
-                    :placeholder="aiRequiresApiKey ? '' : 'Optional'"
-                  />
-                </div>
-
-                <div class="grid grid-cols-3 items-center gap-3">
-                  <Label class="text-right text-xs">Endpoint</Label>
-                  <Input
-                    v-model="aiEditEndpoint"
-                    placeholder="https://api.openai.com/v1"
-                    autocomplete="off"
-                    class="col-span-2 h-8 text-xs"
-                  />
-                </div>
-
-                <div class="grid grid-cols-3 items-start gap-3">
-                  <Label class="pt-2 text-right text-xs">{{ t("ai.model") }}</Label>
-                  <div class="col-span-2 space-y-1.5">
-                    <div class="flex min-w-0 items-center gap-2">
-                      <Input v-model="aiEditModel" autocomplete="off" class="h-8 min-w-0 flex-1 text-xs" />
-                      <SearchableSelect
-                        :model-value="aiEditModel"
-                        :options="aiModelOptionIds"
-                        :placeholder="t('ai.browseModels')"
-                        :search-placeholder="t('ai.searchModels')"
-                        :empty-text="aiModelEmptyText"
-                        :loading-text="t('ai.loadingModels')"
-                        :loading="aiModelLoading"
-                        :display-name="displayAiModelName"
-                        trigger-class="h-8 min-w-[104px] max-w-[150px] shrink-0 border border-border bg-background px-2 text-xs shadow-none hover:bg-muted/50"
-                        content-class="w-72"
-                        @update:model-value="aiSelectModel"
-                        @update:open="onAiModelListOpen"
-                      >
-                        <template #trigger-label="{ loading }">
-                          <span class="truncate">{{ loading ? t("ai.loadingModels") : t("ai.browseModels") }}</span>
-                        </template>
-                        <template #option-label="{ option, label }">
-                          <span class="flex min-w-0 flex-col">
-                            <span class="truncate">{{ label }}</span>
-                            <span v-if="label !== option" class="truncate text-[11px] text-muted-foreground">{{
-                              option
-                            }}</span>
-                          </span>
-                        </template>
-                      </SearchableSelect>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="outline"
-                        class="shrink-0"
-                        :disabled="aiModelLoading || !aiModelListSupported"
-                        :title="t('ai.refreshModels')"
-                        :aria-label="t('ai.refreshModels')"
-                        @click="aiRefreshModels"
-                      >
-                        <Loader2 v-if="aiModelLoading" class="h-3.5 w-3.5 animate-spin" />
-                        <RefreshCw v-else class="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                    <p v-if="aiModelError" class="text-xs text-destructive">{{ aiModelError }}</p>
-                    <p v-else-if="!aiModelOptionIds.length" class="text-xs text-muted-foreground">
-                      {{ aiModelListSupported ? t("ai.modelListHint") : t("ai.modelListUnsupported") }}
-                    </p>
-                  </div>
-                </div>
-
-                <div v-if="aiSupportsApiStyle" class="grid grid-cols-3 items-center gap-3">
-                  <Label class="text-right text-xs">API</Label>
-                  <div class="col-span-2 flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      class="h-8 flex-1 text-xs"
-                      :class="{ 'border-blue-300 border-2 ring-2 ring-blue-300/50': aiEditApiStyle === 'completions' }"
-                      @click="aiEditApiStyle = 'completions'"
-                      >/chat/completions</Button
+              <div class="space-y-2">
+                <Label>{{ t("ai.provider") }}</Label>
+                <Select :model-value="aiEditProvider" @update:model-value="(v: any) => aiSelectProvider(v)">
+                  <SelectTrigger class="w-full">
+                    <SelectValue>
+                      <span class="flex items-center gap-2">
+                        <AiProviderLogo
+                          :provider="selectedAiProviderPreset.provider"
+                          :label="selectedAiProviderPreset.label"
+                          :icon-slug="selectedAiProviderPreset.iconSlug"
+                        />
+                        <span>{{ selectedAiProviderPreset.label }}</span>
+                      </span>
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="provider in aiProviderOptions"
+                      :key="provider.provider"
+                      :value="provider.provider"
                     >
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      class="h-8 flex-1 text-xs"
-                      :class="{ 'border-blue-300 border-2 ring-2 ring-blue-300/50': aiEditApiStyle === 'responses' }"
-                      @click="aiEditApiStyle = 'responses'"
-                      >/responses</Button
-                    >
-                  </div>
-                </div>
+                      <span class="flex items-center gap-2">
+                        <AiProviderLogo
+                          :provider="provider.provider"
+                          :label="provider.label"
+                          :icon-slug="provider.iconSlug"
+                        />
+                        <span>{{ provider.label }}</span>
+                      </span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-                <div class="grid grid-cols-3 items-center gap-3">
-                  <Label class="text-right text-xs">{{ t("ai.enableThinking") }}</Label>
-                  <div class="col-span-2 flex items-center gap-2">
-                    <label class="flex items-center gap-2 text-xs text-muted-foreground">
-                      <input
-                        v-model="aiEditEnableThinking"
-                        type="checkbox"
-                        class="h-4 w-4 shrink-0 accent-primary"
-                        :disabled="!aiCompletionsMode || aiEditProvider === 'gemini'"
-                      />
-                      {{ aiEditEnableThinking ? t("ai.enableThinkingOn") : t("ai.enableThinkingOff") }}
-                    </label>
+              <div class="space-y-2">
+                <Label>API Key</Label>
+                <Input
+                  v-model="aiEditApiKey"
+                  type="password"
+                  autocomplete="off"
+                  :placeholder="aiRequiresApiKey ? '' : 'Optional'"
+                />
+              </div>
+
+              <div class="space-y-2">
+                <Label>Endpoint</Label>
+                <Input v-model="aiEditEndpoint" placeholder="https://api.openai.com/v1" autocomplete="off" />
+              </div>
+
+              <div class="space-y-2">
+                <Label>{{ t("ai.model") }}</Label>
+                <div class="flex min-w-0 items-center gap-2">
+                  <Input v-model="aiEditModel" autocomplete="off" class="min-w-0 flex-1" />
+                  <SearchableSelect
+                    :model-value="aiEditModel"
+                    :options="aiModelOptionIds"
+                    :placeholder="t('ai.browseModels')"
+                    :search-placeholder="t('ai.searchModels')"
+                    :empty-text="aiModelEmptyText"
+                    :loading-text="t('ai.loadingModels')"
+                    :loading="aiModelLoading"
+                    :display-name="displayAiModelName"
+                    trigger-class="h-9 min-w-[104px] max-w-[150px] shrink-0 border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-2 text-sm shadow-none hover:bg-[var(--ds-bg-hover)] hover:border-[var(--ds-border-strong)]"
+                    content-class="w-72"
+                    @update:model-value="aiSelectModel"
+                    @update:open="onAiModelListOpen"
+                  >
+                    <template #trigger-label="{ loading }">
+                      <span class="truncate">{{ loading ? t("ai.loadingModels") : t("ai.browseModels") }}</span>
+                    </template>
+                    <template #option-label="{ option, label }">
+                      <span class="flex min-w-0 flex-col">
+                        <span class="truncate">{{ label }}</span>
+                        <span v-if="label !== option" class="truncate text-[11px] text-[var(--ds-text-3)]">{{
+                          option
+                        }}</span>
+                      </span>
+                    </template>
+                  </SearchableSelect>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    class="shrink-0"
+                    :disabled="aiModelLoading || !aiModelListSupported"
+                    :title="t('ai.refreshModels')"
+                    :aria-label="t('ai.refreshModels')"
+                    @click="aiRefreshModels"
+                  >
+                    <Loader2 v-if="aiModelLoading" class="h-3.5 w-3.5 animate-spin" />
+                    <RefreshCw v-else class="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <p v-if="aiModelError" class="text-xs text-[var(--ds-red)]">{{ aiModelError }}</p>
+                <p v-else-if="!aiModelOptionIds.length" class="text-xs text-[var(--ds-text-3)]">
+                  {{ aiModelListSupported ? t("ai.modelListHint") : t("ai.modelListUnsupported") }}
+                </p>
+              </div>
+
+              <div v-if="aiSupportsApiStyle" class="space-y-2">
+                <Label>API</Label>
+                <div class="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    class="h-9 flex-1"
+                    :class="{
+                      'border-[var(--ds-accent-line)] bg-[var(--ds-accent-soft)] text-[var(--ds-text-1)]':
+                        aiEditApiStyle === 'completions',
+                    }"
+                    @click="aiEditApiStyle = 'completions'"
+                    >/chat/completions</Button
+                  >
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    class="h-9 flex-1"
+                    :class="{
+                      'border-[var(--ds-accent-line)] bg-[var(--ds-accent-soft)] text-[var(--ds-text-1)]':
+                        aiEditApiStyle === 'responses',
+                    }"
+                    @click="aiEditApiStyle = 'responses'"
+                    >/responses</Button
+                  >
+                </div>
+              </div>
+
+              <div :class="dsSettingGroup">
+                <div :class="dsSettingRow">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <Label>{{ t("ai.enableThinking") }}</Label>
                     <Popover>
                       <PopoverTrigger as-child>
-                        <CircleHelp class="h-3.5 w-3.5 cursor-help text-muted-foreground hover:text-foreground" />
+                        <CircleHelp
+                          class="h-3.5 w-3.5 cursor-help text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]"
+                        />
                       </PopoverTrigger>
                       <PopoverContent class="max-w-[320px] text-xs leading-relaxed" side="top" align="start">
                         {{ t("ai.enableThinkingHint") }}
                       </PopoverContent>
                     </Popover>
                   </div>
+                  <label class="flex shrink-0 items-center gap-2 text-xs text-[var(--ds-text-3)]">
+                    <input
+                      v-model="aiEditEnableThinking"
+                      type="checkbox"
+                      class="h-4 w-4 shrink-0 accent-[var(--ds-accent)]"
+                      :disabled="!aiCompletionsMode || aiEditProvider === 'gemini'"
+                    />
+                    {{ aiEditEnableThinking ? t("ai.enableThinkingOn") : t("ai.enableThinkingOff") }}
+                  </label>
                 </div>
-
-                <div class="grid grid-cols-3 items-center gap-3">
-                  <Label class="text-right text-xs">{{ t("ai.proxy") }}</Label>
-                  <label class="col-span-2 flex items-center gap-2 text-xs text-muted-foreground">
-                    <input v-model="aiEditProxyEnabled" type="checkbox" class="h-4 w-4 shrink-0 accent-primary" />
+                <div :class="dsSettingRow">
+                  <Label>{{ t("ai.proxy") }}</Label>
+                  <label class="flex shrink-0 items-center gap-2 text-xs text-[var(--ds-text-3)]">
+                    <input
+                      v-model="aiEditProxyEnabled"
+                      type="checkbox"
+                      class="h-4 w-4 shrink-0 accent-[var(--ds-accent)]"
+                    />
                     {{ t("ai.proxyEnable") }}
                   </label>
                 </div>
+              </div>
 
-                <div class="grid grid-cols-3 items-center gap-3">
-                  <Label class="text-right text-xs">{{ t("ai.proxyUrl") }}</Label>
-                  <Input
-                    v-model="aiEditProxyUrl"
-                    autocomplete="off"
-                    class="col-span-2 h-8 text-xs"
-                    placeholder="socks5://127.0.0.1:7890"
-                    :disabled="!aiEditProxyEnabled"
-                  />
-                </div>
+              <div class="space-y-2">
+                <Label>{{ t("ai.proxyUrl") }}</Label>
+                <Input
+                  v-model="aiEditProxyUrl"
+                  autocomplete="off"
+                  placeholder="socks5://127.0.0.1:7890"
+                  :disabled="!aiEditProxyEnabled"
+                />
               </div>
             </section>
 
             <section v-else-if="activeSettingsTab === 'mcp' && !isWeb" class="flex flex-col gap-5 py-2">
-              <div class="rounded-md border bg-muted/20 p-4">
-                <div class="flex items-start justify-between gap-4">
-                  <div class="min-w-0 space-y-2">
-                    <div class="flex items-center gap-2">
-                      <PackageSearch class="h-4 w-4 text-muted-foreground" />
-                      <Label class="text-base">{{ t("settings.mcpTitle") }}</Label>
-                      <Tooltip>
-                        <TooltipTrigger as-child>
-                          <CircleHelp class="h-3.5 w-3.5 cursor-help text-muted-foreground hover:text-foreground" />
-                        </TooltipTrigger>
-                        <TooltipContent class="max-w-[320px] text-xs leading-relaxed" side="top" align="start">
-                          {{ t("settings.mcpDescription") }}
-                        </TooltipContent>
-                      </Tooltip>
-                    </div>
-                  </div>
-                  <Badge
-                    variant="outline"
-                    class="shrink-0 rounded-md"
-                    :class="
-                      mcpStatusTone === 'ok'
-                        ? 'border-green-500/40 text-green-600 dark:text-green-400'
-                        : mcpStatusTone === 'warning'
-                          ? 'border-amber-500/40 text-amber-600 dark:text-amber-400'
-                          : 'text-muted-foreground'
-                    "
-                  >
-                    <Loader2 v-if="mcpStatusLoading" class="mr-1 h-3 w-3 animate-spin" />
-                    <CheckCircle2 v-else-if="mcpStatusTone === 'ok'" class="mr-1 h-3 w-3" />
-                    <AlertTriangle v-else-if="mcpStatusTone === 'warning'" class="mr-1 h-3 w-3" />
-                    {{ mcpStatusLabel }}
-                  </Badge>
+              <div
+                class="flex items-center justify-between gap-4 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-hover)] px-3 py-2.5"
+              >
+                <div class="flex min-w-0 items-center gap-2">
+                  <PackageSearch class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
+                  <span class="truncate text-sm font-medium text-[var(--ds-text-1)]">{{ t("settings.mcpTitle") }}</span>
                 </div>
+                <Badge
+                  variant="outline"
+                  class="shrink-0 rounded-md"
+                  :class="
+                    mcpStatusTone === 'ok'
+                      ? 'border-[color-mix(in_srgb,var(--ds-green)_35%,transparent)] text-[var(--ds-green)]'
+                      : mcpStatusTone === 'warning'
+                        ? 'border-[color-mix(in_srgb,var(--ds-amber)_35%,transparent)] text-[var(--ds-amber)]'
+                        : 'text-[var(--ds-text-3)]'
+                  "
+                >
+                  <Loader2 v-if="mcpStatusLoading" class="mr-1 h-3 w-3 animate-spin" />
+                  <CheckCircle2 v-else-if="mcpStatusTone === 'ok'" class="mr-1 h-3 w-3" />
+                  <AlertTriangle v-else-if="mcpStatusTone === 'warning'" class="mr-1 h-3 w-3" />
+                  {{ mcpStatusLabel }}
+                </Badge>
               </div>
 
               <div class="grid gap-3 sm:grid-cols-2">
-                <div class="rounded-md border p-3">
-                  <div class="text-xs font-medium uppercase text-muted-foreground">{{ t("settings.mcpCurrent") }}</div>
-                  <div class="mt-2 font-mono text-sm">
+                <div class="rounded-md border border-[var(--ds-border)] p-3">
+                  <div class="ds-menu-label">{{ t("settings.mcpCurrent") }}</div>
+                  <div class="mt-2 font-mono text-sm text-[var(--ds-text-1)]">
                     {{ mcpStatus?.current_version ? `v${mcpStatus.current_version}` : t("settings.mcpVersionMissing") }}
                   </div>
                 </div>
-                <div class="rounded-md border p-3">
-                  <div class="text-xs font-medium uppercase text-muted-foreground">{{ t("settings.mcpLatest") }}</div>
-                  <div class="mt-2 font-mono text-sm">
+                <div class="rounded-md border border-[var(--ds-border)] p-3">
+                  <div class="ds-menu-label">{{ t("settings.mcpLatest") }}</div>
+                  <div class="mt-2 font-mono text-sm text-[var(--ds-text-1)]">
                     {{ mcpStatus?.latest_version ? `v${mcpStatus.latest_version}` : t("settings.mcpVersionUnknown") }}
                   </div>
                 </div>
-                <div class="rounded-md border p-3">
-                  <div class="text-xs font-medium uppercase text-muted-foreground">Node.js</div>
-                  <div class="mt-2 font-mono text-sm">
+                <div class="rounded-md border border-[var(--ds-border)] p-3">
+                  <div class="ds-menu-label">Node.js</div>
+                  <div class="mt-2 font-mono text-sm text-[var(--ds-text-1)]">
                     {{ mcpStatus?.node_version || t("settings.mcpVersionUnknown") }}
                   </div>
                 </div>
-                <div class="rounded-md border p-3">
-                  <div class="text-xs font-medium uppercase text-muted-foreground">npm</div>
-                  <div class="mt-2 font-mono text-sm">
+                <div class="rounded-md border border-[var(--ds-border)] p-3">
+                  <div class="ds-menu-label">npm</div>
+                  <div class="mt-2 font-mono text-sm text-[var(--ds-text-1)]">
                     {{ mcpStatus?.npm_available ? t("settings.mcpAvailable") : t("settings.mcpUnavailable") }}
                   </div>
                 </div>
@@ -2383,7 +2583,9 @@ watch(
 
               <div v-if="mcpStatus?.bin_path" class="space-y-2">
                 <Label>{{ t("settings.mcpBinPath") }}</Label>
-                <div class="rounded-md border bg-muted/20 px-3 py-2 font-mono text-xs text-muted-foreground">
+                <div
+                  class="rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-hover)] px-3 py-2 font-mono text-xs text-[var(--ds-text-3)]"
+                >
                   {{ mcpStatus.bin_path }}
                 </div>
               </div>
@@ -2394,7 +2596,7 @@ watch(
                 }}</Label>
                 <div class="flex min-w-0 items-center gap-2">
                   <div
-                    class="min-w-0 flex-1 overflow-x-auto rounded-md border bg-background px-3 py-2 font-mono text-xs whitespace-nowrap"
+                    class="min-w-0 flex-1 overflow-x-auto rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-3 py-2 font-mono text-xs whitespace-nowrap text-[var(--ds-text-1)]"
                   >
                     {{ mcpCommand }}
                   </div>
@@ -2405,29 +2607,31 @@ watch(
                     :title="t('common.copy')"
                     @click="copyMcpText('install', mcpCommand)"
                   >
-                    <CheckCircle2 v-if="mcpCopied === 'install'" class="h-4 w-4 text-green-500" />
+                    <CheckCircle2 v-if="mcpCopied === 'install'" class="h-4 w-4 text-[var(--ds-green)]" />
                     <Copy v-else class="h-4 w-4" />
                   </Button>
                 </div>
               </div>
 
-              <div class="space-y-2">
-                <div class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
-                  <div class="space-y-1">
+              <div :class="dsSettingGroup">
+                <div :class="dsSettingRow">
+                  <div class="min-w-0 space-y-0.5">
                     <Label for="mcp-readonly-mode">{{ t("settings.mcpReadonlyMode") }}</Label>
-                    <p class="text-xs text-muted-foreground">{{ t("settings.mcpReadonlyModeDescription") }}</p>
+                    <p :class="dsSettingDesc">{{ t("settings.mcpReadonlyModeDescription") }}</p>
                   </div>
-                  <Switch id="mcp-readonly-mode" v-model="mcpReadonlyMode" />
+                  <Switch id="mcp-readonly-mode" v-model="mcpReadonlyMode" class="shrink-0" />
                 </div>
-              </div>
-
-              <div class="space-y-2">
-                <div class="flex items-center justify-between gap-4 rounded-md border bg-muted/20 px-3 py-2">
-                  <div class="space-y-1">
+                <div :class="dsSettingRow">
+                  <div class="min-w-0 space-y-0.5">
                     <Label for="mcp-allow-dangerous">{{ t("settings.mcpAllowDangerous") }}</Label>
-                    <p class="text-xs text-muted-foreground">{{ t("settings.mcpAllowDangerousDescription") }}</p>
+                    <p :class="dsSettingDesc">{{ t("settings.mcpAllowDangerousDescription") }}</p>
                   </div>
-                  <Switch id="mcp-allow-dangerous" v-model="mcpAllowDangerous" :disabled="mcpReadonlyMode" />
+                  <Switch
+                    id="mcp-allow-dangerous"
+                    v-model="mcpAllowDangerous"
+                    :disabled="mcpReadonlyMode"
+                    class="shrink-0"
+                  />
                 </div>
               </div>
 
@@ -2440,7 +2644,7 @@ watch(
                   </TabsList>
 
                   <TabsContent value="claude" class="m-0">
-                    <div class="relative rounded-md border bg-background p-3">
+                    <div class="relative rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-3">
                       <pre
                         class="overflow-x-auto whitespace-pre text-xs leading-relaxed"
                       ><code>{{ mcpClaudeRecommendedConfig }}</code></pre>
@@ -2452,7 +2656,7 @@ watch(
                         :title="t('common.copy')"
                         @click="copyMcpText('claude-config', mcpClaudeRecommendedConfig)"
                       >
-                        <CheckCircle2 v-if="mcpCopied === 'claude-config'" class="h-3.5 w-3.5 text-green-500" />
+                        <CheckCircle2 v-if="mcpCopied === 'claude-config'" class="h-3.5 w-3.5 text-[var(--ds-green)]" />
                         <Copy v-else class="h-3.5 w-3.5" />
                       </Button>
                     </div>
@@ -2460,10 +2664,12 @@ watch(
 
                   <TabsContent value="codex" class="m-0">
                     <div class="space-y-2">
-                      <div class="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                      <div
+                        class="rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-hover)] px-3 py-2 text-xs text-[var(--ds-text-3)]"
+                      >
                         {{ t("settings.mcpCodexConfigPath") }}
                       </div>
-                      <div class="relative rounded-md border bg-background p-3">
+                      <div class="relative rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-3">
                         <pre
                           class="overflow-x-auto whitespace-pre text-xs leading-relaxed"
                         ><code>{{ mcpCodexRecommendedConfig }}</code></pre>
@@ -2475,7 +2681,10 @@ watch(
                           :title="t('common.copy')"
                           @click="copyMcpText('codex-config', mcpCodexRecommendedConfig)"
                         >
-                          <CheckCircle2 v-if="mcpCopied === 'codex-config'" class="h-3.5 w-3.5 text-green-500" />
+                          <CheckCircle2
+                            v-if="mcpCopied === 'codex-config'"
+                            class="h-3.5 w-3.5 text-[var(--ds-green)]"
+                          />
                           <Copy v-else class="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -2486,12 +2695,12 @@ watch(
 
               <div
                 v-if="mcpStatus?.error || mcpStatusError"
-                class="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+                class="rounded-md border border-[color-mix(in_srgb,var(--ds-amber)_30%,transparent)] bg-[color-mix(in_srgb,var(--ds-amber)_12%,transparent)] px-3 py-2 text-xs text-[var(--ds-amber)]"
               >
                 {{ mcpStatusError || mcpStatus?.error }}
               </div>
 
-              <div class="flex items-center gap-2 text-xs text-muted-foreground">
+              <div class="flex items-center gap-2 text-xs text-[var(--ds-text-3)]">
                 <Terminal class="h-3.5 w-3.5" />
                 <span>{{ t("settings.mcpDetectionTiming") }} {{ t("settings.mcpNpmBoundary") }}</span>
               </div>
@@ -2499,8 +2708,6 @@ watch(
 
             <section v-else-if="activeSettingsTab === 'security' && isWeb" class="flex flex-col gap-5 py-2">
               <div class="space-y-3">
-                <Label class="text-base">{{ t("auth.changePassword") }}</Label>
-                <p class="text-sm text-muted-foreground">{{ t("auth.changePasswordDescription") }}</p>
                 <Input
                   v-model="oldPassword"
                   type="password"
@@ -2525,7 +2732,7 @@ watch(
                 <p
                   v-if="passwordMessage"
                   class="text-xs"
-                  :class="passwordError ? 'text-destructive' : 'text-green-500'"
+                  :class="passwordError ? 'text-[var(--ds-red)]' : 'text-[var(--ds-green)]'"
                 >
                   {{ passwordMessage }}
                 </p>
@@ -2533,28 +2740,28 @@ watch(
             </section>
 
             <section v-else-if="activeSettingsTab === 'about'" class="flex flex-col gap-5 py-2">
-              <div class="rounded-lg border bg-muted/20 p-4">
-                <div class="flex items-start justify-between gap-4">
-                  <div class="min-w-0 space-y-1">
-                    <div class="text-lg font-semibold">DBX</div>
-                    <p class="text-sm text-muted-foreground">{{ t("settings.aboutDescription") }}</p>
-                  </div>
-                  <div
-                    v-if="displayedAppVersion"
-                    class="rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground"
-                  >
-                    {{ displayedAppVersion }}
-                  </div>
+              <div
+                class="flex items-center justify-between gap-4 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-bg-hover)] p-4"
+              >
+                <div class="flex min-w-0 items-center gap-3">
+                  <AppLogo class="h-9 w-9 shrink-0" />
+                  <div class="text-base font-semibold text-[var(--ds-text-1)]">DBX</div>
+                </div>
+                <div
+                  v-if="displayedAppVersion"
+                  class="shrink-0 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-2 py-1 font-mono text-xs text-[var(--ds-text-3)]"
+                >
+                  {{ displayedAppVersion }}
                 </div>
               </div>
 
               <div class="grid gap-3 sm:grid-cols-2">
                 <button
                   type="button"
-                  class="rounded-lg border p-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  class="rounded-lg border border-[var(--ds-border)] p-4 text-left transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]"
                   @click="openExternalUrl('https://qm.qq.com/cgi-bin/qm/qr?k=&group_code=1087880322')"
                 >
-                  <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <div class="ds-menu-label">
                     {{ t("settings.community") }}
                   </div>
                   <div class="mt-3 flex items-center gap-2 text-sm font-medium">
@@ -2564,16 +2771,16 @@ watch(
                       class="h-7 w-7 rounded-md bg-white p-1"
                     />
                     {{ t("settings.qqGroup") }}
-                    <ExternalLink class="ml-auto h-3.5 w-3.5 text-muted-foreground" />
+                    <ExternalLink class="ml-auto h-3.5 w-3.5 text-[var(--ds-text-3)]" />
                   </div>
-                  <div class="mt-1 font-mono text-base">1087880322</div>
+                  <div class="mt-1 font-mono text-base text-[var(--ds-text-1)]">1087880322</div>
                 </button>
                 <button
                   type="button"
-                  class="rounded-lg border p-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  class="rounded-lg border border-[var(--ds-border)] p-4 text-left transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]"
                   @click="openExternalUrl('https://discord.gg/W7NyVDRt6a')"
                 >
-                  <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <div class="ds-menu-label">
                     {{ t("settings.community") }}
                   </div>
                   <div class="mt-3 flex items-center gap-2 text-sm font-medium">
@@ -2583,16 +2790,16 @@ watch(
                       class="h-7 w-7 rounded-md bg-white p-1"
                     />
                     Discord
-                    <ExternalLink class="ml-auto h-3.5 w-3.5 text-muted-foreground" />
+                    <ExternalLink class="ml-auto h-3.5 w-3.5 text-[var(--ds-text-3)]" />
                   </div>
-                  <div class="mt-1 text-sm text-primary">discord.gg/W7NyVDRt6a</div>
+                  <div class="mt-1 text-sm text-[var(--ds-accent)]">discord.gg/W7NyVDRt6a</div>
                 </button>
                 <button
                   type="button"
-                  class="rounded-lg border p-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  class="rounded-lg border border-[var(--ds-border)] p-4 text-left transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]"
                   @click="openExternalUrl('https://docs.qq.com/doc/DVVhMY0h1ekJqc0tz')"
                 >
-                  <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <div class="ds-menu-label">
                     {{ t("settings.community") }}
                   </div>
                   <div class="mt-3 flex items-center gap-2 text-sm font-medium">
@@ -2604,16 +2811,16 @@ watch(
                       </svg>
                     </span>
                     {{ t("settings.wechatGroup") }}
-                    <ExternalLink class="ml-auto h-3.5 w-3.5 text-muted-foreground" />
+                    <ExternalLink class="ml-auto h-3.5 w-3.5 text-[var(--ds-text-3)]" />
                   </div>
-                  <div class="mt-1 text-sm text-primary">{{ t("settings.wechatGroupInvite") }}</div>
+                  <div class="mt-1 text-sm text-[var(--ds-accent)]">{{ t("settings.wechatGroupInvite") }}</div>
                 </button>
                 <button
                   type="button"
-                  class="rounded-lg border p-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  class="rounded-lg border border-[var(--ds-border)] p-4 text-left transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]"
                   @click="openExternalUrl('https://github.com/t8y2/dbx')"
                 >
-                  <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <div class="ds-menu-label">
                     {{ t("settings.project") }}
                   </div>
                   <div class="mt-3 flex items-center gap-2 text-sm font-medium">
@@ -2623,24 +2830,24 @@ watch(
                       class="h-7 w-7 rounded-md bg-white p-1"
                     />
                     {{ t("settings.openSource") }}
-                    <ExternalLink class="ml-auto h-3.5 w-3.5 text-muted-foreground" />
+                    <ExternalLink class="ml-auto h-3.5 w-3.5 text-[var(--ds-text-3)]" />
                   </div>
-                  <div class="mt-1 text-sm text-primary">github.com/t8y2/dbx</div>
+                  <div class="mt-1 text-sm text-[var(--ds-accent)]">github.com/t8y2/dbx</div>
                 </button>
                 <button
                   type="button"
-                  class="rounded-lg border p-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  class="rounded-lg border border-[var(--ds-border)] p-4 text-left transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]"
                   @click="openExternalUrl('https://dbxio.com')"
                 >
-                  <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  <div class="ds-menu-label">
                     {{ t("settings.project") }}
                   </div>
                   <div class="mt-3 flex items-center gap-2 text-sm font-medium">
                     <AppLogo class="h-7 w-7" />
                     {{ t("settings.officialDocs") }}
-                    <ExternalLink class="ml-auto h-3.5 w-3.5 text-muted-foreground" />
+                    <ExternalLink class="ml-auto h-3.5 w-3.5 text-[var(--ds-text-3)]" />
                   </div>
-                  <div class="mt-1 text-sm text-primary">dbxio.com</div>
+                  <div class="mt-1 text-sm text-[var(--ds-accent)]">dbxio.com</div>
                 </button>
               </div>
             </section>
@@ -2648,7 +2855,7 @@ watch(
 
           <DialogFooter
             v-if="hasSettingsApplyFooter(activeSettingsTab as SettingsCategory)"
-            class="mx-0 mb-0 shrink-0 rounded-none border-t border-border/60 bg-transparent px-0 pb-0 pt-3 gap-3 sm:gap-3"
+            class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-0 pb-0 pt-3 gap-3 sm:gap-3"
           >
             <Button variant="outline" @click="resetDefaults">
               {{ t("settings.resetDefaults") }}
@@ -2667,7 +2874,7 @@ watch(
 
           <DialogFooter
             v-else-if="activeSettingsTab === 'ai'"
-            class="mx-0 mb-0 shrink-0 rounded-none border-t border-border/60 bg-transparent px-0 pb-0 pt-3 gap-3 sm:gap-3"
+            class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-0 pb-0 pt-3 gap-3 sm:gap-3"
           >
             <div class="flex flex-1 items-center gap-2">
               <Button
@@ -2684,12 +2891,12 @@ watch(
                 <Loader2 v-if="aiTesting" class="h-3 w-3 animate-spin mr-1" />
                 {{ t("connection.test") }}
               </Button>
-              <span v-if="aiTestResult === 'success'" class="text-xs text-green-500">
+              <span v-if="aiTestResult === 'success'" class="text-xs text-[var(--ds-green)]">
                 {{ t("connection.testSuccess") }}
               </span>
               <span
                 v-else-if="aiTestResult === 'error'"
-                class="text-xs text-destructive truncate max-w-[200px]"
+                class="text-xs text-[var(--ds-red)] truncate max-w-[200px]"
                 :title="aiTestError"
               >
                 {{ aiTestError }}
@@ -2701,7 +2908,7 @@ watch(
 
           <DialogFooter
             v-else-if="activeSettingsTab === 'sync'"
-            class="mx-0 mb-0 shrink-0 rounded-none border-t border-border/60 bg-transparent px-0 pb-0 pt-3 gap-3 sm:gap-3"
+            class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-0 pb-0 pt-3 gap-3 sm:gap-3"
           >
             <Button variant="outline" @click="emit('update:open', false)">
               {{ t("common.close") }}
@@ -2709,7 +2916,7 @@ watch(
             <p
               v-if="webdavMessage"
               class="text-xs self-center truncate max-w-[280px]"
-              :class="webdavError ? 'text-destructive' : 'text-green-500'"
+              :class="webdavError ? 'text-[var(--ds-red)]' : 'text-[var(--ds-green)]'"
             >
               {{ webdavMessage }}
             </p>
@@ -2732,7 +2939,7 @@ watch(
 
           <DialogFooter
             v-else-if="activeSettingsTab === 'mcp' && !isWeb"
-            class="mx-0 mb-0 shrink-0 rounded-none border-t border-border/60 bg-transparent px-0 pb-0 pt-3"
+            class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-0 pb-0 pt-3"
           >
             <Button variant="outline" @click="emit('update:open', false)">
               {{ t("common.close") }}
@@ -2751,7 +2958,7 @@ watch(
 
           <DialogFooter
             v-else-if="activeSettingsTab === 'security' && isWeb"
-            class="mx-0 mb-0 shrink-0 rounded-none border-t border-border/60 bg-transparent px-0 pb-0 pt-3"
+            class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-0 pb-0 pt-3"
           >
             <Button variant="outline" @click="emit('update:open', false)">
               {{ t("common.close") }}
@@ -2766,7 +2973,7 @@ watch(
 
           <DialogFooter
             v-else-if="activeSettingsTab === 'about'"
-            class="mx-0 mb-0 shrink-0 rounded-none border-t border-border/60 bg-transparent px-0 pb-0 pt-3"
+            class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-0 pb-0 pt-3"
           >
             <Button variant="outline" @click="emit('update:open', false)">
               {{ t("common.close") }}
@@ -2808,7 +3015,7 @@ watch(
               v-model="snippetForm.prefix"
               :placeholder="t('settings.snippetsPrefixPlaceholder')"
             />
-            <p v-if="snippetFormPrefixError" class="text-xs text-destructive">{{ snippetFormPrefixError }}</p>
+            <p v-if="snippetFormPrefixError" class="text-xs text-[var(--ds-red)]">{{ snippetFormPrefixError }}</p>
           </div>
           <div class="flex flex-col gap-1.5">
             <Label for="snippet-body">{{ t("settings.snippetsBody") }}</Label>
@@ -2817,7 +3024,7 @@ watch(
               v-model="snippetForm.body"
               :placeholder="t('settings.snippetsBodyPlaceholder')"
               rows="6"
-              class="flex min-h-[120px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              class="flex min-h-[120px] w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-3 py-2 text-sm font-mono text-[var(--ds-text-1)] placeholder:text-[var(--ds-text-3)] focus-visible:border-[var(--ds-accent-line)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]"
             />
           </div>
         </div>

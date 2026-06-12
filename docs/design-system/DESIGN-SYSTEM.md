@@ -10,13 +10,13 @@
 A dense, calm, keyboard-first **dark** interface in the Linear lineage, built for a database client.
 - Hierarchy comes from **elevation** (5 stacked near-black surfaces) and a 4-step text ramp — never from heavy borders or big type.
 - **Color means something.** UI is neutral by default; the indigo accent marks primary actions, selection and focus; semantic hues signal state; each data type owns a fixed hue reused everywhere.
-- **Two typefaces, strict split:** Geist for interface chrome, Geist Mono for anything machine-shaped (values, types, ids, keys, code).
+- **Two typefaces, strict split:** Inter for interface chrome, IBM Plex Mono for anything machine-shaped (values, types, ids, keys, code).
 - Chrome recedes; data is the loudest thing on screen.
 
 ## Setup
 
 ```html
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 ```
 
 ## Tokens (copy verbatim)
@@ -70,8 +70,8 @@ A dense, calm, keyboard-first **dark** interface in the Linear lineage, built fo
   --sidebar-w:   256px;  /* tweakable 210–320px */
 
   /* type */
-  --font: 'Geist', system-ui, sans-serif;
-  --mono: 'Geist Mono', ui-monospace, 'SF Mono', monospace;
+  --font: 'Inter', system-ui, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
 
   /* depth & motion */
   --shadow-pop:  0 16px 48px -12px rgba(0,0,0,0.65), 0 4px 12px -2px rgba(0,0,0,0.45), 0 0 0 0.5px rgba(255,255,255,0.06);
@@ -196,6 +196,22 @@ The page itself stays flat — only overlays get `--shadow-pop`.
 560px wide, `--bg-elevated` + faint top sheen gradient, 12px radius, `--border-strong`, `--shadow-pop`. Search row 14px with trailing `esc` kbd. Group labels: mono 10.5px/600 caps `--text-4`. Items 13.5px, 7px radius; active item `--accent-soft` fill + `--text-1` + accent icon.
 
 ### Status dot — 7px filled dot + `box-shadow: 0 0 0 3px <hue at 13%>` halo; green pulse = live connection.
+
+### Tooltip
+```css
+.tooltip {
+  display: inline-flex; align-items: center; gap: 8px; width: max-content;
+  padding: 4.5px 9px; border-radius: 6px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%), var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--sheen), 0 4px 12px -2px rgba(0,0,0,0.5);
+  font-size: 11.5px; font-weight: 500; color: var(--text-1); line-height: 1.4;
+}
+.tooltip .tkbd { font-family: var(--mono); font-size: 10px; color: var(--text-3);
+  padding: 1px 4px; border-radius: 3px; background: var(--bg-active); }
+.tooltip .tsub { color: var(--text-3); font-weight: 400; }  /* secondary detail */
+```
+Behavior: show after 400ms hover delay, 6px from anchor, no arrow; fade in 120ms; shortcut hint in `.tkbd` chip; never wrap past ~36ch.
 
 ## States
 

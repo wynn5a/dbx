@@ -116,8 +116,8 @@
   <span class="c">--sidebar-w</span>: <span class="n">256px</span>;
 
   <span class="m">/* type */</span>
-  <span class="c">--font</span>: <span class="v">'Geist', system-ui, sans-serif</span>;
-  <span class="c">--mono</span>: <span class="v">'Geist Mono', ui-monospace, monospace</span>;
+  <span class="c">--font</span>: <span class="v">'Inter', system-ui, sans-serif</span>;
+  <span class="c">--mono</span>: <span class="v">'IBM Plex Mono', ui-monospace, monospace</span>;
 
   <span class="c">--shadow-pop</span>: <span class="v">0 16px 48px -12px rgba(0,0,0,.65), 0 4px 12px -2px rgba(0,0,0,.45), 0 0 0 .5px rgba(255,255,255,.06)</span>;
   <span class="c">--shadow-card</span>: <span class="v">0 1px 2px rgba(0,0,0,.25)</span>;
@@ -148,7 +148,7 @@
   },
   <span class="c">"radius"</span>: { <span class="c">"sm"</span>: <span class="v">"6px"</span>, <span class="c">"base"</span>: <span class="v">"8px"</span>, <span class="c">"pill"</span>: <span class="v">"99px"</span> },
   <span class="c">"size"</span>:   { <span class="c">"row"</span>: <span class="v">"34px"</span>, <span class="c">"sidebar"</span>: <span class="v">"256px"</span>, <span class="c">"inspector"</span>: <span class="v">"360px"</span> },
-  <span class="c">"font"</span>:   { <span class="c">"ui"</span>: <span class="v">"Geist"</span>, <span class="c">"mono"</span>: <span class="v">"Geist Mono"</span> }
+  <span class="c">"font"</span>:   { <span class="c">"ui"</span>: <span class="v">"Inter"</span>, <span class="c">"mono"</span>: <span class="v">"IBM Plex Mono"</span> }
 <span class="m">}</span>
 <span class="m">// full file: ds/tokens.json</span></pre>
     <pre id="md-block" style="display:none;"><span class="m"># Data Buddy — Design System (v1.1)</span>
@@ -160,7 +160,7 @@
 A dense, calm, keyboard-first dark interface in the Linear lineage.
 Hierarchy from elevation + a 4-step text ramp — never heavy borders or big type.
 Color means something: neutral by default; accent = action, selection, focus.
-Geist for chrome, Geist Mono for anything machine-shaped.
+Inter for chrome, IBM Plex Mono for anything machine-shaped.
 
 <span class="c">## Tokens</span> <span class="m">(full :root block, copy verbatim)</span>
 <span class="c">## Type scale</span> <span class="m">(display → micro, 9 roles with usage)</span>
@@ -169,7 +169,7 @@ Geist for chrome, Geist Mono for anything machine-shaped.
 <span class="c">## States</span> <span class="m">(hover / focus / disabled / empty / loading / error)</span>
 <span class="c">## Hard rules</span> <span class="m">(do / don't — 8 binding rules)</span>
 
-<span class="m">// full file: DESIGN-SYSTEM.md (project root) — download for the real thing</span></pre>
+<span class="m">// full file: ds/DESIGN-SYSTEM.md — download for the real thing</span></pre>
   </div>
   <p class="ds-sub" style="margin-top:14px;font-size:12px;">Download pulls the complete file from the system — the JSON above is abridged for readability.</p>
 
@@ -178,7 +178,7 @@ Geist for chrome, Geist Mono for anything machine-shaped.
   const FILES = {
     css:  { fetch: 'tokens.css',          name: 'tokens.css',        label: 'ds/tokens.css' },
     json: { fetch: 'tokens.json',         name: 'tokens.json',       label: 'ds/tokens.json' },
-    md:   { fetch: '../DESIGN-SYSTEM.md', name: 'DESIGN-SYSTEM.md',  label: 'DESIGN-SYSTEM.md' }
+    md:   { fetch: 'DESIGN-SYSTEM.md', name: 'DESIGN-SYSTEM.md',  label: 'ds/DESIGN-SYSTEM.md' }
   };
   function show(which) {
     current = which;

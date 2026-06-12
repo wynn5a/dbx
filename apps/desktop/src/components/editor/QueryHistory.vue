@@ -348,8 +348,8 @@ onMounted(() => store.load());
 
     <Dialog :open="!!selectedEntry" @update:open="(value) => !value && (selectedEntry = null)">
       <DialogContent class="sm:max-w-2xl duration-75" @interact-outside="selectedEntry = null">
-        <DialogHeader>
-          <DialogTitle class="flex items-center gap-2">
+        <DialogHeader class="min-w-0">
+          <DialogTitle class="flex items-center gap-2 pr-8">
             <span
               v-if="selectedEntry"
               class="inline-flex h-[18px] shrink-0 items-center rounded px-1.5 font-mono text-[10px] font-medium leading-none"
@@ -357,12 +357,12 @@ onMounted(() => store.load());
             >
               {{ kindShortLabel(selectedEntry) }}
             </span>
-            <span class="min-w-0 truncate">{{
+            <span class="min-w-0 truncate leading-normal">{{
               selectedEntry ? entryTitle(selectedEntry) : t("history.viewDetails")
             }}</span>
           </DialogTitle>
         </DialogHeader>
-        <div v-if="selectedEntry" class="max-h-[60vh] space-y-4 overflow-y-auto">
+        <div v-if="selectedEntry" class="max-h-[60vh] min-w-0 space-y-4 overflow-y-auto">
           <div class="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2.5 text-[12.5px]">
             <template v-for="[label, value] in detailsRows(selectedEntry)" :key="label">
               <div class="text-[var(--ds-text-3)]">{{ label }}</div>
@@ -383,7 +383,7 @@ onMounted(() => store.load());
               </Button>
             </div>
             <pre
-              class="max-h-48 overflow-auto rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-3 font-mono text-xs leading-5"
+              class="max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-3 font-mono text-xs leading-5"
               v-html="highlight(selectedEntry.sql)"
             ></pre>
           </div>
@@ -401,7 +401,7 @@ onMounted(() => store.load());
               </Button>
             </div>
             <pre
-              class="max-h-40 overflow-auto rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-3 font-mono text-xs leading-5"
+              class="max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-3 font-mono text-xs leading-5"
               v-html="highlight(selectedEntry.rollback_sql || '')"
             ></pre>
           </div>
