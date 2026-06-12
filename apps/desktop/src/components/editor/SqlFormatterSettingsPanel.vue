@@ -182,7 +182,7 @@ const indentLabel = computed(() =>
 
 function segmentClass(active: boolean): string {
   return [
-    "flex h-8 flex-1 items-center justify-center rounded-[var(--ds-radius-sm)] text-[12.5px] font-medium transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)]",
+    "flex h-full flex-1 items-center justify-center rounded-[var(--ds-radius-sm)] text-[12.5px] font-medium transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)]",
     active
       ? "bg-[var(--ds-accent-soft)] text-[var(--ds-text-1)] shadow-[inset_0_0_0_1px_var(--ds-accent-line)]"
       : "text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]",
@@ -307,7 +307,7 @@ watch(
             <div>
               <label :class="fieldLabelClass">{{ t("settings.sqlFormatterIndent") }}</label>
               <div
-                class="inline-flex w-full gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-1"
+                class="inline-flex h-8 w-full gap-1 rounded-sm border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-0.5"
               >
                 <button type="button" :class="segmentClass(!settings.useTabs)" @click="updateOption('useTabs', false)">
                   {{ t("settings.sqlFormatterIndentSpaces") }}
@@ -343,10 +343,10 @@ watch(
             {{ t("settings.sqlFormatterLayoutGroup") }}
           </div>
           <div class="grid gap-3 sm:grid-cols-3">
-            <div>
+            <div class="flex flex-col">
               <label :class="fieldLabelClass">{{ t("settings.sqlFormatterLogicalOperatorNewline") }}</label>
               <Select :model-value="settings.logicalOperatorNewline" @update:model-value="onLogicalOperatorNewline">
-                <SelectTrigger class="w-full">
+                <SelectTrigger class="mt-auto w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -357,10 +357,10 @@ watch(
               </Select>
             </div>
 
-            <div>
+            <div class="flex flex-col">
               <label :class="fieldLabelClass">{{ t("settings.sqlFormatterExpressionWidth") }}</label>
               <Select :model-value="String(settings.expressionWidth)" @update:model-value="onExpressionWidth">
-                <SelectTrigger class="w-full">
+                <SelectTrigger class="mt-auto w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -371,10 +371,10 @@ watch(
               </Select>
             </div>
 
-            <div>
+            <div class="flex flex-col">
               <label :class="fieldLabelClass">{{ t("settings.sqlFormatterLinesBetweenQueries") }}</label>
               <Select :model-value="String(settings.linesBetweenQueries)" @update:model-value="onLinesBetweenQueries">
-                <SelectTrigger class="w-full">
+                <SelectTrigger class="mt-auto w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
