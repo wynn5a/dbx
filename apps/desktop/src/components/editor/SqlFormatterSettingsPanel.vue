@@ -1,16 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Upload, Download, RotateCcw, Type, IndentIncrease, Rows3, Zap, Eye } from "@lucide/vue";
+import { Type, IndentIncrease, Rows3, Zap, Eye } from "@lucide/vue";
 import { useI18n } from "vue-i18n";
-import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { useToast } from "@/composables/useToast";
 import {
-  DEFAULT_SQL_FORMATTER_SETTINGS,
   normalizeSqlFormatterSettings,
-  parseSqlFormatterConfig,
-  serializeSqlFormatterConfig,
   type SqlFormatterCase,
   type SqlFormatterExpressionWidth,
   type SqlFormatterLinesBetweenQueries,
@@ -29,10 +24,6 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-const { toast } = useToast();
-
-const fileInputRef = ref<HTMLInputElement>();
-const importError = ref("");
 
 const settings = computed(() => normalizeSqlFormatterSettings(props.modelValue));
 
@@ -50,25 +41,6 @@ const logicalOperatorOptions: { value: SqlFormatterLogicalOperatorNewline; label
 const tabWidthOptions: SqlFormatterTabWidth[] = [2, 4];
 const expressionWidthOptions: SqlFormatterExpressionWidth[] = [50, 80, 120];
 const linesBetweenQueriesOptions: SqlFormatterLinesBetweenQueries[] = [0, 1, 2];
-const sqlFormatterOptionLabelKeys: Record<keyof SqlFormatterSettings, string> = {
-  keywordCase: "settings.sqlFormatterKeywordCase",
-  dataTypeCase: "settings.sqlFormatterDataTypeCase",
-  functionCase: "settings.sqlFormatterFunctionCase",
-  useTabs: "settings.sqlFormatterIndent",
-  tabWidth: "settings.sqlFormatterTabWidth",
-  logicalOperatorNewline: "settings.sqlFormatterLogicalOperatorNewline",
-  expressionWidth: "settings.sqlFormatterExpressionWidth",
-  linesBetweenQueries: "settings.sqlFormatterLinesBetweenQueries",
-  denseOperators: "settings.sqlFormatterDenseOperators",
-  newlineBeforeSemicolon: "settings.sqlFormatterNewlineBeforeSemicolon",
-};
-const sqlFormatterConfigErrorKeys: Record<string, string> = {
-  "Invalid JSON.": "settings.sqlFormatterConfigErrorInvalidJson",
-  "Config must be a JSON object.": "settings.sqlFormatterConfigErrorObject",
-  "Unsupported config version.": "settings.sqlFormatterConfigErrorVersion",
-  "Unsupported formatter.": "settings.sqlFormatterConfigErrorFormatter",
-  "Config options must be a JSON object.": "settings.sqlFormatterConfigErrorOptionsObject",
-};
 
 // ----- Live preview -----
 // A fixed sample exercises every option group (casing, indentation, layout, operators)
@@ -219,28 +191,7 @@ function segmentClass(active: boolean): string {
 
 const fieldLabelClass = "ds-menu-label mb-1.5 block";
 
-function localizeSqlFormatterConfigError(message: string): string {
-  const exactKey = sqlFormatterConfigErrorKeys[message];
-  if (exactKey) return t(exactKey);
-
-  const unknownOption = message.match(/^Unknown formatter option: (.+)\.$/);
-  if (unknownOption?.[1]) {
-    return t("settings.sqlFormatterConfigErrorUnknownOption", { option: unknownOption[1] });
-  }
-
-  const invalidOption = message.match(/^Invalid formatter option value: (.+)\.$/);
-  if (invalidOption?.[1]) {
-    const labelKey = sqlFormatterOptionLabelKeys[invalidOption[1] as keyof SqlFormatterSettings];
-    if (labelKey) {
-      return t("settings.sqlFormatterConfigErrorInvalidOptionValue", { option: t(labelKey) });
-    }
-  }
-
-  return t("settings.sqlFormatterConfigErrorInvalidConfig");
-}
-
 function updateSettings(next: unknown) {
-  importError.value = "";
   emit("update:modelValue", normalizeSqlFormatterSettings(next));
 }
 
@@ -271,47 +222,6 @@ function onLinesBetweenQueries(value: any) {
   if (next === 0 || next === 1 || next === 2) updateOption("linesBetweenQueries", next);
 }
 
-function restoreDefaults() {
-  updateSettings(DEFAULT_SQL_FORMATTER_SETTINGS);
-}
-
-function importConfig() {
-  importError.value = "";
-  fileInputRef.value?.click();
-}
-
-async function onImportFile(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  input.value = "";
-  if (!file) return;
-
-  try {
-    const text = await file.text();
-    const result = parseSqlFormatterConfig(text);
-    if (!result.ok) {
-      importError.value = localizeSqlFormatterConfigError(result.message);
-      return;
-    }
-    updateSettings(result.settings);
-    toast(t("settings.sqlFormatterImportSuccess"));
-  } catch (e: any) {
-    importError.value = e?.message || String(e);
-  }
-}
-
-function exportConfig() {
-  const blob = new Blob([serializeSqlFormatterConfig(settings.value)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "dbx-sql-formatter.json";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
 watch(
   () => props.modelValue,
   () => void refreshPreview(),
@@ -321,32 +231,6 @@ watch(
 
 <template>
   <div class="flex flex-col gap-4">
-    <!-- Action bar -->
-    <div class="flex flex-wrap items-center justify-between gap-2">
-      <div class="flex flex-wrap items-center gap-2">
-        <input ref="fileInputRef" type="file" accept="application/json,.json" class="hidden" @change="onImportFile" />
-        <Button type="button" variant="outline" size="sm" @click="importConfig">
-          <Upload class="mr-1.5 h-3.5 w-3.5" />
-          {{ t("settings.sqlFormatterImport") }}
-        </Button>
-        <Button type="button" variant="outline" size="sm" @click="exportConfig">
-          <Download class="mr-1.5 h-3.5 w-3.5" />
-          {{ t("settings.sqlFormatterExport") }}
-        </Button>
-      </div>
-      <Button type="button" variant="ghost" size="sm" @click="restoreDefaults">
-        <RotateCcw class="mr-1.5 h-3.5 w-3.5" />
-        {{ t("settings.sqlFormatterRestoreDefaults") }}
-      </Button>
-    </div>
-
-    <p
-      v-if="importError"
-      class="rounded-[var(--ds-radius-sm)] border border-[color-mix(in_srgb,var(--ds-red)_40%,transparent)] bg-[color-mix(in_srgb,var(--ds-red)_12%,transparent)] px-3 py-2 text-xs text-[var(--ds-red)]"
-    >
-      {{ importError }}
-    </p>
-
     <!-- Controls + live preview -->
     <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,21rem)]">
       <!-- Left: controls -->

@@ -40,7 +40,7 @@ import {
 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -460,6 +460,56 @@ function resetDefaults() {
   editExportBatchSize.value = DEFAULT_EDITOR_SETTINGS.exportBatchSize;
   editSnippets.value = DEFAULT_SQL_SNIPPETS.map((s) => ({ ...s }));
 }
+
+// SQL Formatter header action: restore just the formatter settings to defaults,
+// disabled when the draft already matches them.
+const isSqlFormatterAtDefaults = computed(
+  () =>
+    JSON.stringify(normalizeSqlFormatterSettings(editSqlFormatter.value)) ===
+    JSON.stringify(normalizeSqlFormatterSettings(DEFAULT_EDITOR_SETTINGS.sqlFormatter)),
+);
+
+function restoreSqlFormatterDefaults() {
+  editSqlFormatter.value = normalizeSqlFormatterSettings(DEFAULT_EDITOR_SETTINGS.sqlFormatter);
+}
+
+// Mirrors resetDefaults(): true when every edit field already holds its default,
+// so the Reset Defaults button disables itself the same way the Apply buttons do.
+const isAtDefaults = computed(
+  () =>
+    editFontFamily.value === DEFAULT_EDITOR_SETTINGS.fontFamily &&
+    editFontSize.value === DEFAULT_EDITOR_SETTINGS.fontSize &&
+    editUiScale.value === DEFAULT_EDITOR_SETTINGS.uiScale &&
+    editTheme.value === DEFAULT_EDITOR_SETTINGS.theme &&
+    JSON.stringify(editCustomThemes.value) === JSON.stringify(DEFAULT_EDITOR_SETTINGS.customThemes) &&
+    editActiveCustomThemeId.value === DEFAULT_EDITOR_SETTINGS.activeCustomThemeId &&
+    editExecuteMode.value === DEFAULT_EDITOR_SETTINGS.executeMode &&
+    editWordWrap.value === DEFAULT_EDITOR_SETTINGS.wordWrap &&
+    editConfirmDangerousSqlExecution.value === DEFAULT_EDITOR_SETTINGS.confirmDangerousSqlExecution &&
+    editShowTrayIcon.value === DEFAULT_DESKTOP_SETTINGS.show_tray_icon &&
+    editIconTheme.value === DEFAULT_DESKTOP_SETTINGS.icon_theme &&
+    editDebugLoggingEnabled.value === DEFAULT_DESKTOP_SETTINGS.debug_logging_enabled &&
+    editShowColumnCommentsInHeader.value === DEFAULT_EDITOR_SETTINGS.showColumnCommentsInHeader &&
+    editShowColumnTypesInHeader.value === DEFAULT_EDITOR_SETTINGS.showColumnTypesInHeader &&
+    editCompactColumnHeaderActions.value === DEFAULT_EDITOR_SETTINGS.compactColumnHeaderActions &&
+    editRedisScanPageSize.value === DEFAULT_EDITOR_SETTINGS.redisScanPageSize &&
+    JSON.stringify(editShortcuts.value) ===
+      JSON.stringify(normalizeShortcutSettings(DEFAULT_EDITOR_SETTINGS.shortcuts)) &&
+    JSON.stringify(editSqlFormatter.value) ===
+      JSON.stringify(normalizeSqlFormatterSettings(DEFAULT_EDITOR_SETTINGS.sqlFormatter)) &&
+    editSidebarActivation.value === DEFAULT_EDITOR_SETTINGS.sidebarActivation &&
+    editSidebarObjectDisplay.value === DEFAULT_EDITOR_SETTINGS.sidebarObjectDisplay &&
+    editAutoSelectActiveSidebarNode.value === DEFAULT_EDITOR_SETTINGS.autoSelectActiveSidebarNode &&
+    editDisconnectTabHandlingMode.value === DEFAULT_EDITOR_SETTINGS.disconnectTabHandlingMode &&
+    editReuseDataTab.value === DEFAULT_EDITOR_SETTINGS.reuseDataTab &&
+    editUpdateNotificationsEnabled.value === DEFAULT_EDITOR_SETTINGS.updateNotificationsEnabled &&
+    editSidebarHideTableComments.value === DEFAULT_EDITOR_SETTINGS.sidebarHideTableComments &&
+    editSidebarAllowHorizontalScroll.value === DEFAULT_EDITOR_SETTINGS.sidebarAllowHorizontalScroll &&
+    JSON.stringify(normalizeSidebarHiddenTablePrefixes(editSidebarHiddenTablePrefixes.value)) ===
+      JSON.stringify(DEFAULT_EDITOR_SETTINGS.sidebarHiddenTablePrefixes) &&
+    editExportBatchSize.value === DEFAULT_EDITOR_SETTINGS.exportBatchSize &&
+    JSON.stringify(editSnippets.value) === JSON.stringify(DEFAULT_SQL_SNIPPETS),
+);
 
 function onExecuteModeChange(v: any) {
   if (v === "all" || v === "current") editExecuteMode.value = v;
@@ -1380,17 +1430,31 @@ watch(
 
 <template>
   <Dialog :open="open" @update:open="(v: boolean) => emit('update:open', v)">
-    <DialogContent class="ds-dialog sm:max-w-[1040px] h-[min(820px,calc(100vh-48px))] flex flex-col overflow-hidden">
-      <DialogHeader>
-        <DialogTitle class="flex items-center gap-2">
+    <DialogContent
+      class="ds-dialog sm:max-w-[1040px] h-[min(820px,calc(100vh-48px))] flex flex-col gap-0 overflow-hidden p-0"
+      :show-close-button="false"
+    >
+      <!-- DESIGN-SYSTEM dialog shell: edge-to-edge title bar, hairline seam below -->
+      <header class="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--ds-border)] px-4">
+        <div
+          class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+        >
           <Settings class="h-4 w-4" />
+        </div>
+        <DialogTitle class="text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]">
           {{ t("settings.title") }}
         </DialogTitle>
-      </DialogHeader>
+        <DialogClose as-child>
+          <Button variant="ghost" size="icon-sm" class="ml-auto">
+            <X />
+            <span class="sr-only">{{ t("common.close") }}</span>
+          </Button>
+        </DialogClose>
+      </header>
 
-      <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden sm:flex-row">
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden sm:flex-row">
         <nav
-          class="settingsCategoryNav flex min-h-0 shrink-0 gap-1 overflow-x-auto border-b border-[var(--ds-border)] pb-3 sm:w-48 sm:flex-col sm:overflow-x-hidden sm:overflow-y-auto sm:border-b-0 sm:border-r sm:pb-0 sm:pr-3"
+          class="flex min-h-0 shrink-0 gap-1 overflow-x-auto border-b border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] p-3 sm:w-56 sm:flex-col sm:overflow-x-hidden sm:overflow-y-auto sm:border-b-0 sm:border-r"
         >
           <button
             v-for="category in settingsCategoryNav"
@@ -1408,14 +1472,30 @@ watch(
           </button>
         </nav>
 
-        <div class="min-w-0 flex-1 overflow-hidden px-1 flex flex-col">
-          <header class="shrink-0 space-y-0.5 px-1 pb-3">
-            <h2 class="text-[15px] font-semibold text-[var(--ds-text-1)]">{{ activeCategoryMeta.label }}</h2>
-            <p class="text-[12px] leading-relaxed text-[var(--ds-text-3)]">
-              {{ t(activeCategoryMeta.subtitleKey) }}
-            </p>
+        <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <header class="flex shrink-0 items-start justify-between gap-4 px-6 pb-3 pt-5">
+            <div class="min-w-0 space-y-1">
+              <h2 class="text-[18px] font-semibold tracking-[-0.018em] text-[var(--ds-text-1)]">
+                {{ activeCategoryMeta.label }}
+              </h2>
+              <p class="text-[12.5px] leading-relaxed text-[var(--ds-text-3)]">
+                {{ t(activeCategoryMeta.subtitleKey) }}
+              </p>
+            </div>
+            <Button
+              v-if="activeSettingsTab === 'formatter'"
+              type="button"
+              variant="secondary"
+              size="sm"
+              class="shrink-0"
+              :disabled="isSqlFormatterAtDefaults"
+              @click="restoreSqlFormatterDefaults"
+            >
+              <RotateCcw class="mr-1.5 h-3.5 w-3.5" />
+              {{ t("settings.sqlFormatterRestoreDefaults") }}
+            </Button>
           </header>
-          <div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1 pr-2">
+          <div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pb-6">
             <section v-if="activeSettingsTab === 'editor'" class="flex flex-col gap-5 py-2">
               <div class="grid gap-4 md:grid-cols-[2fr_1fr]">
                 <!-- Font Family -->
@@ -2850,135 +2930,140 @@ watch(
               </div>
             </section>
           </div>
-
-          <DialogFooter
-            v-if="hasSettingsApplyFooter(activeSettingsTab as SettingsCategory)"
-            class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-0 pb-0 pt-3 gap-3 sm:gap-3"
-          >
-            <Button variant="outline" @click="resetDefaults">
-              {{ t("settings.resetDefaults") }}
-            </Button>
-            <div class="flex-1" />
-            <Button variant="outline" @click="emit('update:open', false)">
-              {{ t("common.close") }}
-            </Button>
-            <Button :disabled="!hasChanges() || hasApplyBlocker" @click="applySettings">
-              {{ t("settings.apply") }}
-            </Button>
-            <Button :disabled="!hasChanges() || hasApplyBlocker" @click="applySettingsAndClose">
-              {{ t("settings.applyAndClose") }}
-            </Button>
-          </DialogFooter>
-
-          <DialogFooter
-            v-else-if="activeSettingsTab === 'ai'"
-            class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-0 pb-0 pt-3 gap-3 sm:gap-3"
-          >
-            <div class="flex flex-1 items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                :disabled="
-                  aiTesting ||
-                  (aiRequiresApiKey && !aiEditApiKey?.trim()) ||
-                  !aiEditEndpoint?.trim() ||
-                  !aiEditModel?.trim()
-                "
-                @click="aiTestConn"
-              >
-                <Loader2 v-if="aiTesting" class="h-3 w-3 animate-spin mr-1" />
-                {{ t("connection.test") }}
-              </Button>
-              <span v-if="aiTestResult === 'success'" class="text-xs text-[var(--ds-green)]">
-                {{ t("connection.testSuccess") }}
-              </span>
-              <span
-                v-else-if="aiTestResult === 'error'"
-                class="text-xs text-[var(--ds-red)] truncate max-w-[200px]"
-                :title="aiTestError"
-              >
-                {{ aiTestError }}
-              </span>
-            </div>
-            <Button variant="outline" @click="emit('update:open', false)">{{ t("common.close") }}</Button>
-            <Button :disabled="!aiHasChanges()" @click="aiApplySettings">{{ t("settings.apply") }}</Button>
-          </DialogFooter>
-
-          <DialogFooter
-            v-else-if="activeSettingsTab === 'sync'"
-            class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-0 pb-0 pt-3 gap-3 sm:gap-3"
-          >
-            <Button variant="outline" @click="emit('update:open', false)">
-              {{ t("common.close") }}
-            </Button>
-            <p
-              v-if="webdavMessage"
-              class="text-xs self-center truncate max-w-[280px]"
-              :class="webdavError ? 'text-[var(--ds-red)]' : 'text-[var(--ds-green)]'"
-            >
-              {{ webdavMessage }}
-            </p>
-            <div class="flex-1" />
-            <Button variant="outline" :disabled="!webdavReady" @click="testWebDav">
-              <Loader2 v-if="webdavBusy === 'test'" class="mr-1 h-3 w-3 animate-spin" />
-              {{ t("settings.syncTest") }}
-            </Button>
-            <Button variant="outline" :disabled="!webdavReady" @click="downloadWebDavSnapshot">
-              <Loader2 v-if="webdavBusy === 'download'" class="mr-1 h-3 w-3 animate-spin" />
-              <Download v-else class="mr-1 h-3 w-3" />
-              {{ t("settings.syncDownload") }}
-            </Button>
-            <Button :disabled="!webdavReady" @click="uploadWebDavSnapshot">
-              <Loader2 v-if="webdavBusy === 'upload'" class="mr-1 h-3 w-3 animate-spin" />
-              <Upload v-else class="mr-1 h-3 w-3" />
-              {{ t("settings.syncUpload") }}
-            </Button>
-          </DialogFooter>
-
-          <DialogFooter
-            v-else-if="activeSettingsTab === 'mcp' && !isWeb"
-            class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-0 pb-0 pt-3"
-          >
-            <Button variant="outline" @click="emit('update:open', false)">
-              {{ t("common.close") }}
-            </Button>
-            <div class="flex-1" />
-            <Button variant="outline" :disabled="mcpStatusLoading" @click="refreshMcpStatus">
-              <Loader2 v-if="mcpStatusLoading" class="mr-1 h-3 w-3 animate-spin" />
-              <RefreshCw v-else class="mr-1 h-3 w-3" />
-              {{ t("settings.mcpRefresh") }}
-            </Button>
-            <Button variant="outline" @click="openExternalUrl('https://dbxio.com/cn/docs/mcp')">
-              <ExternalLink class="mr-1 h-3 w-3" />
-              {{ t("settings.mcpGuide") }}
-            </Button>
-          </DialogFooter>
-
-          <DialogFooter
-            v-else-if="activeSettingsTab === 'security' && isWeb"
-            class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-0 pb-0 pt-3"
-          >
-            <Button variant="outline" @click="emit('update:open', false)">
-              {{ t("common.close") }}
-            </Button>
-            <Button
-              :disabled="changingPassword || !oldPassword || !newPassword || !confirmNewPassword"
-              @click="changePassword"
-            >
-              {{ t("auth.changePassword") }}
-            </Button>
-          </DialogFooter>
-
-          <DialogFooter
-            v-else-if="activeSettingsTab === 'about'"
-            class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-0 pb-0 pt-3"
-          >
-            <Button variant="outline" @click="emit('update:open', false)">
-              {{ t("common.close") }}
-            </Button>
-          </DialogFooter>
         </div>
       </div>
+
+      <DialogFooter
+        v-if="hasSettingsApplyFooter(activeSettingsTab as SettingsCategory)"
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 gap-3 sm:gap-3"
+      >
+        <Button
+          variant="ghost"
+          class="text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]"
+          :disabled="isAtDefaults"
+          @click="resetDefaults"
+        >
+          {{ t("settings.resetDefaults") }}
+        </Button>
+        <div class="flex-1" />
+        <Button variant="outline" @click="emit('update:open', false)">
+          {{ t("common.close") }}
+        </Button>
+        <Button variant="secondary" :disabled="!hasChanges() || hasApplyBlocker" @click="applySettings">
+          {{ t("settings.apply") }}
+        </Button>
+        <Button :disabled="!hasChanges() || hasApplyBlocker" @click="applySettingsAndClose">
+          {{ t("settings.applyAndClose") }}
+        </Button>
+      </DialogFooter>
+
+      <DialogFooter
+        v-else-if="activeSettingsTab === 'ai'"
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 gap-3 sm:gap-3"
+      >
+        <div class="flex flex-1 items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            :disabled="
+              aiTesting ||
+              (aiRequiresApiKey && !aiEditApiKey?.trim()) ||
+              !aiEditEndpoint?.trim() ||
+              !aiEditModel?.trim()
+            "
+            @click="aiTestConn"
+          >
+            <Loader2 v-if="aiTesting" class="h-3 w-3 animate-spin mr-1" />
+            {{ t("connection.test") }}
+          </Button>
+          <span v-if="aiTestResult === 'success'" class="text-xs text-[var(--ds-green)]">
+            {{ t("connection.testSuccess") }}
+          </span>
+          <span
+            v-else-if="aiTestResult === 'error'"
+            class="text-xs text-[var(--ds-red)] truncate max-w-[200px]"
+            :title="aiTestError"
+          >
+            {{ aiTestError }}
+          </span>
+        </div>
+        <Button variant="outline" @click="emit('update:open', false)">{{ t("common.close") }}</Button>
+        <Button :disabled="!aiHasChanges()" @click="aiApplySettings">{{ t("settings.apply") }}</Button>
+      </DialogFooter>
+
+      <DialogFooter
+        v-else-if="activeSettingsTab === 'sync'"
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 gap-3 sm:gap-3"
+      >
+        <Button variant="outline" @click="emit('update:open', false)">
+          {{ t("common.close") }}
+        </Button>
+        <p
+          v-if="webdavMessage"
+          class="text-xs self-center truncate max-w-[280px]"
+          :class="webdavError ? 'text-[var(--ds-red)]' : 'text-[var(--ds-green)]'"
+        >
+          {{ webdavMessage }}
+        </p>
+        <div class="flex-1" />
+        <Button variant="outline" :disabled="!webdavReady" @click="testWebDav">
+          <Loader2 v-if="webdavBusy === 'test'" class="mr-1 h-3 w-3 animate-spin" />
+          {{ t("settings.syncTest") }}
+        </Button>
+        <Button variant="outline" :disabled="!webdavReady" @click="downloadWebDavSnapshot">
+          <Loader2 v-if="webdavBusy === 'download'" class="mr-1 h-3 w-3 animate-spin" />
+          <Download v-else class="mr-1 h-3 w-3" />
+          {{ t("settings.syncDownload") }}
+        </Button>
+        <Button :disabled="!webdavReady" @click="uploadWebDavSnapshot">
+          <Loader2 v-if="webdavBusy === 'upload'" class="mr-1 h-3 w-3 animate-spin" />
+          <Upload v-else class="mr-1 h-3 w-3" />
+          {{ t("settings.syncUpload") }}
+        </Button>
+      </DialogFooter>
+
+      <DialogFooter
+        v-else-if="activeSettingsTab === 'mcp' && !isWeb"
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3"
+      >
+        <Button variant="outline" @click="emit('update:open', false)">
+          {{ t("common.close") }}
+        </Button>
+        <div class="flex-1" />
+        <Button variant="outline" :disabled="mcpStatusLoading" @click="refreshMcpStatus">
+          <Loader2 v-if="mcpStatusLoading" class="mr-1 h-3 w-3 animate-spin" />
+          <RefreshCw v-else class="mr-1 h-3 w-3" />
+          {{ t("settings.mcpRefresh") }}
+        </Button>
+        <Button variant="outline" @click="openExternalUrl('https://dbxio.com/cn/docs/mcp')">
+          <ExternalLink class="mr-1 h-3 w-3" />
+          {{ t("settings.mcpGuide") }}
+        </Button>
+      </DialogFooter>
+
+      <DialogFooter
+        v-else-if="activeSettingsTab === 'security' && isWeb"
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3"
+      >
+        <Button variant="outline" @click="emit('update:open', false)">
+          {{ t("common.close") }}
+        </Button>
+        <Button
+          :disabled="changingPassword || !oldPassword || !newPassword || !confirmNewPassword"
+          @click="changePassword"
+        >
+          {{ t("auth.changePassword") }}
+        </Button>
+      </DialogFooter>
+
+      <DialogFooter
+        v-else-if="activeSettingsTab === 'about'"
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3"
+      >
+        <Button variant="outline" @click="emit('update:open', false)">
+          {{ t("common.close") }}
+        </Button>
+      </DialogFooter>
     </DialogContent>
 
     <!-- Theme Customizer Dialog -->
