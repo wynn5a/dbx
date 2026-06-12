@@ -2,7 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { uuid } from "@/lib/utils";
 import { useI18n } from "vue-i18n";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -50,11 +50,13 @@ import {
   KeyRound,
   Link2,
   List,
+  Pencil,
   Pipette,
   Plus,
   Search,
   ShieldCheck,
   Trash2,
+  X,
 } from "@lucide/vue";
 
 type DbOption = { value: string; label: string };
@@ -1939,109 +1941,138 @@ function openExternalUrl(url: string) {
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent :class="dialogStep === 'select' ? 'sm:max-w-[760px]' : 'sm:max-w-[560px]'" @interact-outside.prevent>
-      <DialogHeader>
-        <DialogTitle>{{ editingId ? t("connection.editTitle") : t("connection.title") }}</DialogTitle>
+    <DialogContent
+      :class="[
+        'ds-dialog gap-0 p-0 flex flex-col overflow-hidden',
+        dialogStep === 'select' ? 'sm:max-w-[760px]' : 'sm:max-w-[560px]',
+      ]"
+      :show-close-button="false"
+      @interact-outside.prevent
+    >
+      <DialogHeader
+        class="flex h-14 shrink-0 flex-row items-center gap-3 space-y-0 border-b border-[var(--ds-border)] px-4 text-left"
+      >
+        <div
+          class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+        >
+          <KeyRound class="h-4 w-4" />
+        </div>
+        <DialogTitle
+          class="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]"
+        >
+          {{ editingId ? t("connection.editTitle") : t("connection.title") }}
+        </DialogTitle>
+        <DialogClose as-child>
+          <Button variant="ghost" size="icon-sm" class="-mr-1 shrink-0"
+            ><X class="h-4 w-4" /><span class="sr-only">{{ t("common.close") }}</span></Button
+          >
+        </DialogClose>
       </DialogHeader>
 
       <template v-if="dialogStep === 'select'">
-        <div class="space-y-4">
-          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-            <div class="flex items-center gap-2">
-              <div class="flex shrink-0 rounded-lg border bg-muted/40 p-0.5">
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  :variant="dbPickerView === 'icon' ? 'secondary' : 'ghost'"
-                  :title="t('connection.iconView')"
-                  :aria-label="t('connection.iconView')"
-                  @click="dbPickerView = 'icon'"
-                >
-                  <Grid3X3 class="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  :variant="dbPickerView === 'list' ? 'secondary' : 'ghost'"
-                  :title="t('connection.listView')"
-                  :aria-label="t('connection.listView')"
-                  @click="dbPickerView = 'list'"
-                >
-                  <List class="h-3.5 w-3.5" />
-                </Button>
-              </div>
-              <div class="relative w-full sm:w-64">
-                <Search class="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  v-model="dbSearchQuery"
-                  class="h-9 pl-8"
-                  :placeholder="t('connection.searchDatabasePlaceholder')"
-                />
+        <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          <div class="space-y-4">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <div class="flex items-center gap-2">
+                <div class="flex shrink-0 rounded-lg border bg-muted/40 p-0.5">
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    :variant="dbPickerView === 'icon' ? 'secondary' : 'ghost'"
+                    :title="t('connection.iconView')"
+                    :aria-label="t('connection.iconView')"
+                    @click="dbPickerView = 'icon'"
+                  >
+                    <Grid3X3 class="h-3.5 w-3.5" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    :variant="dbPickerView === 'list' ? 'secondary' : 'ghost'"
+                    :title="t('connection.listView')"
+                    :aria-label="t('connection.listView')"
+                    @click="dbPickerView = 'list'"
+                  >
+                    <List class="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+                <div class="relative w-full sm:w-64">
+                  <Search class="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    v-model="dbSearchQuery"
+                    class="h-9 pl-8"
+                    :placeholder="t('connection.searchDatabasePlaceholder')"
+                  />
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="max-h-[58vh] space-y-5 overflow-y-auto pr-2">
-            <section v-for="category in filteredDbCategories" :key="category.key" class="space-y-2">
-              <div class="flex items-center">
-                <h3 class="text-sm font-medium">{{ category.title }}</h3>
-              </div>
+            <div class="max-h-[58vh] space-y-5 overflow-y-auto pr-2">
+              <section v-for="category in filteredDbCategories" :key="category.key" class="space-y-2">
+                <div class="flex items-center">
+                  <h3 class="text-sm font-medium">{{ category.title }}</h3>
+                </div>
 
-              <div v-if="dbPickerView === 'icon'" class="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-5">
-                <button
-                  v-for="opt in category.options"
-                  :key="opt.value"
-                  type="button"
-                  class="group flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border bg-background/70 p-3 text-center transition hover:-translate-y-0.5 hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  :class="
-                    selectedType === opt.value
-                      ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/30'
-                      : 'border-border'
-                  "
-                  :aria-pressed="selectedType === opt.value"
-                  @click="onDbTypeChange(opt.value)"
-                  @dblclick="goToConnectionStep(opt.value)"
-                >
-                  <span
-                    class="flex h-10 w-10 items-center justify-center rounded-xl bg-muted/60 transition group-hover:bg-background"
+                <div v-if="dbPickerView === 'icon'" class="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-5">
+                  <button
+                    v-for="opt in category.options"
+                    :key="opt.value"
+                    type="button"
+                    class="group flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border bg-background/70 p-3 text-center transition hover:-translate-y-0.5 hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    :class="
+                      selectedType === opt.value
+                        ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/30'
+                        : 'border-border'
+                    "
+                    :aria-pressed="selectedType === opt.value"
+                    @click="onDbTypeChange(opt.value)"
+                    @dblclick="goToConnectionStep(opt.value)"
                   >
-                    <DatabaseIcon :db-type="iconTypeMap[opt.value]" class="h-6 w-6" />
-                  </span>
-                  <span class="max-w-full truncate text-sm font-medium">{{ opt.label }}</span>
-                </button>
-              </div>
+                    <span
+                      class="flex h-10 w-10 items-center justify-center rounded-xl bg-muted/60 transition group-hover:bg-background"
+                    >
+                      <DatabaseIcon :db-type="iconTypeMap[opt.value]" class="h-6 w-6" />
+                    </span>
+                    <span class="max-w-full truncate text-sm font-medium">{{ opt.label }}</span>
+                  </button>
+                </div>
 
-              <div v-else class="grid gap-2">
-                <button
-                  v-for="opt in category.options"
-                  :key="opt.value"
-                  type="button"
-                  class="flex items-center gap-3 rounded-lg border bg-background px-3 py-2 text-left transition hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  :class="
-                    selectedType === opt.value ? 'border-primary bg-primary/10 ring-1 ring-primary/30' : 'border-border'
-                  "
-                  :aria-pressed="selectedType === opt.value"
-                  @click="onDbTypeChange(opt.value)"
-                  @dblclick="goToConnectionStep(opt.value)"
-                >
-                  <DatabaseIcon :db-type="iconTypeMap[opt.value]" class="h-5 w-5 shrink-0" />
-                  <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ opt.label }}</span>
-                  <span class="text-xs text-muted-foreground">{{ category.title }}</span>
-                </button>
-              </div>
-            </section>
+                <div v-else class="grid gap-2">
+                  <button
+                    v-for="opt in category.options"
+                    :key="opt.value"
+                    type="button"
+                    class="flex items-center gap-3 rounded-lg border bg-background px-3 py-2 text-left transition hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    :class="
+                      selectedType === opt.value
+                        ? 'border-primary bg-primary/10 ring-1 ring-primary/30'
+                        : 'border-border'
+                    "
+                    :aria-pressed="selectedType === opt.value"
+                    @click="onDbTypeChange(opt.value)"
+                    @dblclick="goToConnectionStep(opt.value)"
+                  >
+                    <DatabaseIcon :db-type="iconTypeMap[opt.value]" class="h-5 w-5 shrink-0" />
+                    <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ opt.label }}</span>
+                    <span class="text-xs text-muted-foreground">{{ category.title }}</span>
+                  </button>
+                </div>
+              </section>
 
-            <div
-              v-if="!hasDbPickerResults"
-              class="rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground"
-            >
-              {{ t("connection.noDatabaseMatches") }}
+              <div
+                v-if="!hasDbPickerResults"
+                class="rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground"
+              >
+                {{ t("connection.noDatabaseMatches") }}
+              </div>
             </div>
           </div>
         </div>
 
-        <DialogFooter class="flex items-center gap-2">
-          <div class="mr-auto flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+        <DialogFooter
+          class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 flex items-center gap-2"
+        >
+          <div class="mr-auto flex min-w-0 items-center gap-2 text-sm text-[var(--ds-text-3)]">
             <DatabaseIcon :db-type="selectedDbIcon" class="h-4 w-4 shrink-0" />
             <span class="truncate">{{ t("connection.selectedDatabase") }}: {{ selectedProfile().label }}</span>
           </div>
@@ -2053,332 +2084,202 @@ function openExternalUrl(url: string) {
       </template>
 
       <template v-else>
-        <div class="space-y-3">
-          <Tabs v-model="configTab" class="min-h-0">
-            <div class="flex items-center justify-between border-b pb-2">
-              <TabsList>
-                <TabsTrigger value="connection">{{ t("connection.basicTab") }}</TabsTrigger>
-                <TabsTrigger v-if="supportsTlsToggle" value="tls">{{ t("connection.tlsTab") }}</TabsTrigger>
-                <TabsTrigger v-if="canUseTransportLayers" value="transport">{{
-                  t("connection.sshTunnel")
-                }}</TabsTrigger>
-                <TabsTrigger value="advanced">{{ t("connection.advancedTab") }}</TabsTrigger>
-              </TabsList>
-            </div>
+        <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+          <div class="space-y-3">
+            <Tabs v-model="configTab" class="min-h-0">
+              <div class="flex items-center justify-between border-b pb-2">
+                <TabsList>
+                  <TabsTrigger value="connection">{{ t("connection.basicTab") }}</TabsTrigger>
+                  <TabsTrigger v-if="supportsTlsToggle" value="tls">{{ t("connection.tlsTab") }}</TabsTrigger>
+                  <TabsTrigger v-if="canUseTransportLayers" value="transport">{{
+                    t("connection.sshTunnel")
+                  }}</TabsTrigger>
+                  <TabsTrigger value="advanced">{{ t("connection.advancedTab") }}</TabsTrigger>
+                </TabsList>
+              </div>
 
-            <TabsContent value="connection" class="m-0">
-              <div class="grid gap-4 py-4 pr-2 max-h-[65vh] overflow-y-auto">
-                <div v-if="!isJdbcConnection" class="grid grid-cols-4 items-center gap-4">
-                  <Label class="text-right">{{ t("connection.connectionUrlOptional") }}</Label>
-                  <div class="col-span-3 flex items-center gap-1">
-                    <Input
-                      v-model="connectionUrlInput"
-                      class="flex-1"
-                      :placeholder="connectionUrlPlaceholder"
-                      @keydown.enter.prevent="applyConnectionUrl"
-                    />
-                    <Tooltip>
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="outline"
-                          size="icon-lg"
-                          class="shrink-0"
-                          :disabled="!connectionUrlInput.trim()"
-                          :aria-label="t('connection.parseConnectionUrl')"
-                          @click="applyConnectionUrl"
-                        >
-                          <Link2 class="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("connection.parseConnectionUrl") }}</TooltipContent>
-                    </Tooltip>
+              <TabsContent value="connection" class="m-0">
+                <div class="grid gap-4 py-4 pr-2 max-h-[65vh] overflow-y-auto">
+                  <div v-if="!isJdbcConnection" class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right">{{ t("connection.connectionUrlOptional") }}</Label>
+                    <div class="col-span-3 flex items-center gap-1">
+                      <Input
+                        v-model="connectionUrlInput"
+                        class="flex-1"
+                        :placeholder="connectionUrlPlaceholder"
+                        @keydown.enter.prevent="applyConnectionUrl"
+                      />
+                      <Tooltip>
+                        <TooltipTrigger as-child>
+                          <Button
+                            variant="outline"
+                            size="icon-lg"
+                            class="shrink-0"
+                            :disabled="!connectionUrlInput.trim()"
+                            :aria-label="t('connection.parseConnectionUrl')"
+                            @click="applyConnectionUrl"
+                          >
+                            <Link2 class="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{{ t("connection.parseConnectionUrl") }}</TooltipContent>
+                      </Tooltip>
+                    </div>
                   </div>
-                </div>
 
-                <div class="grid grid-cols-4 items-center gap-4">
-                  <Label class="text-right">{{ t("connection.name") }}</Label>
-                  <Input v-model="form.name" class="col-span-3" :placeholder="t('connection.namePlaceholder')" />
-                </div>
-
-                <div class="grid grid-cols-4 items-center gap-4">
-                  <Label class="text-right">{{ t("connection.type") }}</Label>
-                  <button
-                    type="button"
-                    class="col-span-3 flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 hover:bg-muted/40 cursor-pointer transition"
-                    @click="backToDatabasePicker()"
-                  >
-                    <DatabaseIcon :db-type="selectedDbIcon" class="h-4 w-4 shrink-0" />
-                    <span class="min-w-0 flex-1 truncate text-sm text-left">{{ selectedProfile().label }}</span>
-                    <Pencil class="h-3 w-3 text-muted-foreground" />
-                  </button>
-                </div>
-
-                <!-- OceanBase mode toggle -->
-                <div v-if="selectedType === 'oceanbase'" class="grid grid-cols-4 items-center gap-4">
-                  <Label class="text-right text-xs">{{ t("connection.mode") }}</Label>
-                  <div class="col-span-3 flex gap-2">
-                    <Button
-                      size="sm"
-                      :variant="oceanbaseSubMode === 'mysql' ? 'default' : 'outline'"
-                      @click="switchOceanbaseMode('mysql')"
-                    >
-                      {{ t("connection.oceanbaseMySQLMode") }}
-                    </Button>
-                    <Button
-                      size="sm"
-                      :variant="oceanbaseSubMode === 'oracle' ? 'default' : 'outline'"
-                      @click="switchOceanbaseMode('oracle')"
-                    >
-                      {{ t("connection.oceanbaseOracleMode") }}
-                    </Button>
+                  <div class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right">{{ t("connection.name") }}</Label>
+                    <Input v-model="form.name" class="col-span-3" :placeholder="t('connection.namePlaceholder')" />
                   </div>
-                </div>
 
-                <div v-if="selectedType === 'gbase'" class="grid grid-cols-4 items-center gap-4">
-                  <Label class="text-right text-xs">{{ t("connection.version") }}</Label>
-                  <div class="col-span-3 flex gap-2">
-                    <Button
-                      size="sm"
-                      :variant="form.driver_profile === 'gbase8s' ? 'outline' : 'default'"
-                      @click="switchGbaseProfile('gbase')"
-                    >
-                      GBase
-                    </Button>
-                    <Button
-                      size="sm"
-                      :variant="form.driver_profile === 'gbase8s' ? 'default' : 'outline'"
-                      @click="switchGbaseProfile('gbase8s')"
-                    >
-                      GBase 8s
-                    </Button>
-                  </div>
-                </div>
-
-                <div v-if="isCustomCompatibleProfile()" class="grid grid-cols-4 items-center gap-4">
-                  <Label class="text-right">{{ t("connection.driverName") }}</Label>
-                  <Input
-                    v-model="customDriverName"
-                    class="col-span-3"
-                    :placeholder="t('connection.driverNamePlaceholder')"
-                  />
-                </div>
-
-                <div class="grid grid-cols-4 items-center gap-4">
-                  <Label class="text-right">{{ t("connection.color") }}</Label>
-                  <div class="col-span-3 flex items-center gap-1.5">
+                  <div class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right">{{ t("connection.type") }}</Label>
                     <button
-                      v-for="color in colorOptions"
-                      :key="color.value || 'none'"
                       type="button"
-                      class="h-6 w-6 rounded-full border ring-offset-background transition hover:scale-105"
-                      :class="[
-                        color.class,
-                        form.color === color.value ? 'ring-2 ring-ring ring-offset-2' : 'border-border',
-                      ]"
-                      :title="t(color.labelKey)"
-                      @click="handlePresetClick(color.value)"
-                    />
-                    <Popover v-model:open="customColorOpen">
-                      <PopoverTrigger as-child>
-                        <button
-                          type="button"
-                          class="h-6 w-6 rounded-full border flex items-center justify-center hover:scale-105 transition"
-                          :class="[
-                            !isPresetColor(form.color) && form.color
-                              ? 'border-border ring-2 ring-ring ring-offset-2'
-                              : 'border-dashed border-border',
-                          ]"
-                          :style="!isPresetColor(form.color) && form.color ? { backgroundColor: form.color } : {}"
-                          :title="t('connection.colorCustom')"
-                        >
-                          <Pipette
-                            class="h-3.5 w-3.5"
-                            :class="!isPresetColor(form.color) && form.color ? 'text-white' : 'text-muted-foreground'"
-                          />
-                        </button>
-                      </PopoverTrigger>
-                      <PopoverContent class="w-auto p-2">
-                        <div class="flex items-center gap-2">
-                          <input
-                            type="color"
-                            :value="form.color"
-                            @input="handleCustomColorPicked(($event.target as HTMLInputElement).value)"
-                            class="h-6 w-6 cursor-pointer rounded border-0 p-0"
-                          />
-                          <Input
-                            type="text"
-                            :value="customColorInput || form.color"
-                            @input="handleCustomColorInput(($event.target as HTMLInputElement).value)"
-                            class="w-28 h-7 text-xs font-mono"
-                            :placeholder="'#ff0000 或 rgba(…)'"
-                          />
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                </div>
-
-                <div v-if="form.db_type === 'h2'" class="grid grid-cols-4 items-center gap-4">
-                  <Label class="text-right text-xs">{{ t("connection.mode") }}</Label>
-                  <div class="col-span-3 flex gap-2">
-                    <Button
-                      size="sm"
-                      :variant="h2ConnectionMode === 'file' ? 'default' : 'outline'"
-                      @click="switchH2ConnectionMode('file')"
+                      class="col-span-3 flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 hover:bg-muted/40 cursor-pointer transition"
+                      @click="backToDatabasePicker()"
                     >
-                      {{ t("connection.h2FileMode") }}
-                    </Button>
-                    <Button
-                      size="sm"
-                      :variant="h2ConnectionMode === 'tcp' ? 'default' : 'outline'"
-                      @click="switchH2ConnectionMode('tcp')"
-                    >
-                      {{ t("connection.h2TcpMode") }}
-                    </Button>
+                      <DatabaseIcon :db-type="selectedDbIcon" class="h-4 w-4 shrink-0" />
+                      <span class="min-w-0 flex-1 truncate text-sm text-left">{{ selectedProfile().label }}</span>
+                      <Pencil class="h-3 w-3 text-muted-foreground" />
+                    </button>
                   </div>
-                </div>
 
-                <!-- JDBC: optional external plugin -->
-                <template v-if="form.db_type === 'jdbc'">
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.jdbcUrl") }}</Label>
-                    <Input
-                      v-model="form.connection_string"
-                      class="col-span-3"
-                      :placeholder="t('connection.jdbcUrlPlaceholder')"
-                    />
-                  </div>
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.user") }}</Label>
-                    <Input v-model="form.username" class="col-span-3" placeholder="sa" />
-                  </div>
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.password") }}</Label>
-                    <Input v-model="form.password" type="password" class="col-span-3" />
-                  </div>
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.jdbcDriverClass") }}</Label>
-                    <Input
-                      v-model="form.jdbc_driver_class"
-                      class="col-span-3"
-                      :placeholder="t('connection.jdbcDriverClassPlaceholder')"
-                    />
-                  </div>
-                  <div class="grid grid-cols-4 items-start gap-4">
-                    <Label class="text-right mt-2">{{ t("connection.jdbcDriverPaths") }}</Label>
-                    <div class="col-span-3 space-y-2">
-                      <Select
-                        v-if="jdbcDrivers.length > 0"
-                        :model-value="selectedJdbcDriverPath"
-                        @update:model-value="onJdbcDriverSelect"
+                  <!-- OceanBase mode toggle -->
+                  <div v-if="selectedType === 'oceanbase'" class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right text-xs">{{ t("connection.mode") }}</Label>
+                    <div class="col-span-3 flex gap-2">
+                      <Button
+                        size="sm"
+                        :variant="oceanbaseSubMode === 'mysql' ? 'default' : 'outline'"
+                        @click="switchOceanbaseMode('mysql')"
                       >
-                        <SelectTrigger>
-                          <SelectValue :placeholder="t('connection.jdbcDriverSelectPlaceholder')" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem v-for="driver in jdbcDrivers" :key="driver.path" :value="driver.path">
-                            {{ driver.name }}
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <div class="flex items-start gap-1">
-                        <textarea
-                          v-model="jdbcDriverPathsInput"
-                          class="flex min-h-12 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          :placeholder="t('connection.jdbcDriverPathsPlaceholder')"
-                        />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon-lg"
-                              class="shrink-0"
-                              @click="browseJdbcDriverPaths"
-                            >
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.jdbcDriverBrowse") }}</TooltipContent>
-                        </Tooltip>
-                      </div>
+                        {{ t("connection.oceanbaseMySQLMode") }}
+                      </Button>
+                      <Button
+                        size="sm"
+                        :variant="oceanbaseSubMode === 'oracle' ? 'default' : 'outline'"
+                        @click="switchOceanbaseMode('oracle')"
+                      >
+                        {{ t("connection.oceanbaseOracleMode") }}
+                      </Button>
                     </div>
                   </div>
-                  <div class="grid grid-cols-4 items-start gap-4">
-                    <span />
-                    <div class="col-span-3 space-y-2">
-                      <p class="text-xs text-muted-foreground">
-                        {{ t("connection.jdbcPluginHint") }}
-                      </p>
-                      <div class="flex flex-wrap gap-2">
-                        <Button type="button" variant="outline" size="sm" @click="openExternalUrl('https://dbxio.com')">
-                          <ExternalLink class="h-3.5 w-3.5" />
-                          {{ t("connection.jdbcDocs") }}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </template>
 
-                <!-- Local database files: file path only -->
-                <template v-else-if="usesLocalFilePathInput">
+                  <div v-if="selectedType === 'gbase'" class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right text-xs">{{ t("connection.version") }}</Label>
+                    <div class="col-span-3 flex gap-2">
+                      <Button
+                        size="sm"
+                        :variant="form.driver_profile === 'gbase8s' ? 'outline' : 'default'"
+                        @click="switchGbaseProfile('gbase')"
+                      >
+                        GBase
+                      </Button>
+                      <Button
+                        size="sm"
+                        :variant="form.driver_profile === 'gbase8s' ? 'default' : 'outline'"
+                        @click="switchGbaseProfile('gbase8s')"
+                      >
+                        GBase 8s
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div v-if="isCustomCompatibleProfile()" class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right">{{ t("connection.driverName") }}</Label>
+                    <Input
+                      v-model="customDriverName"
+                      class="col-span-3"
+                      :placeholder="t('connection.driverNamePlaceholder')"
+                    />
+                  </div>
+
                   <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.filePath") }}</Label>
-                    <div class="col-span-3 space-y-1">
-                      <div class="flex items-center gap-1">
-                        <Input v-model="form.host" class="flex-1" :placeholder="filePathPlaceholder" />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button variant="outline" size="icon-lg" class="shrink-0" @click="browseDbFilePath">
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.sshKeyPathBrowse") }}</TooltipContent>
-                        </Tooltip>
-                        <Tooltip v-if="isDesktop && form.db_type === 'duckdb'">
-                          <TooltipTrigger as-child>
-                            <Button variant="outline" size="icon-lg" class="shrink-0" @click="createDuckDbFilePath">
-                              <FilePlus2 class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.createDuckDbFile") }}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <p v-if="supportsMemoryDatabasePath" class="text-xs text-muted-foreground">
-                        {{ t("connection.memoryDatabasePathHint") }}
-                      </p>
+                    <Label class="text-right">{{ t("connection.color") }}</Label>
+                    <div class="col-span-3 flex items-center gap-1.5">
+                      <button
+                        v-for="color in colorOptions"
+                        :key="color.value || 'none'"
+                        type="button"
+                        class="h-6 w-6 rounded-full border ring-offset-background transition hover:scale-105"
+                        :class="[
+                          color.class,
+                          form.color === color.value ? 'ring-2 ring-ring ring-offset-2' : 'border-border',
+                        ]"
+                        :title="t(color.labelKey)"
+                        @click="handlePresetClick(color.value)"
+                      />
+                      <Popover v-model:open="customColorOpen">
+                        <PopoverTrigger as-child>
+                          <button
+                            type="button"
+                            class="h-6 w-6 rounded-full border flex items-center justify-center hover:scale-105 transition"
+                            :class="[
+                              !isPresetColor(form.color) && form.color
+                                ? 'border-border ring-2 ring-ring ring-offset-2'
+                                : 'border-dashed border-border',
+                            ]"
+                            :style="!isPresetColor(form.color) && form.color ? { backgroundColor: form.color } : {}"
+                            :title="t('connection.colorCustom')"
+                          >
+                            <Pipette
+                              class="h-3.5 w-3.5"
+                              :class="!isPresetColor(form.color) && form.color ? 'text-white' : 'text-muted-foreground'"
+                            />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent class="w-auto p-2">
+                          <div class="flex items-center gap-2">
+                            <input
+                              type="color"
+                              :value="form.color"
+                              @input="handleCustomColorPicked(($event.target as HTMLInputElement).value)"
+                              class="h-6 w-6 cursor-pointer rounded border-0 p-0"
+                            />
+                            <Input
+                              type="text"
+                              :value="customColorInput || form.color"
+                              @input="handleCustomColorInput(($event.target as HTMLInputElement).value)"
+                              class="w-28 h-7 text-xs font-mono"
+                              :placeholder="'#ff0000 或 rgba(…)'"
+                            />
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                     </div>
                   </div>
-                  <div v-if="form.db_type === 'sqlite'" class="grid grid-cols-4 items-start gap-4">
-                    <Label class="text-right mt-2">{{ t("connection.sqliteExtensions") }}</Label>
-                    <div class="col-span-3 space-y-1">
-                      <div class="flex items-start gap-1">
-                        <textarea
-                          v-model="sqliteExtensionPaths"
-                          class="flex min-h-[76px] flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                          :placeholder="t('connection.sqliteExtensionsPlaceholder')"
-                          spellcheck="false"
-                        />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button
-                              variant="outline"
-                              size="icon-lg"
-                              class="shrink-0"
-                              @click="browseSqliteExtensionPath"
-                            >
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.sqliteExtensionBrowse") }}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <p class="text-xs text-muted-foreground">
-                        {{ t("connection.sqliteExtensionsHint") }}
-                      </p>
+
+                  <div v-if="form.db_type === 'h2'" class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right text-xs">{{ t("connection.mode") }}</Label>
+                    <div class="col-span-3 flex gap-2">
+                      <Button
+                        size="sm"
+                        :variant="h2ConnectionMode === 'file' ? 'default' : 'outline'"
+                        @click="switchH2ConnectionMode('file')"
+                      >
+                        {{ t("connection.h2FileMode") }}
+                      </Button>
+                      <Button
+                        size="sm"
+                        :variant="h2ConnectionMode === 'tcp' ? 'default' : 'outline'"
+                        @click="switchH2ConnectionMode('tcp')"
+                      >
+                        {{ t("connection.h2TcpMode") }}
+                      </Button>
                     </div>
                   </div>
-                  <template v-if="form.db_type === 'h2'">
+
+                  <!-- JDBC: optional external plugin -->
+                  <template v-if="form.db_type === 'jdbc'">
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right">{{ t("connection.jdbcUrl") }}</Label>
+                      <Input
+                        v-model="form.connection_string"
+                        class="col-span-3"
+                        :placeholder="t('connection.jdbcUrlPlaceholder')"
+                      />
+                    </div>
                     <div class="grid grid-cols-4 items-center gap-4">
                       <Label class="text-right">{{ t("connection.user") }}</Label>
                       <Input v-model="form.username" class="col-span-3" placeholder="sa" />
@@ -2387,170 +2288,260 @@ function openExternalUrl(url: string) {
                       <Label class="text-right">{{ t("connection.password") }}</Label>
                       <Input v-model="form.password" type="password" class="col-span-3" />
                     </div>
-                  </template>
-                </template>
-
-                <!-- Redis: host, port, user, password, ssl -->
-                <template v-else-if="form.db_type === 'redis'">
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right text-xs">{{ t("connection.mode") }}</Label>
-                    <div class="col-span-3 flex gap-2">
-                      <Button
-                        size="sm"
-                        :variant="form.redis_connection_mode === 'standalone' ? 'default' : 'outline'"
-                        @click="form.redis_connection_mode = 'standalone'"
-                      >
-                        {{ t("connection.redisStandaloneMode") }}
-                      </Button>
-                      <Button
-                        size="sm"
-                        :variant="form.redis_connection_mode === 'sentinel' ? 'default' : 'outline'"
-                        @click="form.redis_connection_mode = 'sentinel'"
-                      >
-                        {{ t("connection.redisSentinelMode") }}
-                      </Button>
-                      <Button
-                        size="sm"
-                        :variant="form.redis_connection_mode === 'cluster' ? 'default' : 'outline'"
-                        @click="form.redis_connection_mode = 'cluster'"
-                      >
-                        {{ t("connection.redisClusterMode") }}
-                      </Button>
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right">{{ t("connection.jdbcDriverClass") }}</Label>
+                      <Input
+                        v-model="form.jdbc_driver_class"
+                        class="col-span-3"
+                        :placeholder="t('connection.jdbcDriverClassPlaceholder')"
+                      />
                     </div>
-                  </div>
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{
-                      form.redis_connection_mode === "sentinel"
-                        ? t("connection.redisFirstSentinel")
-                        : form.redis_connection_mode === "cluster"
-                          ? t("connection.redisFirstClusterNode")
-                          : t("connection.host")
-                    }}</Label>
-                    <Input v-model="form.host" class="col-span-2" />
-                    <Input v-model.number="form.port" type="number" class="col-span-1" />
-                  </div>
-                  <template v-if="form.redis_connection_mode === 'sentinel'">
                     <div class="grid grid-cols-4 items-start gap-4">
-                      <Label class="text-right mt-2">{{ t("connection.redisSentinelNodes") }}</Label>
-                      <textarea
-                        v-model="form.redis_sentinel_nodes"
-                        class="col-span-3 flex min-h-[76px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        placeholder="sentinel-1:26379&#10;sentinel-2:26379"
-                        spellcheck="false"
-                      />
+                      <Label class="text-right mt-2">{{ t("connection.jdbcDriverPaths") }}</Label>
+                      <div class="col-span-3 space-y-2">
+                        <Select
+                          v-if="jdbcDrivers.length > 0"
+                          :model-value="selectedJdbcDriverPath"
+                          @update:model-value="onJdbcDriverSelect"
+                        >
+                          <SelectTrigger>
+                            <SelectValue :placeholder="t('connection.jdbcDriverSelectPlaceholder')" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem v-for="driver in jdbcDrivers" :key="driver.path" :value="driver.path">
+                              {{ driver.name }}
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <div class="flex items-start gap-1">
+                          <textarea
+                            v-model="jdbcDriverPathsInput"
+                            class="flex min-h-12 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            :placeholder="t('connection.jdbcDriverPathsPlaceholder')"
+                          />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon-lg"
+                                class="shrink-0"
+                                @click="browseJdbcDriverPaths"
+                              >
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.jdbcDriverBrowse") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </div>
                     </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right">{{ t("connection.redisSentinelMaster") }}</Label>
-                      <Input v-model="form.redis_sentinel_master" class="col-span-3" placeholder="mymaster" />
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right">{{ t("connection.redisSentinelUser") }}</Label>
-                      <Input v-model="form.redis_sentinel_username" class="col-span-3" />
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right">{{ t("connection.redisSentinelPassword") }}</Label>
-                      <Input v-model="form.redis_sentinel_password" type="password" class="col-span-3" />
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">{{ t("connection.redisSentinelTls") }}</Label>
-                      <label class="col-span-3 inline-flex items-center gap-2">
-                        <input type="checkbox" v-model="form.redis_sentinel_tls" class="mr-0" />
-                        <span class="text-xs text-muted-foreground">{{ t("connection.redisSentinelTlsHint") }}</span>
-                      </label>
-                    </div>
-                  </template>
-                  <template v-else-if="form.redis_connection_mode === 'cluster'">
                     <div class="grid grid-cols-4 items-start gap-4">
-                      <Label class="text-right mt-2">{{ t("connection.redisClusterNodes") }}</Label>
-                      <textarea
-                        v-model="form.redis_cluster_nodes"
-                        class="col-span-3 flex min-h-[76px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        placeholder="redis-1:6379&#10;redis-2:6379"
-                        spellcheck="false"
+                      <span />
+                      <div class="col-span-3 space-y-2">
+                        <p class="text-xs text-muted-foreground">
+                          {{ t("connection.jdbcPluginHint") }}
+                        </p>
+                        <div class="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            @click="openExternalUrl('https://dbxio.com')"
+                          >
+                            <ExternalLink class="h-3.5 w-3.5" />
+                            {{ t("connection.jdbcDocs") }}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+
+                  <!-- Local database files: file path only -->
+                  <template v-else-if="usesLocalFilePathInput">
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right">{{ t("connection.filePath") }}</Label>
+                      <div class="col-span-3 space-y-1">
+                        <div class="flex items-center gap-1">
+                          <Input v-model="form.host" class="flex-1" :placeholder="filePathPlaceholder" />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button variant="outline" size="icon-lg" class="shrink-0" @click="browseDbFilePath">
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.sshKeyPathBrowse") }}</TooltipContent>
+                          </Tooltip>
+                          <Tooltip v-if="isDesktop && form.db_type === 'duckdb'">
+                            <TooltipTrigger as-child>
+                              <Button variant="outline" size="icon-lg" class="shrink-0" @click="createDuckDbFilePath">
+                                <FilePlus2 class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.createDuckDbFile") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <p v-if="supportsMemoryDatabasePath" class="text-xs text-muted-foreground">
+                          {{ t("connection.memoryDatabasePathHint") }}
+                        </p>
+                      </div>
+                    </div>
+                    <div v-if="form.db_type === 'sqlite'" class="grid grid-cols-4 items-start gap-4">
+                      <Label class="text-right mt-2">{{ t("connection.sqliteExtensions") }}</Label>
+                      <div class="col-span-3 space-y-1">
+                        <div class="flex items-start gap-1">
+                          <textarea
+                            v-model="sqliteExtensionPaths"
+                            class="flex min-h-[76px] flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            :placeholder="t('connection.sqliteExtensionsPlaceholder')"
+                            spellcheck="false"
+                          />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="outline"
+                                size="icon-lg"
+                                class="shrink-0"
+                                @click="browseSqliteExtensionPath"
+                              >
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.sqliteExtensionBrowse") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <p class="text-xs text-muted-foreground">
+                          {{ t("connection.sqliteExtensionsHint") }}
+                        </p>
+                      </div>
+                    </div>
+                    <template v-if="form.db_type === 'h2'">
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right">{{ t("connection.user") }}</Label>
+                        <Input v-model="form.username" class="col-span-3" placeholder="sa" />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right">{{ t("connection.password") }}</Label>
+                        <Input v-model="form.password" type="password" class="col-span-3" />
+                      </div>
+                    </template>
+                  </template>
+
+                  <!-- Redis: host, port, user, password, ssl -->
+                  <template v-else-if="form.db_type === 'redis'">
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right text-xs">{{ t("connection.mode") }}</Label>
+                      <div class="col-span-3 flex gap-2">
+                        <Button
+                          size="sm"
+                          :variant="form.redis_connection_mode === 'standalone' ? 'default' : 'outline'"
+                          @click="form.redis_connection_mode = 'standalone'"
+                        >
+                          {{ t("connection.redisStandaloneMode") }}
+                        </Button>
+                        <Button
+                          size="sm"
+                          :variant="form.redis_connection_mode === 'sentinel' ? 'default' : 'outline'"
+                          @click="form.redis_connection_mode = 'sentinel'"
+                        >
+                          {{ t("connection.redisSentinelMode") }}
+                        </Button>
+                        <Button
+                          size="sm"
+                          :variant="form.redis_connection_mode === 'cluster' ? 'default' : 'outline'"
+                          @click="form.redis_connection_mode = 'cluster'"
+                        >
+                          {{ t("connection.redisClusterMode") }}
+                        </Button>
+                      </div>
+                    </div>
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right">{{
+                        form.redis_connection_mode === "sentinel"
+                          ? t("connection.redisFirstSentinel")
+                          : form.redis_connection_mode === "cluster"
+                            ? t("connection.redisFirstClusterNode")
+                            : t("connection.host")
+                      }}</Label>
+                      <Input v-model="form.host" class="col-span-2" />
+                      <Input v-model.number="form.port" type="number" class="col-span-1" />
+                    </div>
+                    <template v-if="form.redis_connection_mode === 'sentinel'">
+                      <div class="grid grid-cols-4 items-start gap-4">
+                        <Label class="text-right mt-2">{{ t("connection.redisSentinelNodes") }}</Label>
+                        <textarea
+                          v-model="form.redis_sentinel_nodes"
+                          class="col-span-3 flex min-h-[76px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          placeholder="sentinel-1:26379&#10;sentinel-2:26379"
+                          spellcheck="false"
+                        />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right">{{ t("connection.redisSentinelMaster") }}</Label>
+                        <Input v-model="form.redis_sentinel_master" class="col-span-3" placeholder="mymaster" />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right">{{ t("connection.redisSentinelUser") }}</Label>
+                        <Input v-model="form.redis_sentinel_username" class="col-span-3" />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right">{{ t("connection.redisSentinelPassword") }}</Label>
+                        <Input v-model="form.redis_sentinel_password" type="password" class="col-span-3" />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right text-xs">{{ t("connection.redisSentinelTls") }}</Label>
+                        <label class="col-span-3 inline-flex items-center gap-2">
+                          <input type="checkbox" v-model="form.redis_sentinel_tls" class="mr-0" />
+                          <span class="text-xs text-muted-foreground">{{ t("connection.redisSentinelTlsHint") }}</span>
+                        </label>
+                      </div>
+                    </template>
+                    <template v-else-if="form.redis_connection_mode === 'cluster'">
+                      <div class="grid grid-cols-4 items-start gap-4">
+                        <Label class="text-right mt-2">{{ t("connection.redisClusterNodes") }}</Label>
+                        <textarea
+                          v-model="form.redis_cluster_nodes"
+                          class="col-span-3 flex min-h-[76px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          placeholder="redis-1:6379&#10;redis-2:6379"
+                          spellcheck="false"
+                        />
+                      </div>
+                    </template>
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right">{{ t("connection.user") }}</Label>
+                      <Input v-model="form.username" class="col-span-3" placeholder="default" />
+                    </div>
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right">{{ t("connection.password") }}</Label>
+                      <Input
+                        v-model="form.password"
+                        type="password"
+                        class="col-span-3"
+                        :placeholder="t('connection.databasePlaceholder')"
                       />
                     </div>
                   </template>
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.user") }}</Label>
-                    <Input v-model="form.username" class="col-span-3" placeholder="default" />
-                  </div>
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.password") }}</Label>
-                    <Input
-                      v-model="form.password"
-                      type="password"
-                      class="col-span-3"
-                      :placeholder="t('connection.databasePlaceholder')"
-                    />
-                  </div>
-                </template>
 
-                <!-- etcd: endpoints, user, password, TLS -->
-                <template v-else-if="form.db_type === 'etcd'">
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.host") }}</Label>
-                    <Input v-model="form.host" class="col-span-2" />
-                    <Input v-model.number="form.port" type="number" class="col-span-1" />
-                  </div>
-                  <div class="grid grid-cols-4 items-start gap-4">
-                    <Label class="text-right mt-2">{{ t("connection.etcdEndpoints") }}</Label>
-                    <div class="col-span-3 space-y-1">
-                      <textarea
-                        v-model="etcdEndpointsLines"
-                        class="flex min-h-[76px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        placeholder="http://127.0.0.1:2379&#10;https://etcd-2:2379"
-                        spellcheck="false"
-                      />
-                      <p class="text-xs text-muted-foreground">
-                        {{ t("connection.etcdEndpointsHint") }}
-                      </p>
-                    </div>
-                  </div>
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.user") }}</Label>
-                    <Input v-model="form.username" class="col-span-3" />
-                  </div>
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.password") }}</Label>
-                    <Input v-model="form.password" type="password" class="col-span-3" />
-                  </div>
-                </template>
-
-                <!-- MongoDB: URL or form -->
-                <template v-else-if="form.db_type === 'mongodb'">
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right text-xs">{{ t("connection.mode") }}</Label>
-                    <div class="col-span-3 flex gap-2">
-                      <Button size="sm" :variant="mongoUseUrl ? 'outline' : 'default'" @click="mongoUseUrl = false">{{
-                        t("connection.modeForm")
-                      }}</Button>
-                      <Button size="sm" :variant="mongoUseUrl ? 'default' : 'outline'" @click="mongoUseUrl = true"
-                        >URL</Button
-                      >
-                    </div>
-                  </div>
-                  <template v-if="mongoUseUrl">
-                    <div class="grid grid-cols-4 items-start gap-4">
-                      <Label class="text-right mt-2">URL</Label>
-                      <textarea
-                        v-model="form.connection_string"
-                        class="col-span-3 flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        placeholder="mongodb+srv://user:pass@cluster.mongodb.net/mydb"
-                      />
-                    </div>
-                  </template>
-                  <template v-else>
+                  <!-- etcd: endpoints, user, password, TLS -->
+                  <template v-else-if="form.db_type === 'etcd'">
                     <div class="grid grid-cols-4 items-center gap-4">
                       <Label class="text-right">{{ t("connection.host") }}</Label>
                       <Input v-model="form.host" class="col-span-2" />
-                      <Input v-model.number="form.port" type="number" class="col-span-1" :disabled="form.ssl" />
+                      <Input v-model.number="form.port" type="number" class="col-span-1" />
                     </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <span />
-                      <label class="col-span-3 flex items-center gap-2 text-sm">
-                        <input type="checkbox" v-model="form.ssl" class="mr-0" />
-                        <span>SRV (MongoDB Atlas)</span>
-                      </label>
+                    <div class="grid grid-cols-4 items-start gap-4">
+                      <Label class="text-right mt-2">{{ t("connection.etcdEndpoints") }}</Label>
+                      <div class="col-span-3 space-y-1">
+                        <textarea
+                          v-model="etcdEndpointsLines"
+                          class="flex min-h-[76px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          placeholder="http://127.0.0.1:2379&#10;https://etcd-2:2379"
+                          spellcheck="false"
+                        />
+                        <p class="text-xs text-muted-foreground">
+                          {{ t("connection.etcdEndpointsHint") }}
+                        </p>
+                      </div>
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
                       <Label class="text-right">{{ t("connection.user") }}</Label>
@@ -2560,843 +2551,902 @@ function openExternalUrl(url: string) {
                       <Label class="text-right">{{ t("connection.password") }}</Label>
                       <Input v-model="form.password" type="password" class="col-span-3" />
                     </div>
+                  </template>
+
+                  <!-- MongoDB: URL or form -->
+                  <template v-else-if="form.db_type === 'mongodb'">
                     <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right">{{ t("connection.defaultDatabase") }}</Label>
-                      <Input
-                        v-model="form.database"
-                        class="col-span-3"
-                        :placeholder="t('connection.databasePlaceholder')"
-                      />
+                      <Label class="text-right text-xs">{{ t("connection.mode") }}</Label>
+                      <div class="col-span-3 flex gap-2">
+                        <Button size="sm" :variant="mongoUseUrl ? 'outline' : 'default'" @click="mongoUseUrl = false">{{
+                          t("connection.modeForm")
+                        }}</Button>
+                        <Button size="sm" :variant="mongoUseUrl ? 'default' : 'outline'" @click="mongoUseUrl = true"
+                          >URL</Button
+                        >
+                      </div>
                     </div>
+                    <template v-if="mongoUseUrl">
+                      <div class="grid grid-cols-4 items-start gap-4">
+                        <Label class="text-right mt-2">URL</Label>
+                        <textarea
+                          v-model="form.connection_string"
+                          class="col-span-3 flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          placeholder="mongodb+srv://user:pass@cluster.mongodb.net/mydb"
+                        />
+                      </div>
+                    </template>
+                    <template v-else>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right">{{ t("connection.host") }}</Label>
+                        <Input v-model="form.host" class="col-span-2" />
+                        <Input v-model.number="form.port" type="number" class="col-span-1" :disabled="form.ssl" />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <span />
+                        <label class="col-span-3 flex items-center gap-2 text-sm">
+                          <input type="checkbox" v-model="form.ssl" class="mr-0" />
+                          <span>SRV (MongoDB Atlas)</span>
+                        </label>
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right">{{ t("connection.user") }}</Label>
+                        <Input v-model="form.username" class="col-span-3" />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right">{{ t("connection.password") }}</Label>
+                        <Input v-model="form.password" type="password" class="col-span-3" />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right">{{ t("connection.defaultDatabase") }}</Label>
+                        <Input
+                          v-model="form.database"
+                          class="col-span-3"
+                          :placeholder="t('connection.databasePlaceholder')"
+                        />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right">{{ t("connection.authDatabase") }}</Label>
+                        <Input
+                          v-model="mongoAuthDatabase"
+                          class="col-span-3"
+                          :placeholder="t('connection.authDatabasePlaceholder')"
+                        />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right">{{ t("connection.authMechanism") }}</Label>
+                        <Select v-model="mongoAuthMechanism">
+                          <SelectTrigger class="col-span-3">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="default">{{ t("connection.authMechanismDefault") }}</SelectItem>
+                            <SelectItem value="SCRAM-SHA-1">SCRAM-SHA-1</SelectItem>
+                            <SelectItem value="SCRAM-SHA-256">SCRAM-SHA-256</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right">{{ t("connection.urlParams") }}</Label>
+                        <Input
+                          v-model="form.url_params"
+                          class="col-span-3"
+                          placeholder="authSource=admin&authMechanism=SCRAM-SHA-1"
+                        />
+                      </div>
+                      <div class="grid grid-cols-4 items-start gap-4">
+                        <span />
+                        <p class="col-span-3 text-xs text-muted-foreground">
+                          {{ t("connection.mongoLegacyHint") }}
+                        </p>
+                      </div>
+                    </template>
+                  </template>
+
+                  <!-- MySQL / PostgreSQL: host, port, user, password, database -->
+                  <template v-else>
                     <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right">{{ t("connection.authDatabase") }}</Label>
-                      <Input
-                        v-model="mongoAuthDatabase"
-                        class="col-span-3"
-                        :placeholder="t('connection.authDatabasePlaceholder')"
-                      />
+                      <Label class="text-right">{{ t("connection.host") }}</Label>
+                      <Input v-model="form.host" class="col-span-2" />
+                      <Input v-model.number="form.port" type="number" class="col-span-1" />
                     </div>
+
                     <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right">{{ t("connection.authMechanism") }}</Label>
-                      <Select v-model="mongoAuthMechanism">
-                        <SelectTrigger class="col-span-3">
+                      <Label class="text-right">{{ t("connection.user") }}</Label>
+                      <Input v-model="form.username" class="col-span-3" />
+                    </div>
+
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right">{{ t("connection.password") }}</Label>
+                      <Input v-model="form.password" type="password" class="col-span-3" />
+                    </div>
+
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right">{{ databaseLabel }}</Label>
+                      <Input v-model="form.database" class="col-span-3" :placeholder="databasePlaceholder" />
+                    </div>
+
+                    <div v-if="form.db_type === 'oracle'" class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right text-xs">{{ t("connection.mode") }}</Label>
+                      <div
+                        class="col-span-3 grid h-8 grid-cols-2 overflow-hidden rounded-md border border-input bg-muted/30 p-0.5"
+                      >
+                        <button
+                          type="button"
+                          class="h-7 rounded-sm px-3 text-sm transition-colors"
+                          :class="
+                            form.oracle_connection_type !== 'sid'
+                              ? 'bg-background text-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
+                          "
+                          :aria-pressed="form.oracle_connection_type !== 'sid'"
+                          @click="form.oracle_connection_type = 'service_name'"
+                        >
+                          {{ t("connection.serviceNameOnly") }}
+                        </button>
+                        <button
+                          type="button"
+                          class="h-7 rounded-sm px-3 text-sm transition-colors"
+                          :class="
+                            form.oracle_connection_type === 'sid'
+                              ? 'bg-background text-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
+                          "
+                          :aria-pressed="form.oracle_connection_type === 'sid'"
+                          @click="form.oracle_connection_type = 'sid'"
+                        >
+                          SID
+                        </button>
+                      </div>
+                    </div>
+
+                    <div v-if="shouldShowAgentDriverInstallHint" class="grid grid-cols-4 items-center gap-4">
+                      <span />
+                      <p class="col-span-3 text-xs text-muted-foreground">
+                        {{ t("connection.driverInstallHintPrefix")
+                        }}<a
+                          class="underline cursor-pointer text-primary hover:text-primary/80"
+                          @click="emit('openDriverStore')"
+                          >{{ t("toolbar.driverManager") }}</a
+                        >{{ t("connection.driverInstallHintSuffix") }}
+                      </p>
+                    </div>
+
+                    <div v-if="form.db_type === 'oracle'" class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right text-xs">{{ t("connection.version") }}</Label>
+                      <Select
+                        :model-value="
+                          selectedType === 'oracle-legacy' || selectedType === 'oracle-10g' ? selectedType : 'oracle'
+                        "
+                        @update:model-value="(val) => applyProfile(String(val), true)"
+                      >
+                        <SelectTrigger class="col-span-3 h-8 text-sm">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="default">{{ t("connection.authMechanismDefault") }}</SelectItem>
-                          <SelectItem value="SCRAM-SHA-1">SCRAM-SHA-1</SelectItem>
-                          <SelectItem value="SCRAM-SHA-256">SCRAM-SHA-256</SelectItem>
+                          <SelectItem value="oracle">Oracle 19c+</SelectItem>
+                          <SelectItem value="oracle-legacy">Oracle 11g-19c</SelectItem>
+                          <SelectItem value="oracle-10g">Oracle 10g</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
+
+                    <div v-if="form.db_type === 'oracle'" class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right text-xs">SYSDBA</Label>
+                      <label class="col-span-3 flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" v-model="form.sysdba" class="mr-0" :disabled="isOracleSysUser(form)" />
+                        <span class="text-xs text-muted-foreground">as SYSDBA</span>
+                      </label>
+                    </div>
+
                     <div class="grid grid-cols-4 items-center gap-4">
                       <Label class="text-right">{{ t("connection.urlParams") }}</Label>
                       <Input
                         v-model="form.url_params"
                         class="col-span-3"
-                        placeholder="authSource=admin&authMechanism=SCRAM-SHA-1"
+                        :placeholder="
+                          form.db_type === 'mysql'
+                            ? 'charset=utf8mb4'
+                            : form.db_type === 'saphana'
+                              ? 'databaseName=TENANT_DB'
+                              : form.db_type === 'clickhouse'
+                                ? 'secure=true'
+                                : form.db_type === 'bigquery'
+                                  ? 'OAuthType=0;OAuthServiceAcctEmail=svc@project.iam.gserviceaccount.com;OAuthPvtKeyPath=/path/key.json'
+                                  : form.db_type === 'informix'
+                                    ? 'INFORMIXSERVER=informix;CLIENT_LOCALE=en_US.utf8;DB_LOCALE=en_US.utf8'
+                                    : 'sslmode=disable'
+                        "
                       />
                     </div>
-                    <div class="grid grid-cols-4 items-start gap-4">
-                      <span />
-                      <p class="col-span-3 text-xs text-muted-foreground">
-                        {{ t("connection.mongoLegacyHint") }}
-                      </p>
-                    </div>
                   </template>
-                </template>
+                </div>
+              </TabsContent>
 
-                <!-- MySQL / PostgreSQL: host, port, user, password, database -->
-                <template v-else>
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.host") }}</Label>
-                    <Input v-model="form.host" class="col-span-2" />
-                    <Input v-model.number="form.port" type="number" class="col-span-1" />
-                  </div>
-
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.user") }}</Label>
-                    <Input v-model="form.username" class="col-span-3" />
-                  </div>
-
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.password") }}</Label>
-                    <Input v-model="form.password" type="password" class="col-span-3" />
-                  </div>
-
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ databaseLabel }}</Label>
-                    <Input v-model="form.database" class="col-span-3" :placeholder="databasePlaceholder" />
-                  </div>
-
-                  <div v-if="form.db_type === 'oracle'" class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right text-xs">{{ t("connection.mode") }}</Label>
-                    <div
-                      class="col-span-3 grid h-8 grid-cols-2 overflow-hidden rounded-md border border-input bg-muted/30 p-0.5"
-                    >
-                      <button
-                        type="button"
-                        class="h-7 rounded-sm px-3 text-sm transition-colors"
-                        :class="
-                          form.oracle_connection_type !== 'sid'
-                            ? 'bg-background text-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground'
-                        "
-                        :aria-pressed="form.oracle_connection_type !== 'sid'"
-                        @click="form.oracle_connection_type = 'service_name'"
-                      >
-                        {{ t("connection.serviceNameOnly") }}
-                      </button>
-                      <button
-                        type="button"
-                        class="h-7 rounded-sm px-3 text-sm transition-colors"
-                        :class="
-                          form.oracle_connection_type === 'sid'
-                            ? 'bg-background text-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground'
-                        "
-                        :aria-pressed="form.oracle_connection_type === 'sid'"
-                        @click="form.oracle_connection_type = 'sid'"
-                      >
-                        SID
-                      </button>
-                    </div>
-                  </div>
-
-                  <div v-if="shouldShowAgentDriverInstallHint" class="grid grid-cols-4 items-center gap-4">
-                    <span />
-                    <p class="col-span-3 text-xs text-muted-foreground">
-                      {{ t("connection.driverInstallHintPrefix")
-                      }}<a
-                        class="underline cursor-pointer text-primary hover:text-primary/80"
-                        @click="emit('openDriverStore')"
-                        >{{ t("toolbar.driverManager") }}</a
-                      >{{ t("connection.driverInstallHintSuffix") }}
-                    </p>
-                  </div>
-
-                  <div v-if="form.db_type === 'oracle'" class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right text-xs">{{ t("connection.version") }}</Label>
-                    <Select
-                      :model-value="
-                        selectedType === 'oracle-legacy' || selectedType === 'oracle-10g' ? selectedType : 'oracle'
-                      "
-                      @update:model-value="(val) => applyProfile(String(val), true)"
-                    >
-                      <SelectTrigger class="col-span-3 h-8 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="oracle">Oracle 19c+</SelectItem>
-                        <SelectItem value="oracle-legacy">Oracle 11g-19c</SelectItem>
-                        <SelectItem value="oracle-10g">Oracle 10g</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div v-if="form.db_type === 'oracle'" class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right text-xs">SYSDBA</Label>
+              <TabsContent v-if="supportsTlsToggle" value="tls" class="m-0">
+                <div class="grid gap-4 py-4 pr-2 max-h-[65vh] overflow-y-auto">
+                  <div
+                    v-if="!supportsPostgresTlsOptions && !supportsMysqlTlsOptions"
+                    class="grid grid-cols-4 items-center gap-4"
+                  >
+                    <Label class="text-right text-xs">SSL/TLS</Label>
                     <label class="col-span-3 flex items-center gap-2 cursor-pointer">
-                      <input type="checkbox" v-model="form.sysdba" class="mr-0" :disabled="isOracleSysUser(form)" />
-                      <span class="text-xs text-muted-foreground">as SYSDBA</span>
+                      <input type="checkbox" v-model="form.ssl" class="mr-0" />
+                      <span class="text-xs text-muted-foreground">{{ t("connection.sslEnable") }}</span>
                     </label>
                   </div>
 
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right">{{ t("connection.urlParams") }}</Label>
-                    <Input
-                      v-model="form.url_params"
-                      class="col-span-3"
-                      :placeholder="
-                        form.db_type === 'mysql'
-                          ? 'charset=utf8mb4'
-                          : form.db_type === 'saphana'
-                            ? 'databaseName=TENANT_DB'
-                            : form.db_type === 'clickhouse'
-                              ? 'secure=true'
-                              : form.db_type === 'bigquery'
-                                ? 'OAuthType=0;OAuthServiceAcctEmail=svc@project.iam.gserviceaccount.com;OAuthPvtKeyPath=/path/key.json'
-                                : form.db_type === 'informix'
-                                  ? 'INFORMIXSERVER=informix;CLIENT_LOCALE=en_US.utf8;DB_LOCALE=en_US.utf8'
-                                  : 'sslmode=disable'
-                      "
-                    />
-                  </div>
-                </template>
-              </div>
-            </TabsContent>
-
-            <TabsContent v-if="supportsTlsToggle" value="tls" class="m-0">
-              <div class="grid gap-4 py-4 pr-2 max-h-[65vh] overflow-y-auto">
-                <div
-                  v-if="!supportsPostgresTlsOptions && !supportsMysqlTlsOptions"
-                  class="grid grid-cols-4 items-center gap-4"
-                >
-                  <Label class="text-right text-xs">SSL/TLS</Label>
-                  <label class="col-span-3 flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" v-model="form.ssl" class="mr-0" />
-                    <span class="text-xs text-muted-foreground">{{ t("connection.sslEnable") }}</span>
-                  </label>
-                </div>
-
-                <div v-if="form.db_type === 'redis'" class="grid grid-cols-4 items-start gap-4">
-                  <Label class="text-right text-xs">{{ t("connection.redisTlsInsecure") }}</Label>
-                  <label class="col-span-3 flex items-start gap-2 cursor-pointer">
-                    <input type="checkbox" v-model="redisTlsInsecure" class="mr-0 mt-0.5" :disabled="!form.ssl" />
-                    <span class="text-xs leading-5 text-muted-foreground">
-                      {{ t("connection.redisTlsInsecureHint") }}
-                    </span>
-                  </label>
-                </div>
-
-                <template v-if="form.db_type === 'etcd'">
-                  <div class="grid grid-cols-4 items-start gap-4">
-                    <Label class="pt-2 text-right text-xs">
-                      <span class="inline-flex items-center justify-end gap-1">
-                        <ShieldCheck class="h-3.5 w-3.5" />
-                        {{ t("connection.caCertPath") }}
+                  <div v-if="form.db_type === 'redis'" class="grid grid-cols-4 items-start gap-4">
+                    <Label class="text-right text-xs">{{ t("connection.redisTlsInsecure") }}</Label>
+                    <label class="col-span-3 flex items-start gap-2 cursor-pointer">
+                      <input type="checkbox" v-model="redisTlsInsecure" class="mr-0 mt-0.5" :disabled="!form.ssl" />
+                      <span class="text-xs leading-5 text-muted-foreground">
+                        {{ t("connection.redisTlsInsecureHint") }}
                       </span>
-                    </Label>
-                    <div class="col-span-3 space-y-2">
-                      <div class="flex items-center gap-1">
-                        <Input
-                          v-model="form.ca_cert_path"
-                          class="flex-1"
-                          :placeholder="t('connection.etcdCaCertPlaceholder')"
-                        />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button variant="outline" size="icon-lg" class="shrink-0" @click="browseEtcdTlsFile('ca')">
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.etcdCaCertBrowse") }}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </div>
+                    </label>
                   </div>
 
-                  <div class="grid grid-cols-4 items-start gap-4">
-                    <Label class="pt-2 text-right text-xs">
-                      <span class="inline-flex items-center justify-end gap-1">
-                        <KeyRound class="h-3.5 w-3.5" />
-                        {{ t("connection.etcdClientAuth") }}
-                      </span>
-                    </Label>
-                    <div class="col-span-3 grid gap-2">
-                      <div class="flex items-center gap-1">
-                        <Input
-                          v-model="form.client_cert_path"
-                          class="flex-1"
-                          :placeholder="t('connection.etcdClientCertPlaceholder')"
-                        />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button
-                              variant="outline"
-                              size="icon-lg"
-                              class="shrink-0"
-                              @click="browseEtcdTlsFile('cert')"
-                            >
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.etcdClientCertBrowse") }}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <div class="flex items-center gap-1">
-                        <Input
-                          v-model="form.client_key_path"
-                          class="flex-1"
-                          :placeholder="t('connection.etcdClientKeyPlaceholder')"
-                        />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button variant="outline" size="icon-lg" class="shrink-0" @click="browseEtcdTlsFile('key')">
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.etcdClientKeyBrowse") }}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <p class="text-[11px] leading-4 text-muted-foreground">
-                        {{ t("connection.etcdClientCertHint") }}
-                      </p>
-                    </div>
-                  </div>
-                </template>
-
-                <template v-if="supportsMysqlTlsOptions">
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right text-xs">{{ t("connection.mysqlTlsMode") }}</Label>
-                    <Select v-model="mysqlTlsMode">
-                      <SelectTrigger class="col-span-3 h-9">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="preferred">{{ t("connection.mysqlTlsModePreferred") }}</SelectItem>
-                        <SelectItem value="disabled">{{ t("connection.mysqlTlsModeDisabled") }}</SelectItem>
-                        <SelectItem value="required">{{ t("connection.mysqlTlsModeRequired") }}</SelectItem>
-                        <SelectItem value="verify_ca">{{ t("connection.mysqlTlsModeVerifyCa") }}</SelectItem>
-                        <SelectItem value="verify_identity">{{
-                          t("connection.mysqlTlsModeVerifyIdentity")
-                        }}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div class="grid grid-cols-4 items-start gap-4">
-                    <Label class="pt-2 text-right text-xs">
-                      <span class="inline-flex items-center justify-end gap-1">
-                        <ShieldCheck class="h-3.5 w-3.5" />
-                        {{ t("connection.caCertPath") }}
-                      </span>
-                    </Label>
-                    <div class="col-span-3 space-y-2">
-                      <div class="flex items-center gap-1">
-                        <Input
-                          v-model="form.ca_cert_path"
-                          class="flex-1"
-                          :placeholder="t('connection.caCertPathPlaceholder')"
-                          :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
-                        />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button
-                              variant="outline"
-                              size="icon-lg"
-                              class="shrink-0"
-                              :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
-                              @click="browseCaCertPath"
-                            >
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.caCertPathBrowse") }}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <p class="text-[11px] leading-4 text-muted-foreground">
-                        {{ t("connection.mysqlCaCertHint") }}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div class="grid grid-cols-4 items-start gap-4">
-                    <Label class="pt-2 text-right text-xs">
-                      <span class="inline-flex items-center justify-end gap-1">
-                        <KeyRound class="h-3.5 w-3.5" />
-                        {{ t("connection.mysqlClientCert") }}
-                      </span>
-                    </Label>
-                    <div class="col-span-3 grid gap-2">
-                      <div class="flex items-center gap-1">
-                        <Input
-                          v-model="mysqlClientCertPath"
-                          class="flex-1"
-                          :placeholder="t('connection.mysqlClientCertPlaceholder')"
-                          :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
-                        />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button
-                              variant="outline"
-                              size="icon-lg"
-                              class="shrink-0"
-                              :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
-                              @click="browseMysqlTlsFile('cert')"
-                            >
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.mysqlClientCertBrowse") }}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <div class="flex items-center gap-1">
-                        <Input
-                          v-model="mysqlClientKeyPath"
-                          class="flex-1"
-                          :placeholder="t('connection.mysqlClientKeyPlaceholder')"
-                          :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
-                        />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button
-                              variant="outline"
-                              size="icon-lg"
-                              class="shrink-0"
-                              :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
-                              @click="browseMysqlTlsFile('key')"
-                            >
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.mysqlClientKeyBrowse") }}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <p class="text-[11px] leading-4 text-muted-foreground">
-                        {{ t("connection.mysqlClientCertHint") }}
-                      </p>
-                    </div>
-                  </div>
-                </template>
-
-                <template v-if="supportsPostgresTlsOptions">
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right text-xs">{{ t("connection.postgresSslMode") }}</Label>
-                    <Select v-model="postgresTlsMode">
-                      <SelectTrigger class="col-span-3 h-9">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="disable">{{ t("connection.postgresSslModeDisable") }}</SelectItem>
-                        <SelectItem value="prefer">{{ t("connection.postgresSslModePrefer") }}</SelectItem>
-                        <SelectItem value="require">{{ t("connection.postgresSslModeRequire") }}</SelectItem>
-                        <SelectItem value="verify-ca">{{ t("connection.postgresSslModeVerifyCa") }}</SelectItem>
-                        <SelectItem value="verify-full">{{ t("connection.postgresSslModeVerifyFull") }}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div class="grid grid-cols-4 items-start gap-4">
-                    <Label class="pt-2 text-right text-xs">
-                      <span class="inline-flex items-center justify-end gap-1">
-                        <ShieldCheck class="h-3.5 w-3.5" />
-                        {{ t("connection.postgresServerCert") }}
-                      </span>
-                    </Label>
-                    <div class="col-span-3 space-y-2">
-                      <div class="flex items-center gap-1">
-                        <Input
-                          v-model="postgresRootCertPath"
-                          class="flex-1"
-                          :placeholder="t('connection.postgresRootCertPlaceholder')"
-                          :disabled="postgresTlsMode === 'disable'"
-                        />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button
-                              variant="outline"
-                              size="icon-lg"
-                              class="shrink-0"
-                              :disabled="postgresTlsMode === 'disable'"
-                              @click="browsePostgresTlsFile('root')"
-                            >
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.postgresRootCertBrowse") }}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <p class="text-[11px] leading-4 text-muted-foreground">
-                        {{ t("connection.postgresRootCertHint") }}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div class="grid grid-cols-4 items-start gap-4">
-                    <Label class="pt-2 text-right text-xs">
-                      <span class="inline-flex items-center justify-end gap-1">
-                        <KeyRound class="h-3.5 w-3.5" />
-                        {{ t("connection.postgresClientCert") }}
-                      </span>
-                    </Label>
-                    <div class="col-span-3 grid gap-2">
-                      <div class="flex items-center gap-1">
-                        <Input
-                          v-model="postgresClientCertPath"
-                          class="flex-1"
-                          :placeholder="t('connection.postgresClientCertPlaceholder')"
-                          :disabled="postgresTlsMode === 'disable'"
-                        />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button
-                              variant="outline"
-                              size="icon-lg"
-                              class="shrink-0"
-                              :disabled="postgresTlsMode === 'disable'"
-                              @click="browsePostgresTlsFile('cert')"
-                            >
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.postgresClientCertBrowse") }}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <div class="flex items-center gap-1">
-                        <Input
-                          v-model="postgresClientKeyPath"
-                          class="flex-1"
-                          :placeholder="t('connection.postgresClientKeyPlaceholder')"
-                          :disabled="postgresTlsMode === 'disable'"
-                        />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button
-                              variant="outline"
-                              size="icon-lg"
-                              class="shrink-0"
-                              :disabled="postgresTlsMode === 'disable'"
-                              @click="browsePostgresTlsFile('key')"
-                            >
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.postgresClientKeyBrowse") }}</TooltipContent>
-                        </Tooltip>
-                      </div>
-                      <p class="text-[11px] leading-4 text-muted-foreground">
-                        {{ t("connection.postgresClientCertHint") }}
-                      </p>
-                    </div>
-                  </div>
-                </template>
-
-                <div v-if="supportsCaCertificatePath" class="grid grid-cols-4 items-center gap-4">
-                  <Label class="text-right text-xs">{{ t("connection.caCertPath") }}</Label>
-                  <div class="col-span-3 flex items-center gap-1">
-                    <Input
-                      v-model="form.ca_cert_path"
-                      class="flex-1"
-                      :placeholder="t('connection.caCertPathPlaceholder')"
-                      :disabled="!form.ssl"
-                    />
-                    <Tooltip v-if="isDesktop">
-                      <TooltipTrigger as-child>
-                        <Button
-                          variant="outline"
-                          size="icon-lg"
-                          class="shrink-0"
-                          :disabled="!form.ssl"
-                          @click="browseCaCertPath"
-                        >
-                          <FolderOpen class="h-4 w-4" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>{{ t("connection.caCertPathBrowse") }}</TooltipContent>
-                    </Tooltip>
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="advanced" class="m-0">
-              <div class="grid gap-4 py-4 pr-2 max-h-[65vh] overflow-y-auto">
-                <div class="grid grid-cols-4 items-center gap-4">
-                  <Label class="text-right text-xs">{{ t("connection.connectTimeout") }}</Label>
-                  <Input
-                    v-model.number="form.connect_timeout_secs"
-                    type="number"
-                    min="1"
-                    max="300"
-                    step="1"
-                    class="col-span-3"
-                  />
-                </div>
-                <div class="grid grid-cols-4 items-center gap-4">
-                  <Label class="text-right text-xs">{{ t("connection.queryTimeout") }}</Label>
-                  <Input
-                    v-model.number="form.query_timeout_secs"
-                    type="number"
-                    min="0"
-                    max="300"
-                    step="1"
-                    class="col-span-3"
-                  />
-                </div>
-                <div v-show="form.db_type === 'mongodb'" class="grid grid-cols-4 items-center gap-4">
-                  <Label class="text-right text-xs">{{ t("connection.idleTimeout") }}</Label>
-                  <Input
-                    v-model.number="form.idle_timeout_secs"
-                    type="number"
-                    min="0"
-                    max="600"
-                    step="1"
-                    class="col-span-3"
-                  />
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent v-if="canUseTransportLayers" value="transport" class="m-0">
-              <div class="grid gap-4 py-4 pr-2 max-h-[65vh] overflow-y-auto">
-                <div class="grid grid-cols-4 items-start gap-4">
-                  <Label class="pt-2 text-right text-xs">{{ t("connection.sshHops") }}</Label>
-                  <div class="col-span-3 grid gap-3">
-                    <div class="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
-                      <template v-for="(segment, index) in transportPathSegments" :key="`${segment}-${index}`">
-                        <span class="rounded border bg-muted/40 px-2 py-1">{{ segment }}</span>
-                        <ChevronRight v-if="index < transportPathSegments.length - 1" class="h-3 w-3" />
-                      </template>
-                    </div>
-                    <div class="grid gap-2">
-                      <button
-                        v-for="(hop, index) in transportLayers"
-                        :key="hop.id"
-                        type="button"
-                        draggable="true"
-                        class="flex min-h-10 items-center gap-2 rounded-md border px-2 text-left text-xs transition-colors"
-                        :class="
-                          hop.id === selectedTransportLayer?.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
-                        "
-                        @click="selectedTransportLayerId = hop.id"
-                        @dragstart="draggedTransportLayerId = hop.id"
-                        @dragover.prevent
-                        @drop="dropTransportLayer(hop.id)"
-                      >
-                        <GripVertical class="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <span class="w-5 shrink-0 text-muted-foreground">{{ index + 1 }}</span>
-                        <input v-model="hop.enabled" type="checkbox" class="mr-0" @click.stop />
-                        <span class="min-w-0 flex-1 truncate">
-                          {{
-                            hop.name ||
-                            hop.host ||
-                            (hop.type === "proxy"
-                              ? `Proxy ${index + 1}`
-                              : t("connection.sshHopDefaultName", { index: index + 1 }))
-                          }}
+                  <template v-if="form.db_type === 'etcd'">
+                    <div class="grid grid-cols-4 items-start gap-4">
+                      <Label class="pt-2 text-right text-xs">
+                        <span class="inline-flex items-center justify-end gap-1">
+                          <ShieldCheck class="h-3.5 w-3.5" />
+                          {{ t("connection.caCertPath") }}
                         </span>
-                        <Tooltip>
-                          <TooltipTrigger as-child>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              :disabled="index === 0"
-                              @click.stop="moveTransportLayer(hop.id, -1)"
-                            >
-                              <ArrowUp class="h-3.5 w-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.sshHopMoveUp") }}</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                          <TooltipTrigger as-child>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              :disabled="index === transportLayers.length - 1"
-                              @click.stop="moveTransportLayer(hop.id, 1)"
-                            >
-                              <ArrowDown class="h-3.5 w-3.5" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.sshHopMoveDown") }}</TooltipContent>
-                        </Tooltip>
-                      </button>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <Button type="button" variant="outline" size="sm" @click="addSshTunnel">
-                        <Plus class="mr-1.5 h-3.5 w-3.5" />
-                        {{ t("connection.sshHopAdd") }}
-                      </Button>
-                      <Button type="button" variant="outline" size="sm" @click="addProxyTunnel">
-                        <Plus class="mr-1.5 h-3.5 w-3.5" />
-                        {{ t("connection.proxy") }}
-                      </Button>
-                      <Button
-                        v-if="selectedTransportLayer"
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        @click="duplicateTransportLayer(selectedTransportLayer)"
-                      >
-                        <Copy class="mr-1.5 h-3.5 w-3.5" />
-                        {{ t("connection.sshHopDuplicate") }}
-                      </Button>
-                      <Button
-                        v-if="selectedTransportLayer"
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        @click="removeTransportLayer(selectedTransportLayer.id)"
-                      >
-                        <Trash2 class="mr-1.5 h-3.5 w-3.5" />
-                        {{ t("connection.sshHopDelete") }}
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                <template v-if="selectedTransportLayer">
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right text-xs">{{ t("connection.sshHopName") }}</Label>
-                    <Input
-                      v-model="selectedTransportLayer.name"
-                      class="col-span-3"
-                      :placeholder="t('connection.sshHopNamePlaceholder')"
-                    />
-                  </div>
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right text-xs">Type</Label>
-                    <Select
-                      :model-value="selectedTransportLayer.type"
-                      @update:model-value="(value: any) => changeSelectedTransportLayerType(value)"
-                    >
-                      <SelectTrigger class="col-span-3 h-9">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ssh">SSH</SelectItem>
-                        <SelectItem value="proxy">Proxy</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <template v-if="selectedSshLayer">
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">{{ t("connection.sshHost") }}</Label>
-                      <Input
-                        v-model="selectedSshLayer.host"
-                        class="col-span-2"
-                        placeholder="ssh.example.com"
-                        :disabled="selectedSshLayer.enabled === false"
-                      />
-                      <Input
-                        v-model.number="selectedSshLayer.port"
-                        type="number"
-                        min="1"
-                        max="65535"
-                        class="col-span-1"
-                        :disabled="selectedSshLayer.enabled === false"
-                      />
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">{{ t("connection.sshUser") }}</Label>
-                      <Input
-                        v-model="selectedSshLayer.user"
-                        class="col-span-3"
-                        placeholder="root"
-                        :disabled="selectedSshLayer.enabled === false"
-                      />
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">{{ t("connection.sshPassword") }}</Label>
-                      <Input
-                        v-model="selectedSshLayer.password"
-                        type="password"
-                        class="col-span-3"
-                        :placeholder="t('connection.sshPasswordPlaceholder')"
-                        :disabled="selectedSshLayer.enabled === false"
-                      />
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">{{ t("connection.sshKeyPath") }}</Label>
-                      <div class="col-span-3 flex items-center gap-1">
-                        <Input
-                          v-model="selectedSshLayer.key_path"
-                          class="flex-1"
-                          placeholder="~/.ssh/id_rsa"
-                          :disabled="selectedSshLayer.enabled === false"
-                        />
-                        <Tooltip v-if="isDesktop">
-                          <TooltipTrigger as-child>
-                            <Button
-                              variant="outline"
-                              size="icon-lg"
-                              class="shrink-0"
-                              :disabled="selectedSshLayer.enabled === false"
-                              @click="browseSshKeyPath(selectedSshLayer)"
-                            >
-                              <FolderOpen class="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{{ t("connection.sshKeyPathBrowse") }}</TooltipContent>
-                        </Tooltip>
+                      </Label>
+                      <div class="col-span-3 space-y-2">
+                        <div class="flex items-center gap-1">
+                          <Input
+                            v-model="form.ca_cert_path"
+                            class="flex-1"
+                            :placeholder="t('connection.etcdCaCertPlaceholder')"
+                          />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="outline"
+                                size="icon-lg"
+                                class="shrink-0"
+                                @click="browseEtcdTlsFile('ca')"
+                              >
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.etcdCaCertBrowse") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
                       </div>
                     </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">{{ t("connection.sshKeyPassphrase") }}</Label>
-                      <Input
-                        v-model="selectedSshLayer.key_passphrase"
-                        type="password"
-                        class="col-span-3"
-                        :placeholder="t('connection.sshKeyPassphrasePlaceholder')"
-                        :disabled="selectedSshLayer.enabled === false"
-                      />
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <span />
-                      <label class="col-span-3 flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          v-model="selectedSshLayer.expose_lan"
-                          class="mr-0"
-                          :disabled="selectedSshLayer.enabled === false"
-                        />
-                        <span class="text-xs text-muted-foreground">{{ t("connection.sshExposeLan") }}</span>
-                      </label>
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">{{ t("connection.sshConnectTimeout") }}</Label>
-                      <Input
-                        v-model.number="selectedSshLayer.connect_timeout_secs"
-                        type="number"
-                        min="1"
-                        max="300"
-                        step="1"
-                        class="col-span-3"
-                        :disabled="selectedSshLayer.enabled === false"
-                      />
+
+                    <div class="grid grid-cols-4 items-start gap-4">
+                      <Label class="pt-2 text-right text-xs">
+                        <span class="inline-flex items-center justify-end gap-1">
+                          <KeyRound class="h-3.5 w-3.5" />
+                          {{ t("connection.etcdClientAuth") }}
+                        </span>
+                      </Label>
+                      <div class="col-span-3 grid gap-2">
+                        <div class="flex items-center gap-1">
+                          <Input
+                            v-model="form.client_cert_path"
+                            class="flex-1"
+                            :placeholder="t('connection.etcdClientCertPlaceholder')"
+                          />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="outline"
+                                size="icon-lg"
+                                class="shrink-0"
+                                @click="browseEtcdTlsFile('cert')"
+                              >
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.etcdClientCertBrowse") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <div class="flex items-center gap-1">
+                          <Input
+                            v-model="form.client_key_path"
+                            class="flex-1"
+                            :placeholder="t('connection.etcdClientKeyPlaceholder')"
+                          />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="outline"
+                                size="icon-lg"
+                                class="shrink-0"
+                                @click="browseEtcdTlsFile('key')"
+                              >
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.etcdClientKeyBrowse") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <p class="text-[11px] leading-4 text-muted-foreground">
+                          {{ t("connection.etcdClientCertHint") }}
+                        </p>
+                      </div>
                     </div>
                   </template>
-                  <template v-else-if="selectedProxyLayer">
+
+                  <template v-if="supportsMysqlTlsOptions">
                     <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">{{ t("connection.proxyType") }}</Label>
+                      <Label class="text-right text-xs">{{ t("connection.mysqlTlsMode") }}</Label>
+                      <Select v-model="mysqlTlsMode">
+                        <SelectTrigger class="col-span-3 h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="preferred">{{ t("connection.mysqlTlsModePreferred") }}</SelectItem>
+                          <SelectItem value="disabled">{{ t("connection.mysqlTlsModeDisabled") }}</SelectItem>
+                          <SelectItem value="required">{{ t("connection.mysqlTlsModeRequired") }}</SelectItem>
+                          <SelectItem value="verify_ca">{{ t("connection.mysqlTlsModeVerifyCa") }}</SelectItem>
+                          <SelectItem value="verify_identity">{{
+                            t("connection.mysqlTlsModeVerifyIdentity")
+                          }}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div class="grid grid-cols-4 items-start gap-4">
+                      <Label class="pt-2 text-right text-xs">
+                        <span class="inline-flex items-center justify-end gap-1">
+                          <ShieldCheck class="h-3.5 w-3.5" />
+                          {{ t("connection.caCertPath") }}
+                        </span>
+                      </Label>
+                      <div class="col-span-3 space-y-2">
+                        <div class="flex items-center gap-1">
+                          <Input
+                            v-model="form.ca_cert_path"
+                            class="flex-1"
+                            :placeholder="t('connection.caCertPathPlaceholder')"
+                            :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
+                          />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="outline"
+                                size="icon-lg"
+                                class="shrink-0"
+                                :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
+                                @click="browseCaCertPath"
+                              >
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.caCertPathBrowse") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <p class="text-[11px] leading-4 text-muted-foreground">
+                          {{ t("connection.mysqlCaCertHint") }}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-4 items-start gap-4">
+                      <Label class="pt-2 text-right text-xs">
+                        <span class="inline-flex items-center justify-end gap-1">
+                          <KeyRound class="h-3.5 w-3.5" />
+                          {{ t("connection.mysqlClientCert") }}
+                        </span>
+                      </Label>
+                      <div class="col-span-3 grid gap-2">
+                        <div class="flex items-center gap-1">
+                          <Input
+                            v-model="mysqlClientCertPath"
+                            class="flex-1"
+                            :placeholder="t('connection.mysqlClientCertPlaceholder')"
+                            :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
+                          />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="outline"
+                                size="icon-lg"
+                                class="shrink-0"
+                                :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
+                                @click="browseMysqlTlsFile('cert')"
+                              >
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.mysqlClientCertBrowse") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <div class="flex items-center gap-1">
+                          <Input
+                            v-model="mysqlClientKeyPath"
+                            class="flex-1"
+                            :placeholder="t('connection.mysqlClientKeyPlaceholder')"
+                            :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
+                          />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="outline"
+                                size="icon-lg"
+                                class="shrink-0"
+                                :disabled="mysqlTlsMode === 'preferred' || mysqlTlsMode === 'disabled'"
+                                @click="browseMysqlTlsFile('key')"
+                              >
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.mysqlClientKeyBrowse") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <p class="text-[11px] leading-4 text-muted-foreground">
+                          {{ t("connection.mysqlClientCertHint") }}
+                        </p>
+                      </div>
+                    </div>
+                  </template>
+
+                  <template v-if="supportsPostgresTlsOptions">
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right text-xs">{{ t("connection.postgresSslMode") }}</Label>
+                      <Select v-model="postgresTlsMode">
+                        <SelectTrigger class="col-span-3 h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="disable">{{ t("connection.postgresSslModeDisable") }}</SelectItem>
+                          <SelectItem value="prefer">{{ t("connection.postgresSslModePrefer") }}</SelectItem>
+                          <SelectItem value="require">{{ t("connection.postgresSslModeRequire") }}</SelectItem>
+                          <SelectItem value="verify-ca">{{ t("connection.postgresSslModeVerifyCa") }}</SelectItem>
+                          <SelectItem value="verify-full">{{ t("connection.postgresSslModeVerifyFull") }}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div class="grid grid-cols-4 items-start gap-4">
+                      <Label class="pt-2 text-right text-xs">
+                        <span class="inline-flex items-center justify-end gap-1">
+                          <ShieldCheck class="h-3.5 w-3.5" />
+                          {{ t("connection.postgresServerCert") }}
+                        </span>
+                      </Label>
+                      <div class="col-span-3 space-y-2">
+                        <div class="flex items-center gap-1">
+                          <Input
+                            v-model="postgresRootCertPath"
+                            class="flex-1"
+                            :placeholder="t('connection.postgresRootCertPlaceholder')"
+                            :disabled="postgresTlsMode === 'disable'"
+                          />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="outline"
+                                size="icon-lg"
+                                class="shrink-0"
+                                :disabled="postgresTlsMode === 'disable'"
+                                @click="browsePostgresTlsFile('root')"
+                              >
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.postgresRootCertBrowse") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <p class="text-[11px] leading-4 text-muted-foreground">
+                          {{ t("connection.postgresRootCertHint") }}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div class="grid grid-cols-4 items-start gap-4">
+                      <Label class="pt-2 text-right text-xs">
+                        <span class="inline-flex items-center justify-end gap-1">
+                          <KeyRound class="h-3.5 w-3.5" />
+                          {{ t("connection.postgresClientCert") }}
+                        </span>
+                      </Label>
+                      <div class="col-span-3 grid gap-2">
+                        <div class="flex items-center gap-1">
+                          <Input
+                            v-model="postgresClientCertPath"
+                            class="flex-1"
+                            :placeholder="t('connection.postgresClientCertPlaceholder')"
+                            :disabled="postgresTlsMode === 'disable'"
+                          />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="outline"
+                                size="icon-lg"
+                                class="shrink-0"
+                                :disabled="postgresTlsMode === 'disable'"
+                                @click="browsePostgresTlsFile('cert')"
+                              >
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.postgresClientCertBrowse") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <div class="flex items-center gap-1">
+                          <Input
+                            v-model="postgresClientKeyPath"
+                            class="flex-1"
+                            :placeholder="t('connection.postgresClientKeyPlaceholder')"
+                            :disabled="postgresTlsMode === 'disable'"
+                          />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="outline"
+                                size="icon-lg"
+                                class="shrink-0"
+                                :disabled="postgresTlsMode === 'disable'"
+                                @click="browsePostgresTlsFile('key')"
+                              >
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.postgresClientKeyBrowse") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                        <p class="text-[11px] leading-4 text-muted-foreground">
+                          {{ t("connection.postgresClientCertHint") }}
+                        </p>
+                      </div>
+                    </div>
+                  </template>
+
+                  <div v-if="supportsCaCertificatePath" class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right text-xs">{{ t("connection.caCertPath") }}</Label>
+                    <div class="col-span-3 flex items-center gap-1">
+                      <Input
+                        v-model="form.ca_cert_path"
+                        class="flex-1"
+                        :placeholder="t('connection.caCertPathPlaceholder')"
+                        :disabled="!form.ssl"
+                      />
+                      <Tooltip v-if="isDesktop">
+                        <TooltipTrigger as-child>
+                          <Button
+                            variant="outline"
+                            size="icon-lg"
+                            class="shrink-0"
+                            :disabled="!form.ssl"
+                            @click="browseCaCertPath"
+                          >
+                            <FolderOpen class="h-4 w-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>{{ t("connection.caCertPathBrowse") }}</TooltipContent>
+                      </Tooltip>
+                    </div>
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="advanced" class="m-0">
+                <div class="grid gap-4 py-4 pr-2 max-h-[65vh] overflow-y-auto">
+                  <div class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right text-xs">{{ t("connection.connectTimeout") }}</Label>
+                    <Input
+                      v-model.number="form.connect_timeout_secs"
+                      type="number"
+                      min="1"
+                      max="300"
+                      step="1"
+                      class="col-span-3"
+                    />
+                  </div>
+                  <div class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right text-xs">{{ t("connection.queryTimeout") }}</Label>
+                    <Input
+                      v-model.number="form.query_timeout_secs"
+                      type="number"
+                      min="0"
+                      max="300"
+                      step="1"
+                      class="col-span-3"
+                    />
+                  </div>
+                  <div v-show="form.db_type === 'mongodb'" class="grid grid-cols-4 items-center gap-4">
+                    <Label class="text-right text-xs">{{ t("connection.idleTimeout") }}</Label>
+                    <Input
+                      v-model.number="form.idle_timeout_secs"
+                      type="number"
+                      min="0"
+                      max="600"
+                      step="1"
+                      class="col-span-3"
+                    />
+                  </div>
+                </div>
+              </TabsContent>
+
+              <TabsContent v-if="canUseTransportLayers" value="transport" class="m-0">
+                <div class="grid gap-4 py-4 pr-2 max-h-[65vh] overflow-y-auto">
+                  <div class="grid grid-cols-4 items-start gap-4">
+                    <Label class="pt-2 text-right text-xs">{{ t("connection.sshHops") }}</Label>
+                    <div class="col-span-3 grid gap-3">
+                      <div class="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+                        <template v-for="(segment, index) in transportPathSegments" :key="`${segment}-${index}`">
+                          <span class="rounded border bg-muted/40 px-2 py-1">{{ segment }}</span>
+                          <ChevronRight v-if="index < transportPathSegments.length - 1" class="h-3 w-3" />
+                        </template>
+                      </div>
+                      <div class="grid gap-2">
+                        <button
+                          v-for="(hop, index) in transportLayers"
+                          :key="hop.id"
+                          type="button"
+                          draggable="true"
+                          class="flex min-h-10 items-center gap-2 rounded-md border px-2 text-left text-xs transition-colors"
+                          :class="
+                            hop.id === selectedTransportLayer?.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
+                          "
+                          @click="selectedTransportLayerId = hop.id"
+                          @dragstart="draggedTransportLayerId = hop.id"
+                          @dragover.prevent
+                          @drop="dropTransportLayer(hop.id)"
+                        >
+                          <GripVertical class="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <span class="w-5 shrink-0 text-muted-foreground">{{ index + 1 }}</span>
+                          <input v-model="hop.enabled" type="checkbox" class="mr-0" @click.stop />
+                          <span class="min-w-0 flex-1 truncate">
+                            {{
+                              hop.name ||
+                              hop.host ||
+                              (hop.type === "proxy"
+                                ? `Proxy ${index + 1}`
+                                : t("connection.sshHopDefaultName", { index: index + 1 }))
+                            }}
+                          </span>
+                          <Tooltip>
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                :disabled="index === 0"
+                                @click.stop="moveTransportLayer(hop.id, -1)"
+                              >
+                                <ArrowUp class="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.sshHopMoveUp") }}</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                :disabled="index === transportLayers.length - 1"
+                                @click.stop="moveTransportLayer(hop.id, 1)"
+                              >
+                                <ArrowDown class="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.sshHopMoveDown") }}</TooltipContent>
+                          </Tooltip>
+                        </button>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <Button type="button" variant="outline" size="sm" @click="addSshTunnel">
+                          <Plus class="mr-1.5 h-3.5 w-3.5" />
+                          {{ t("connection.sshHopAdd") }}
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" @click="addProxyTunnel">
+                          <Plus class="mr-1.5 h-3.5 w-3.5" />
+                          {{ t("connection.proxy") }}
+                        </Button>
+                        <Button
+                          v-if="selectedTransportLayer"
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          @click="duplicateTransportLayer(selectedTransportLayer)"
+                        >
+                          <Copy class="mr-1.5 h-3.5 w-3.5" />
+                          {{ t("connection.sshHopDuplicate") }}
+                        </Button>
+                        <Button
+                          v-if="selectedTransportLayer"
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          @click="removeTransportLayer(selectedTransportLayer.id)"
+                        >
+                          <Trash2 class="mr-1.5 h-3.5 w-3.5" />
+                          {{ t("connection.sshHopDelete") }}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <template v-if="selectedTransportLayer">
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right text-xs">{{ t("connection.sshHopName") }}</Label>
+                      <Input
+                        v-model="selectedTransportLayer.name"
+                        class="col-span-3"
+                        :placeholder="t('connection.sshHopNamePlaceholder')"
+                      />
+                    </div>
+                    <div class="grid grid-cols-4 items-center gap-4">
+                      <Label class="text-right text-xs">Type</Label>
                       <Select
-                        :model-value="selectedProxyLayer.proxy_type || 'socks5'"
-                        :disabled="selectedProxyLayer.enabled === false"
-                        @update:model-value="updateSelectedProxyType"
+                        :model-value="selectedTransportLayer.type"
+                        @update:model-value="(value: any) => changeSelectedTransportLayerType(value)"
                       >
                         <SelectTrigger class="col-span-3 h-9">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="socks5">SOCKS5</SelectItem>
-                          <SelectItem value="http">HTTP CONNECT</SelectItem>
+                          <SelectItem value="ssh">SSH</SelectItem>
+                          <SelectItem value="proxy">Proxy</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">{{ t("connection.proxyHost") }}</Label>
-                      <Input
-                        v-model="selectedProxyLayer.host"
-                        class="col-span-2"
-                        placeholder="127.0.0.1"
-                        :disabled="selectedProxyLayer.enabled === false"
-                      />
-                      <Input
-                        v-model.number="selectedProxyLayer.port"
-                        type="number"
-                        class="col-span-1"
-                        :disabled="selectedProxyLayer.enabled === false"
-                      />
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">{{ t("connection.proxyUsername") }}</Label>
-                      <Input
-                        v-model="selectedProxyLayer.username"
-                        class="col-span-3"
-                        :placeholder="t('connection.proxyUsernamePlaceholder')"
-                        :disabled="selectedProxyLayer.enabled === false"
-                      />
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">{{ t("connection.proxyPassword") }}</Label>
-                      <Input
-                        v-model="selectedProxyLayer.password"
-                        type="password"
-                        class="col-span-3"
-                        :placeholder="t('connection.proxyPasswordPlaceholder')"
-                        :disabled="selectedProxyLayer.enabled === false"
-                      />
-                    </div>
+                    <template v-if="selectedSshLayer">
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right text-xs">{{ t("connection.sshHost") }}</Label>
+                        <Input
+                          v-model="selectedSshLayer.host"
+                          class="col-span-2"
+                          placeholder="ssh.example.com"
+                          :disabled="selectedSshLayer.enabled === false"
+                        />
+                        <Input
+                          v-model.number="selectedSshLayer.port"
+                          type="number"
+                          min="1"
+                          max="65535"
+                          class="col-span-1"
+                          :disabled="selectedSshLayer.enabled === false"
+                        />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right text-xs">{{ t("connection.sshUser") }}</Label>
+                        <Input
+                          v-model="selectedSshLayer.user"
+                          class="col-span-3"
+                          placeholder="root"
+                          :disabled="selectedSshLayer.enabled === false"
+                        />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right text-xs">{{ t("connection.sshPassword") }}</Label>
+                        <Input
+                          v-model="selectedSshLayer.password"
+                          type="password"
+                          class="col-span-3"
+                          :placeholder="t('connection.sshPasswordPlaceholder')"
+                          :disabled="selectedSshLayer.enabled === false"
+                        />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right text-xs">{{ t("connection.sshKeyPath") }}</Label>
+                        <div class="col-span-3 flex items-center gap-1">
+                          <Input
+                            v-model="selectedSshLayer.key_path"
+                            class="flex-1"
+                            placeholder="~/.ssh/id_rsa"
+                            :disabled="selectedSshLayer.enabled === false"
+                          />
+                          <Tooltip v-if="isDesktop">
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="outline"
+                                size="icon-lg"
+                                class="shrink-0"
+                                :disabled="selectedSshLayer.enabled === false"
+                                @click="browseSshKeyPath(selectedSshLayer)"
+                              >
+                                <FolderOpen class="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.sshKeyPathBrowse") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right text-xs">{{ t("connection.sshKeyPassphrase") }}</Label>
+                        <Input
+                          v-model="selectedSshLayer.key_passphrase"
+                          type="password"
+                          class="col-span-3"
+                          :placeholder="t('connection.sshKeyPassphrasePlaceholder')"
+                          :disabled="selectedSshLayer.enabled === false"
+                        />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <span />
+                        <label class="col-span-3 flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            v-model="selectedSshLayer.expose_lan"
+                            class="mr-0"
+                            :disabled="selectedSshLayer.enabled === false"
+                          />
+                          <span class="text-xs text-muted-foreground">{{ t("connection.sshExposeLan") }}</span>
+                        </label>
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right text-xs">{{ t("connection.sshConnectTimeout") }}</Label>
+                        <Input
+                          v-model.number="selectedSshLayer.connect_timeout_secs"
+                          type="number"
+                          min="1"
+                          max="300"
+                          step="1"
+                          class="col-span-3"
+                          :disabled="selectedSshLayer.enabled === false"
+                        />
+                      </div>
+                    </template>
+                    <template v-else-if="selectedProxyLayer">
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right text-xs">{{ t("connection.proxyType") }}</Label>
+                        <Select
+                          :model-value="selectedProxyLayer.proxy_type || 'socks5'"
+                          :disabled="selectedProxyLayer.enabled === false"
+                          @update:model-value="updateSelectedProxyType"
+                        >
+                          <SelectTrigger class="col-span-3 h-9">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="socks5">SOCKS5</SelectItem>
+                            <SelectItem value="http">HTTP CONNECT</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right text-xs">{{ t("connection.proxyHost") }}</Label>
+                        <Input
+                          v-model="selectedProxyLayer.host"
+                          class="col-span-2"
+                          placeholder="127.0.0.1"
+                          :disabled="selectedProxyLayer.enabled === false"
+                        />
+                        <Input
+                          v-model.number="selectedProxyLayer.port"
+                          type="number"
+                          class="col-span-1"
+                          :disabled="selectedProxyLayer.enabled === false"
+                        />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right text-xs">{{ t("connection.proxyUsername") }}</Label>
+                        <Input
+                          v-model="selectedProxyLayer.username"
+                          class="col-span-3"
+                          :placeholder="t('connection.proxyUsernamePlaceholder')"
+                          :disabled="selectedProxyLayer.enabled === false"
+                        />
+                      </div>
+                      <div class="grid grid-cols-4 items-center gap-4">
+                        <Label class="text-right text-xs">{{ t("connection.proxyPassword") }}</Label>
+                        <Input
+                          v-model="selectedProxyLayer.password"
+                          type="password"
+                          class="col-span-3"
+                          :placeholder="t('connection.proxyPasswordPlaceholder')"
+                          :disabled="selectedProxyLayer.enabled === false"
+                        />
+                      </div>
+                    </template>
                   </template>
-                </template>
-              </div>
-            </TabsContent>
-          </Tabs>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
         </div>
 
-        <DialogFooter class="flex min-w-0 items-center gap-2 sm:flex-nowrap">
+        <DialogFooter
+          class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 flex min-w-0 items-center gap-2 sm:flex-nowrap"
+        >
           <div class="mr-auto flex min-w-0 flex-1 basis-0 items-center gap-2 overflow-hidden">
             <Button
               v-if="!editingId"

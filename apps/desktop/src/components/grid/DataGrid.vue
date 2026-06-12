@@ -74,7 +74,15 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/compon
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DsDialog,
+} from "@/components/ui/dialog";
 import DangerConfirmDialog from "@/components/editor/DangerConfirmDialog.vue";
 import ImagePreviewDialog from "@/components/grid/ImagePreviewDialog.vue";
 import TemporalCellEditor from "@/components/grid/TemporalCellEditor.vue";
@@ -8434,15 +8442,31 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
     </div>
 
     <Dialog v-model:open="cellDetailDialogOpen">
-      <DialogContent v-if="dialogCellDetail" class="sm:max-w-[840px] max-h-[85vh] flex flex-col overflow-hidden">
-        <DialogHeader class="shrink-0 pr-8">
-          <DialogTitle class="flex min-w-0 items-center gap-2 text-sm">
-            <Info class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
-            <span class="min-w-0 truncate text-[var(--ds-text-1)]">{{ t("grid.cellDetails") }}</span>
-          </DialogTitle>
+      <DialogContent
+        v-if="dialogCellDetail"
+        class="ds-dialog gap-0 p-0 flex flex-col overflow-hidden sm:max-w-[840px] max-h-[85vh]"
+        :show-close-button="false"
+      >
+        <DialogHeader
+          class="flex h-14 shrink-0 flex-row items-center gap-3 space-y-0 border-b border-[var(--ds-border)] px-4 text-left"
+        >
+          <div
+            class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+          >
+            <Info class="h-4 w-4" />
+          </div>
+          <DialogTitle
+            class="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]"
+            >{{ t("grid.cellDetails") }}</DialogTitle
+          >
+          <DialogClose as-child>
+            <Button variant="ghost" size="icon-sm" class="-mr-1 shrink-0"
+              ><X class="h-4 w-4" /><span class="sr-only">{{ t("common.close") }}</span></Button
+            >
+          </DialogClose>
         </DialogHeader>
 
-        <div class="min-h-0 flex-1 overflow-auto pr-1 text-xs space-y-4">
+        <div class="min-h-0 flex-1 overflow-auto px-4 py-4 pr-1 text-xs space-y-4">
           <div class="grid gap-3 border-b border-[var(--ds-border-soft)] pb-4 sm:grid-cols-2 lg:grid-cols-4">
             <div class="space-y-1">
               <div class="ds-menu-label">{{ t("grid.columnName") }}</div>
@@ -8586,7 +8610,9 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
           </div>
         </div>
 
-        <DialogFooter class="shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <DialogFooter
+          class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+        >
           <div class="flex flex-wrap gap-2"></div>
           <Button variant="ghost" size="sm" class="h-7 text-xs" @click="copyDialogCellColumnName">
             <Copy class="mr-1.5 h-3 w-3" /> {{ t("grid.copyColumnName") }}
@@ -8596,17 +8622,31 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
     </Dialog>
 
     <Dialog v-model:open="rowDetailDialogOpen">
-      <DialogContent v-if="rowDetail" class="sm:max-w-[960px] max-h-[85vh] flex flex-col overflow-hidden">
-        <DialogHeader class="shrink-0 pr-8">
-          <DialogTitle class="flex min-w-0 items-center gap-2 text-sm">
-            <ListTree class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
-            <span class="min-w-0 truncate text-[var(--ds-text-1)]">{{
-              t("grid.rowDetailsFor", { row: rowDetail.rowNumber })
-            }}</span>
-          </DialogTitle>
+      <DialogContent
+        v-if="rowDetail"
+        class="ds-dialog gap-0 p-0 flex flex-col overflow-hidden sm:max-w-[960px] max-h-[85vh]"
+        :show-close-button="false"
+      >
+        <DialogHeader
+          class="flex h-14 shrink-0 flex-row items-center gap-3 space-y-0 border-b border-[var(--ds-border)] px-4 text-left"
+        >
+          <div
+            class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+          >
+            <ListTree class="h-4 w-4" />
+          </div>
+          <DialogTitle
+            class="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]"
+            >{{ t("grid.rowDetailsFor", { row: rowDetail.rowNumber }) }}</DialogTitle
+          >
+          <DialogClose as-child>
+            <Button variant="ghost" size="icon-sm" class="-mr-1 shrink-0"
+              ><X class="h-4 w-4" /><span class="sr-only">{{ t("common.close") }}</span></Button
+            >
+          </DialogClose>
         </DialogHeader>
 
-        <div class="flex shrink-0 items-center gap-2 text-xs text-[var(--ds-text-3)]">
+        <div class="px-4 py-3 flex shrink-0 items-center gap-2 text-xs text-[var(--ds-text-3)]">
           <span class="whitespace-nowrap tabular-nums">{{
             t("grid.columnsCount", { count: rowDetail.fields.length })
           }}</span>
@@ -8712,7 +8752,9 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
           </div>
         </div>
 
-        <DialogFooter class="shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <DialogFooter
+          class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+        >
           <div class="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" class="h-7 text-xs" @click="copyRowDetailJson">
               <Copy class="mr-1.5 h-3 w-3" /> {{ t("grid.copyRow") }}
@@ -8726,17 +8768,31 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
     </Dialog>
 
     <Dialog v-model:open="columnDetailDialogOpen">
-      <DialogContent v-if="columnDetail" class="sm:max-w-[900px] max-h-[85vh] flex flex-col overflow-hidden">
-        <DialogHeader class="shrink-0 pr-8">
-          <DialogTitle class="flex min-w-0 items-center gap-2 text-sm">
-            <TableProperties class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
-            <span class="min-w-0 truncate text-[var(--ds-text-1)]">{{
-              t("grid.columnDetailsFor", { column: columnDetail.column })
-            }}</span>
-          </DialogTitle>
+      <DialogContent
+        v-if="columnDetail"
+        class="ds-dialog gap-0 p-0 flex flex-col overflow-hidden sm:max-w-[900px] max-h-[85vh]"
+        :show-close-button="false"
+      >
+        <DialogHeader
+          class="flex h-14 shrink-0 flex-row items-center gap-3 space-y-0 border-b border-[var(--ds-border)] px-4 text-left"
+        >
+          <div
+            class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+          >
+            <TableProperties class="h-4 w-4" />
+          </div>
+          <DialogTitle
+            class="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]"
+            >{{ t("grid.columnDetailsFor", { column: columnDetail.column }) }}</DialogTitle
+          >
+          <DialogClose as-child>
+            <Button variant="ghost" size="icon-sm" class="-mr-1 shrink-0"
+              ><X class="h-4 w-4" /><span class="sr-only">{{ t("common.close") }}</span></Button
+            >
+          </DialogClose>
         </DialogHeader>
 
-        <div class="grid shrink-0 gap-3 border-b border-[var(--ds-border-soft)] pb-4 text-xs sm:grid-cols-3">
+        <div class="px-4 py-4 grid shrink-0 gap-3 border-b border-[var(--ds-border-soft)] text-xs sm:grid-cols-3">
           <div class="space-y-1">
             <div class="ds-menu-label">{{ t("grid.columnName") }}</div>
             <div class="text-[12.5px] font-medium text-[var(--ds-text-1)] break-all">{{ columnDetail.column }}</div>
@@ -8767,7 +8823,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
           </div>
         </div>
 
-        <div class="flex shrink-0 items-center gap-2 text-xs text-[var(--ds-text-3)]">
+        <div class="px-4 py-2 flex shrink-0 items-center gap-2 text-xs text-[var(--ds-text-3)]">
           <span class="whitespace-nowrap tabular-nums">{{ t("grid.rowCount") }}: {{ columnDetail.fields.length }}</span>
           <div class="relative ml-auto w-56 max-w-full">
             <Search
@@ -8782,7 +8838,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
           </div>
         </div>
 
-        <div class="min-h-0 flex-1 overflow-auto rounded-md border border-[var(--ds-border)]">
+        <div class="min-h-0 flex-1 overflow-auto rounded-md border border-[var(--ds-border)] mx-4 mb-4">
           <table class="w-full min-w-[500px] text-xs">
             <thead class="sticky top-0 z-10 bg-[var(--ds-bg-elevated)] text-[var(--ds-text-2)]">
               <tr class="border-b border-[var(--ds-border)]">
@@ -8858,7 +8914,9 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
           </div>
         </div>
 
-        <DialogFooter class="shrink-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <DialogFooter
+          class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+        >
           <div class="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" class="h-7 text-xs" @click="copyColumnDetailJson">
               <Copy class="mr-1.5 h-3 w-3" /> {{ t("grid.copyColumnValues") }}
@@ -8874,27 +8932,27 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
       </DialogContent>
     </Dialog>
 
-    <Dialog v-model:open="bulkEditDialogOpen">
-      <DialogContent class="sm:max-w-[420px]">
-        <DialogHeader>
-          <DialogTitle>{{ t("grid.bulkEditTitle") }}</DialogTitle>
-        </DialogHeader>
-        <div class="space-y-2">
-          <p class="text-sm text-muted-foreground">
-            {{ t("grid.bulkEditDescription", { count: selectedCellCount }) }}
-          </p>
-          <Input
-            v-model="bulkEditValue"
-            :placeholder="t('grid.bulkEditValuePlaceholder')"
-            @keydown.enter.prevent="applyBulkEditValue"
-          />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="bulkEditDialogOpen = false">{{ t("dangerDialog.cancel") }}</Button>
-          <Button @click="applyBulkEditValue">{{ t("grid.applyBulkEdit") }}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <DsDialog
+      v-model:open="bulkEditDialogOpen"
+      :title="t('grid.bulkEditTitle')"
+      :icon="Pencil"
+      content-class="sm:max-w-[420px]"
+    >
+      <div class="space-y-2">
+        <p class="text-sm text-[var(--ds-text-3)]">
+          {{ t("grid.bulkEditDescription", { count: selectedCellCount }) }}
+        </p>
+        <Input
+          v-model="bulkEditValue"
+          :placeholder="t('grid.bulkEditValuePlaceholder')"
+          @keydown.enter.prevent="applyBulkEditValue"
+        />
+      </div>
+      <template #footer>
+        <Button variant="outline" @click="bulkEditDialogOpen = false">{{ t("common.cancel") }}</Button>
+        <Button @click="applyBulkEditValue">{{ t("grid.applyBulkEdit") }}</Button>
+      </template>
+    </DsDialog>
 
     <DangerConfirmDialog
       v-model:open="showDeleteRowConfirm"

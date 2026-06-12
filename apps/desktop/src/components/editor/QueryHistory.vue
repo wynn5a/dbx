@@ -2,10 +2,18 @@
 import { ref, computed, onMounted } from "vue";
 import { useI18n } from "vue-i18n";
 import { useSqlHighlighter } from "@/composables/useSqlHighlighter";
-import { Clock, Copy, Database, RotateCcw, Search, Sparkles, Trash2, X } from "@lucide/vue";
+import { Clock, Copy, Database, History, RotateCcw, Search, Sparkles, Trash2, X } from "@lucide/vue";
 import { RecycleScroller } from "vue-virtual-scroller";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DsDialog,
+} from "@/components/ui/dialog";
 import CustomContextMenu, { type ContextMenuItem } from "@/components/ui/CustomContextMenu.vue";
 import { useHistoryStore } from "@/stores/historyStore";
 import { useToast } from "@/composables/useToast";
@@ -347,9 +355,22 @@ onMounted(() => store.load());
     </div>
 
     <Dialog :open="!!selectedEntry" @update:open="(value) => !value && (selectedEntry = null)">
-      <DialogContent class="sm:max-w-2xl duration-75" @interact-outside="selectedEntry = null">
-        <DialogHeader class="min-w-0">
-          <DialogTitle class="flex items-center gap-2 pr-8">
+      <DialogContent
+        class="ds-dialog gap-0 p-0 flex flex-col overflow-hidden sm:max-w-2xl duration-75"
+        :show-close-button="false"
+        @interact-outside="selectedEntry = null"
+      >
+        <DialogHeader
+          class="flex h-14 shrink-0 flex-row items-center gap-3 space-y-0 border-b border-[var(--ds-border)] px-4 text-left"
+        >
+          <div
+            class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+          >
+            <History class="h-4 w-4" />
+          </div>
+          <DialogTitle
+            class="min-w-0 flex-1 flex items-center gap-2 text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]"
+          >
             <span
               v-if="selectedEntry"
               class="inline-flex h-[18px] shrink-0 items-center rounded px-1.5 font-mono text-[10px] font-medium leading-none"
@@ -361,8 +382,13 @@ onMounted(() => store.load());
               selectedEntry ? entryTitle(selectedEntry) : t("history.viewDetails")
             }}</span>
           </DialogTitle>
+          <DialogClose as-child>
+            <Button variant="ghost" size="icon-sm" class="-mr-1 shrink-0"
+              ><X class="h-4 w-4" /><span class="sr-only">{{ t("common.close") }}</span></Button
+            >
+          </DialogClose>
         </DialogHeader>
-        <div v-if="selectedEntry" class="max-h-[60vh] min-w-0 space-y-4 overflow-y-auto">
+        <div v-if="selectedEntry" class="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-4">
           <div class="grid grid-cols-[120px_1fr] gap-x-4 gap-y-2.5 text-[12.5px]">
             <template v-for="[label, value] in detailsRows(selectedEntry)" :key="label">
               <div class="text-[var(--ds-text-3)]">{{ label }}</div>
@@ -406,7 +432,9 @@ onMounted(() => store.load());
             ></pre>
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter
+          class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3"
+        >
           <Button variant="outline" @click="selectedEntry && emit('analyzeAi', selectedEntry)">
             <Sparkles class="h-4 w-4" />
             {{ t("history.analyzeWithAi") }}
@@ -424,30 +452,30 @@ onMounted(() => store.load());
       </DialogContent>
     </Dialog>
 
-    <Dialog v-model:open="showDeleteConfirm">
-      <DialogContent class="sm:max-w-[400px]">
-        <DialogHeader>
-          <DialogTitle>{{ t("history.delete") }}</DialogTitle>
-        </DialogHeader>
-        <p class="text-sm text-muted-foreground">{{ t("history.confirmDelete") }}</p>
-        <DialogFooter>
-          <Button variant="outline" @click="showDeleteConfirm = false">{{ t("dangerDialog.cancel") }}</Button>
-          <Button variant="destructive" @click="executeDelete">{{ t("dangerDialog.confirm") }}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <DsDialog
+      v-model:open="showDeleteConfirm"
+      :title="t('history.delete')"
+      :icon="Trash2"
+      content-class="sm:max-w-[400px]"
+    >
+      <p class="text-sm text-[var(--ds-text-3)]">{{ t("history.confirmDelete") }}</p>
+      <template #footer>
+        <Button variant="outline" @click="showDeleteConfirm = false">{{ t("common.cancel") }}</Button>
+        <Button variant="destructive" @click="executeDelete">{{ t("dangerDialog.confirm") }}</Button>
+      </template>
+    </DsDialog>
 
-    <Dialog v-model:open="showClearConfirm">
-      <DialogContent class="sm:max-w-[400px]">
-        <DialogHeader>
-          <DialogTitle>{{ t("history.clear") }}</DialogTitle>
-        </DialogHeader>
-        <p class="text-sm text-muted-foreground">{{ t("history.confirmClear") }}</p>
-        <DialogFooter>
-          <Button variant="outline" @click="showClearConfirm = false">{{ t("dangerDialog.cancel") }}</Button>
-          <Button variant="destructive" @click="executeClear">{{ t("dangerDialog.confirm") }}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <DsDialog
+      v-model:open="showClearConfirm"
+      :title="t('history.clear')"
+      :icon="Trash2"
+      content-class="sm:max-w-[400px]"
+    >
+      <p class="text-sm text-[var(--ds-text-3)]">{{ t("history.confirmClear") }}</p>
+      <template #footer>
+        <Button variant="outline" @click="showClearConfirm = false">{{ t("common.cancel") }}</Button>
+        <Button variant="destructive" @click="executeClear">{{ t("dangerDialog.confirm") }}</Button>
+      </template>
+    </DsDialog>
   </div>
 </template>

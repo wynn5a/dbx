@@ -738,6 +738,10 @@ export default {
     loading: "Caricamento...",
     stopping: "Interruzione...",
     close: "Chiudi",
+    cancel: "Annulla",
+    save: "Salva",
+    create: "Crea",
+    rename: "Rinomina",
   },
   explain: {
     title: "Piano di Spiegazione",

@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import {
   AlertTriangle,
   Check,
+  FileCode,
   KeyRound,
   Lock,
   Loader2,
@@ -13,11 +14,12 @@ import {
   ShieldCheck,
   Trash2,
   Unlock,
+  UserPlus,
   UserRound,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DsDialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -559,67 +561,55 @@ onMounted(loadUsers);
       </main>
     </div>
 
-    <Dialog v-model:open="createDialogOpen">
-      <DialogContent class="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>{{ t("userAdmin.newUser") }}</DialogTitle>
-        </DialogHeader>
-        <div class="space-y-3">
-          <label class="block text-xs font-medium">{{ createNameLabel }}</label>
-          <Input v-model="createUser" />
-          <template v-if="!isPostgres">
-            <label class="block text-xs font-medium">{{ t("userAdmin.host") }}</label>
-            <Input v-model="createHost" />
-          </template>
-          <label v-else class="flex items-center gap-2 text-xs">
-            <input v-model="createCanLogin" type="checkbox" class="h-3.5 w-3.5 accent-primary" />
-            {{ t("userAdmin.allowLogin") }}
-          </label>
-          <label class="block text-xs font-medium">{{ t("connection.password") }}</label>
-          <Input v-model="createPassword" type="password" />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="createDialogOpen = false">{{ t("dangerDialog.cancel") }}</Button>
-          <Button :disabled="!createUser.trim() || !createPassword" @click="previewCreateUser">
-            {{ t("userAdmin.previewSql") }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <DsDialog v-model:open="createDialogOpen" :title="t('userAdmin.newUser')" :icon="UserPlus">
+      <div class="space-y-3">
+        <label class="block text-xs font-medium">{{ createNameLabel }}</label>
+        <Input v-model="createUser" />
+        <template v-if="!isPostgres">
+          <label class="block text-xs font-medium">{{ t("userAdmin.host") }}</label>
+          <Input v-model="createHost" />
+        </template>
+        <label v-else class="flex items-center gap-2 text-xs">
+          <input v-model="createCanLogin" type="checkbox" class="h-3.5 w-3.5 accent-primary" />
+          {{ t("userAdmin.allowLogin") }}
+        </label>
+        <label class="block text-xs font-medium">{{ t("connection.password") }}</label>
+        <Input v-model="createPassword" type="password" />
+      </div>
+      <template #footer>
+        <Button variant="outline" @click="createDialogOpen = false">{{ t("common.cancel") }}</Button>
+        <Button :disabled="!createUser.trim() || !createPassword" @click="previewCreateUser">
+          {{ t("userAdmin.previewSql") }}
+        </Button>
+      </template>
+    </DsDialog>
 
-    <Dialog v-model:open="passwordDialogOpen">
-      <DialogContent class="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>{{ t("userAdmin.changePassword") }}</DialogTitle>
-        </DialogHeader>
-        <Input v-model="newPassword" type="password" :placeholder="t('userAdmin.newPassword')" />
-        <DialogFooter>
-          <Button variant="outline" @click="passwordDialogOpen = false">{{ t("dangerDialog.cancel") }}</Button>
-          <Button :disabled="!newPassword" @click="previewPasswordChange">{{ t("userAdmin.previewSql") }}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <DsDialog v-model:open="passwordDialogOpen" :title="t('userAdmin.changePassword')" :icon="KeyRound">
+      <Input v-model="newPassword" type="password" :placeholder="t('userAdmin.newPassword')" />
+      <template #footer>
+        <Button variant="outline" @click="passwordDialogOpen = false">{{ t("common.cancel") }}</Button>
+        <Button :disabled="!newPassword" @click="previewPasswordChange">{{ t("userAdmin.previewSql") }}</Button>
+      </template>
+    </DsDialog>
 
-    <Dialog v-model:open="sqlDialogOpen">
-      <DialogContent class="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle class="flex items-center gap-2">
-            <AlertTriangle v-if="pendingDanger" class="h-4 w-4 text-destructive" />
-            {{ t("userAdmin.sqlPreview") }}
-          </DialogTitle>
-        </DialogHeader>
-        <pre
-          class="max-h-[50vh] min-h-44 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 font-mono text-xs leading-5"
-          v-html="highlightedPendingSql"
-        />
-        <DialogFooter>
-          <Button variant="outline" @click="sqlDialogOpen = false">{{ t("dangerDialog.cancel") }}</Button>
-          <Button :variant="pendingDanger ? 'destructive' : 'default'" :disabled="applying" @click="applyPendingSql">
-            <Loader2 v-if="applying" class="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            {{ t("userAdmin.applySql") }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <DsDialog
+      v-model:open="sqlDialogOpen"
+      :title="t('userAdmin.sqlPreview')"
+      :icon="FileCode"
+      content-class="sm:max-w-2xl"
+    >
+      <pre
+        class="max-h-[50vh] min-h-44 overflow-auto whitespace-pre-wrap rounded-md border border-[var(--ds-border-soft)] bg-[var(--ds-bg-canvas)] p-3 font-mono text-xs leading-5"
+        v-html="highlightedPendingSql"
+      />
+      <template #footer>
+        <AlertTriangle v-if="pendingDanger" class="mr-auto h-4 w-4 text-[var(--ds-red)]" />
+        <Button variant="outline" @click="sqlDialogOpen = false">{{ t("common.cancel") }}</Button>
+        <Button :variant="pendingDanger ? 'destructive' : 'default'" :disabled="applying" @click="applyPendingSql">
+          <Loader2 v-if="applying" class="mr-1.5 h-3.5 w-3.5 animate-spin" />
+          {{ t("userAdmin.applySql") }}
+        </Button>
+      </template>
+    </DsDialog>
   </div>
 </template>

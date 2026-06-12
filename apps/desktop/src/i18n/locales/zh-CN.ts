@@ -743,6 +743,8 @@ export default {
     close: "关闭",
     cancel: "取消",
     save: "保存",
+    create: "新建",
+    rename: "重命名",
   },
   explain: {
     title: "执行计划",

@@ -56,7 +56,7 @@ import {
 } from "@lucide/vue";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogTitle, DsDialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchableSelect } from "@/components/ui/searchable-select";
@@ -3416,47 +3416,42 @@ watch(
     />
 
     <!-- Snippet Add/Edit Dialog -->
-    <Dialog :open="snippetDialogOpen" @update:open="snippetDialogOpen = $event">
-      <DialogContent class="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle>
-            {{ snippetEditingId ? t("settings.snippetsEditTitle") : t("settings.snippetsAddTitle") }}
-          </DialogTitle>
-        </DialogHeader>
-        <div class="flex flex-col gap-4 py-2">
-          <div class="flex flex-col gap-1.5">
-            <Label for="snippet-label">{{ t("settings.snippetsLabel") }}</Label>
-            <Input
-              id="snippet-label"
-              v-model="snippetForm.label"
-              :placeholder="t('settings.snippetsLabelPlaceholder')"
-            />
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <Label for="snippet-prefix">{{ t("settings.snippetsPrefix") }}</Label>
-            <Input
-              id="snippet-prefix"
-              v-model="snippetForm.prefix"
-              :placeholder="t('settings.snippetsPrefixPlaceholder')"
-            />
-            <p v-if="snippetFormPrefixError" class="text-xs text-[var(--ds-red)]">{{ snippetFormPrefixError }}</p>
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <Label for="snippet-body">{{ t("settings.snippetsBody") }}</Label>
-            <textarea
-              id="snippet-body"
-              v-model="snippetForm.body"
-              :placeholder="t('settings.snippetsBodyPlaceholder')"
-              rows="6"
-              class="flex min-h-[120px] w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-3 py-2 text-sm font-mono text-[var(--ds-text-1)] placeholder:text-[var(--ds-text-3)] focus-visible:border-[var(--ds-accent-line)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]"
-            />
-          </div>
+    <DsDialog
+      :open="snippetDialogOpen"
+      :title="snippetEditingId ? t('settings.snippetsEditTitle') : t('settings.snippetsAddTitle')"
+      :icon="Braces"
+      content-class="sm:max-w-[500px]"
+      @update:open="snippetDialogOpen = $event"
+    >
+      <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-1.5">
+          <Label for="snippet-label">{{ t("settings.snippetsLabel") }}</Label>
+          <Input id="snippet-label" v-model="snippetForm.label" :placeholder="t('settings.snippetsLabelPlaceholder')" />
         </div>
-        <DialogFooter>
-          <Button variant="outline" @click="snippetDialogOpen = false">{{ t("settings.cancel") }}</Button>
-          <Button @click="saveSnippet">{{ t("settings.save") }}</Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        <div class="flex flex-col gap-1.5">
+          <Label for="snippet-prefix">{{ t("settings.snippetsPrefix") }}</Label>
+          <Input
+            id="snippet-prefix"
+            v-model="snippetForm.prefix"
+            :placeholder="t('settings.snippetsPrefixPlaceholder')"
+          />
+          <p v-if="snippetFormPrefixError" class="text-xs text-[var(--ds-red)]">{{ snippetFormPrefixError }}</p>
+        </div>
+        <div class="flex flex-col gap-1.5">
+          <Label for="snippet-body">{{ t("settings.snippetsBody") }}</Label>
+          <textarea
+            id="snippet-body"
+            v-model="snippetForm.body"
+            :placeholder="t('settings.snippetsBodyPlaceholder')"
+            rows="6"
+            class="flex min-h-[120px] w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-3 py-2 text-sm font-mono text-[var(--ds-text-1)] placeholder:text-[var(--ds-text-3)] focus-visible:border-[var(--ds-accent-line)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]"
+          />
+        </div>
+      </div>
+      <template #footer>
+        <Button variant="outline" @click="snippetDialogOpen = false">{{ t("settings.cancel") }}</Button>
+        <Button @click="saveSnippet">{{ t("settings.save") }}</Button>
+      </template>
+    </DsDialog>
   </Dialog>
 </template>

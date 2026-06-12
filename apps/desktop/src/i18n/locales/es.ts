@@ -659,6 +659,10 @@ export default {
     loading: "Cargando...",
     stopping: "Deteniendo...",
     close: "Cerrar",
+    cancel: "Cancelar",
+    save: "Guardar",
+    create: "Crear",
+    rename: "Renombrar",
   },
   explain: {
     title: "Plan de ejecución",

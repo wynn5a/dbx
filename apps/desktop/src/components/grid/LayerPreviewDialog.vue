@@ -443,9 +443,11 @@ onBeforeUnmount(() => cleanupMap());
       @escape-key-down="close"
     >
       <!-- Header -->
-      <div class="flex h-12 shrink-0 items-center gap-2 border-b bg-muted/20 px-3">
+      <div
+        class="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--ds-border)] bg-[var(--ds-bg-canvas)]/20 px-3"
+      >
         <div class="flex min-w-0 shrink-0 items-center gap-2">
-          <Map class="h-4 w-4 shrink-0 text-muted-foreground" />
+          <Map class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
           <DialogTitle class="truncate text-sm font-semibold">{{ dialogTitle }}</DialogTitle>
         </div>
 
@@ -478,7 +480,7 @@ onBeforeUnmount(() => cleanupMap());
         <Button
           variant="ghost"
           size="icon"
-          class="shrink-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          class="shrink-0 text-[var(--ds-text-3)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]"
           title="导出图片"
           :disabled="isExporting"
           @click="saveAsImage"
@@ -491,7 +493,7 @@ onBeforeUnmount(() => cleanupMap());
         <Button
           variant="ghost"
           size="icon"
-          class="shrink-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          class="shrink-0 text-[var(--ds-text-3)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]"
           :title="isMaximized ? '还原' : '最大化'"
           @click="toggleMaximize"
         >
@@ -502,8 +504,8 @@ onBeforeUnmount(() => cleanupMap());
         <Button
           variant="ghost"
           size="icon"
-          class="shrink-0 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          :title="t('dangerDialog.cancel')"
+          class="shrink-0 text-[var(--ds-text-3)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]"
+          :title="t('common.close')"
           @click="close"
         >
           <X class="h-3.5 w-3.5" />
@@ -513,7 +515,7 @@ onBeforeUnmount(() => cleanupMap());
       <!-- Map -->
       <div ref="mapContainer" class="relative w-full flex-1" style="min-height: 200px" data-map-container>
         <div
-          class="absolute inset-0 z-10 flex items-center justify-center text-xs text-muted-foreground pointer-events-none"
+          class="absolute inset-0 z-10 flex items-center justify-center text-xs text-[var(--ds-text-3)] pointer-events-none"
           data-map-placeholder
         >
           Loading map…
@@ -521,7 +523,7 @@ onBeforeUnmount(() => cleanupMap());
       </div>
       <div
         v-if="mapError"
-        class="absolute inset-0 flex items-center justify-center bg-background/80 p-4 text-sm text-destructive"
+        class="absolute inset-0 flex items-center justify-center bg-[var(--ds-bg-canvas)]/80 p-4 text-sm text-[var(--ds-red)]"
       >
         {{ mapError }}
       </div>

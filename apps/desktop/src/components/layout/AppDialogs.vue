@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, watch, defineAsyncComponent } from "vue";
 import { useI18n } from "vue-i18n";
+import { FileInput } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DsDialog } from "@/components/ui/dialog";
 const ConnectionDialog = defineAsyncComponent(() => import("@/components/connection/ConnectionDialog.vue"));
 const EditorSettingsDialog = defineAsyncComponent(() => import("@/components/editor/EditorSettingsDialog.vue"));
 const DangerConfirmDialog = defineAsyncComponent(() => import("@/components/editor/DangerConfirmDialog.vue"));
@@ -204,24 +205,22 @@ watch(
         : dialogs.onImportConfirm($event)
     "
   />
-  <Dialog v-model:open="dialogs.showImportLayoutConfirm.value">
-    <DialogContent class="sm:max-w-[400px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("configExport.importLayoutTitle") }}</DialogTitle>
-      </DialogHeader>
-      <p class="text-sm text-muted-foreground">{{ t("configExport.importLayoutConfirm") }}</p>
-      <DialogFooter>
-        <Button variant="outline" @click="dialogs.showImportLayoutConfirm.value = false">{{
-          t("dangerDialog.cancel")
-        }}</Button>
-        <Button
-          @click="
-            dialogs.showImportLayoutConfirm.value = false;
-            dialogs.pendingImportLayout.value && connectionStore.applySidebarLayout(dialogs.pendingImportLayout.value);
-          "
-          >{{ t("configExport.importLayoutApply") }}</Button
-        >
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <DsDialog
+    v-model:open="dialogs.showImportLayoutConfirm.value"
+    :title="t('configExport.importLayoutTitle')"
+    :icon="FileInput"
+    content-class="sm:max-w-[400px]"
+  >
+    <p class="text-sm text-[var(--ds-text-3)]">{{ t("configExport.importLayoutConfirm") }}</p>
+    <template #footer>
+      <Button variant="outline" @click="dialogs.showImportLayoutConfirm.value = false">{{ t("common.cancel") }}</Button>
+      <Button
+        @click="
+          dialogs.showImportLayoutConfirm.value = false;
+          dialogs.pendingImportLayout.value && connectionStore.applySidebarLayout(dialogs.pendingImportLayout.value);
+        "
+        >{{ t("configExport.importLayoutApply") }}</Button
+      >
+    </template>
+  </DsDialog>
 </template>

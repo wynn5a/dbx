@@ -682,16 +682,23 @@ onUnmounted(stopDrag);
 <template>
   <Dialog v-model:open="open">
     <DialogContent
-      class="w-[94vw] max-w-[94vw] sm:max-w-[94vw] md:max-w-[94vw] lg:max-w-[94vw] xl:max-w-[94vw] h-[86vh] max-h-[86vh] gap-0 p-0 overflow-hidden flex flex-col"
+      class="ds-dialog w-[94vw] max-w-[94vw] sm:max-w-[94vw] md:max-w-[94vw] lg:max-w-[94vw] xl:max-w-[94vw] h-[86vh] max-h-[86vh] gap-0 p-0 overflow-hidden flex flex-col"
     >
-      <DialogHeader class="px-4 py-3 border-b">
-        <DialogTitle class="flex items-center gap-2">
-          <Network class="w-4 h-4" />
-          {{ t("diagram.title") }}
-        </DialogTitle>
+      <DialogHeader
+        class="flex h-14 shrink-0 flex-row items-center gap-3 space-y-0 border-b border-[var(--ds-border)] px-4 text-left"
+      >
+        <div
+          class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+        >
+          <Network class="h-4 w-4" />
+        </div>
+        <DialogTitle
+          class="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]"
+          >{{ t("diagram.title") }}</DialogTitle
+        >
       </DialogHeader>
 
-      <div class="flex items-center gap-2 border-b px-3 py-2 shrink-0 overflow-x-auto">
+      <div class="flex items-center gap-2 border-b border-[var(--ds-border)] px-3 py-2 shrink-0 overflow-x-auto">
         <Select :model-value="connectionId" @update:model-value="(value: any) => setConnection(String(value))">
           <SelectTrigger class="h-8 w-48 text-xs">
             <div v-if="connectionId" class="flex min-w-0 items-center gap-2">
@@ -738,7 +745,7 @@ onUnmounted(stopDrag);
         </Select>
 
         <div class="relative min-w-40 flex-1">
-          <Search class="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Search class="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ds-text-3)]" />
           <Input v-model="tableSearch" class="h-8 pl-7 text-xs" :placeholder="t('diagram.searchTables')" />
         </div>
 
@@ -812,23 +819,23 @@ onUnmounted(stopDrag);
         </Button>
       </div>
 
-      <div class="flex-1 min-h-0 bg-muted/20">
-        <div v-if="loadingDiagram" class="h-full flex items-center justify-center text-sm text-muted-foreground">
+      <div class="flex-1 min-h-0 bg-[var(--ds-bg-canvas)]/20">
+        <div v-if="loadingDiagram" class="h-full flex items-center justify-center text-sm text-[var(--ds-text-3)]">
           <Loader2 class="mr-2 h-4 w-4 animate-spin" />
           {{ loadingText }}
         </div>
-        <div v-else-if="!diagramReady" class="h-full flex items-center justify-center text-sm text-muted-foreground">
+        <div v-else-if="!diagramReady" class="h-full flex items-center justify-center text-sm text-[var(--ds-text-3)]">
           {{ t("diagram.selectTarget") }}
         </div>
         <div
           v-else-if="tables.length === 0"
-          class="h-full flex items-center justify-center text-sm text-muted-foreground"
+          class="h-full flex items-center justify-center text-sm text-[var(--ds-text-3)]"
         >
           {{ t("diagram.empty") }}
         </div>
         <div
           v-else-if="visibleTables.length === 0"
-          class="h-full flex items-center justify-center text-sm text-muted-foreground"
+          class="h-full flex items-center justify-center text-sm text-[var(--ds-text-3)]"
         >
           {{ t("diagram.noMatches") }}
         </div>
@@ -886,17 +893,21 @@ onUnmounted(stopDrag);
                   v-for="table in visibleTables"
                   :key="table.name"
                   class="absolute overflow-hidden rounded-md border bg-background shadow-sm"
-                  :class="table.name === focusTableName ? 'border-primary ring-1 ring-primary/30' : 'border-border'"
+                  :class="
+                    table.name === focusTableName
+                      ? 'border-primary ring-1 ring-primary/30'
+                      : 'border-[var(--ds-border)]'
+                  "
                   :style="{
                     width: `${CARD_WIDTH}px`,
                     transform: `translate(${positions[table.name]?.x ?? 0}px, ${positions[table.name]?.y ?? 0}px)`,
                   }"
                 >
                   <div
-                    class="flex h-11 cursor-grab items-center gap-2 border-b bg-muted/40 px-3 active:cursor-grabbing"
+                    class="flex h-11 cursor-grab items-center gap-2 border-b border-[var(--ds-border)] bg-[var(--ds-bg-canvas)]/40 px-3 active:cursor-grabbing"
                     @mousedown="startDrag(table.name, $event)"
                   >
-                    <Table2 class="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <Table2 class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
                     <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ table.name }}</span>
                     <Badge variant="outline" class="h-5 px-1.5 text-[10px]">{{ table.columns.length }}</Badge>
                   </div>
@@ -904,15 +915,15 @@ onUnmounted(stopDrag);
                     <div
                       v-for="column in visibleColumns(table)"
                       :key="column.name"
-                      class="flex h-6 items-center gap-1.5 border-b border-border/40 px-3 text-xs last:border-b-0"
+                      class="flex h-6 items-center gap-1.5 border-b border-[var(--ds-border-soft)] px-3 text-xs last:border-b-0"
                     >
                       <KeyRound v-if="column.is_primary_key" class="h-3 w-3 shrink-0 text-amber-500" />
                       <Link2 v-else-if="isForeignKeyColumn(table, column.name)" class="h-3 w-3 shrink-0 text-primary" />
                       <span v-else class="h-3 w-3 shrink-0" />
                       <span class="min-w-0 flex-1 truncate font-mono">{{ column.name }}</span>
-                      <span class="max-w-24 truncate text-[10px] text-muted-foreground">{{ column.data_type }}</span>
+                      <span class="max-w-24 truncate text-[10px] text-[var(--ds-text-3)]">{{ column.data_type }}</span>
                     </div>
-                    <div v-if="hiddenColumnCount(table) > 0" class="h-6 px-3 text-xs leading-6 text-muted-foreground">
+                    <div v-if="hiddenColumnCount(table) > 0" class="h-6 px-3 text-xs leading-6 text-[var(--ds-text-3)]">
                       {{ t("diagram.moreColumns", { count: hiddenColumnCount(table) }) }}
                     </div>
                   </div>

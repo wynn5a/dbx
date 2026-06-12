@@ -8,6 +8,7 @@ import {
   FolderOpen,
   KeyRound,
   Loader2,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -16,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DsDialog } from "@/components/ui/dialog";
 import DangerConfirmDialog from "@/components/editor/DangerConfirmDialog.vue";
 import * as api from "@/lib/api";
 import type { KvGetResponse, KvKeySummary, KvValue } from "@/lib/api";
@@ -314,29 +315,29 @@ defineExpose({ focusSearch });
       </div>
     </div>
 
-    <Dialog v-model:open="showEditDialog">
-      <DialogContent class="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{{ editKey ? t("etcd.editKey") : t("etcd.newKey") }}</DialogTitle>
-        </DialogHeader>
-        <div class="grid gap-3 py-2">
-          <Input v-model="editKey" :placeholder="t('etcd.keyPlaceholder')" />
-          <textarea
-            v-model="editValue"
-            class="min-h-52 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            spellcheck="false"
-          />
-          <div v-if="editError" class="text-sm text-destructive">{{ editError }}</div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" @click="showEditDialog = false">{{ t("common.cancel") }}</Button>
-          <Button :disabled="saving || (!!editError && selectedValueIsBase64)" @click="saveKey">
-            <Loader2 v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
-            {{ t("common.save") }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <DsDialog
+      v-model:open="showEditDialog"
+      :title="editKey ? t('etcd.editKey') : t('etcd.newKey')"
+      :icon="Pencil"
+      content-class="sm:max-w-2xl"
+    >
+      <div class="grid gap-3">
+        <Input v-model="editKey" :placeholder="t('etcd.keyPlaceholder')" />
+        <textarea
+          v-model="editValue"
+          class="min-h-52 rounded-md border border-[var(--ds-border)] bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          spellcheck="false"
+        />
+        <div v-if="editError" class="text-sm text-[var(--ds-red)]">{{ editError }}</div>
+      </div>
+      <template #footer>
+        <Button variant="outline" @click="showEditDialog = false">{{ t("common.cancel") }}</Button>
+        <Button :disabled="saving || (!!editError && selectedValueIsBase64)" @click="saveKey">
+          <Loader2 v-if="saving" class="mr-2 h-4 w-4 animate-spin" />
+          {{ t("common.save") }}
+        </Button>
+      </template>
+    </DsDialog>
 
     <DangerConfirmDialog
       v-model:open="showDeleteConfirm"

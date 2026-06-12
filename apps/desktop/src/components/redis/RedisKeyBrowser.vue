@@ -22,7 +22,7 @@ import "splitpanes/dist/splitpanes.css";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DsDialog } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import DangerConfirmDialog from "@/components/editor/DangerConfirmDialog.vue";
@@ -999,87 +999,86 @@ defineExpose({ focusSearch });
       @confirm="applyDangerAction"
     />
 
-    <Dialog v-model:open="showCreateKeyDialog">
-      <DialogContent class="sm:max-w-md" :style="editorFontFamilyStyle">
-        <DialogHeader>
-          <DialogTitle>{{ t("redis.createKey") }}</DialogTitle>
-        </DialogHeader>
+    <DsDialog
+      v-model:open="showCreateKeyDialog"
+      :title="t('redis.createKey')"
+      :icon="KeyRound"
+      content-class="sm:max-w-md"
+    >
+      <div class="grid gap-3" :style="editorFontFamilyStyle">
+        <label class="grid gap-1.5 text-xs font-medium">
+          <span>{{ t("redis.createKeyName") }}</span>
+          <Input
+            v-model="createKeyName"
+            class="dbx-editor-font-family h-8 text-xs"
+            :placeholder="t('redis.createKeyNamePlaceholder')"
+            @keydown.enter="createRedisKey"
+          />
+        </label>
 
-        <div class="grid gap-3">
-          <label class="grid gap-1.5 text-xs font-medium">
-            <span>{{ t("redis.createKeyName") }}</span>
-            <Input
-              v-model="createKeyName"
-              class="dbx-editor-font-family h-8 text-xs"
-              :placeholder="t('redis.createKeyNamePlaceholder')"
-              @keydown.enter="createRedisKey"
-            />
-          </label>
+        <label class="grid gap-1.5 text-xs font-medium">
+          <span>{{ t("redis.createKeyType") }}</span>
+          <Select
+            :model-value="createKeyType"
+            @update:model-value="(value: any) => (createKeyType = value as RedisCreateKeyType)"
+          >
+            <SelectTrigger class="h-8 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="option in createKeyTypeOptions" :key="option.value" :value="option.value">
+                {{ option.label }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
 
-          <label class="grid gap-1.5 text-xs font-medium">
-            <span>{{ t("redis.createKeyType") }}</span>
-            <Select
-              :model-value="createKeyType"
-              @update:model-value="(value: any) => (createKeyType = value as RedisCreateKeyType)"
-            >
-              <SelectTrigger class="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="option in createKeyTypeOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
+        <label v-if="createKeyType === 'hash'" class="grid gap-1.5 text-xs font-medium">
+          <span>{{ t("redis.createField") }}</span>
+          <Input
+            v-model="createKeyField"
+            class="dbx-editor-font-family h-8 text-xs"
+            :placeholder="t('redis.createFieldPlaceholder')"
+            @keydown.enter="createRedisKey"
+          />
+        </label>
 
-          <label v-if="createKeyType === 'hash'" class="grid gap-1.5 text-xs font-medium">
-            <span>{{ t("redis.createField") }}</span>
-            <Input
-              v-model="createKeyField"
-              class="dbx-editor-font-family h-8 text-xs"
-              :placeholder="t('redis.createFieldPlaceholder')"
-              @keydown.enter="createRedisKey"
-            />
-          </label>
+        <label v-if="createKeyType === 'zset'" class="grid gap-1.5 text-xs font-medium">
+          <span>{{ t("redis.createScore") }}</span>
+          <Input
+            v-model="createKeyScore"
+            class="dbx-editor-font-family h-8 text-xs"
+            placeholder="0"
+            @keydown.enter="createRedisKey"
+          />
+        </label>
 
-          <label v-if="createKeyType === 'zset'" class="grid gap-1.5 text-xs font-medium">
-            <span>{{ t("redis.createScore") }}</span>
-            <Input
-              v-model="createKeyScore"
-              class="dbx-editor-font-family h-8 text-xs"
-              placeholder="0"
-              @keydown.enter="createRedisKey"
-            />
-          </label>
+        <label class="grid gap-1.5 text-xs font-medium">
+          <span>{{
+            t(createKeyType === "set" || createKeyType === "zset" ? "redis.createMember" : "redis.createValue")
+          }}</span>
+          <textarea
+            v-model="createKeyValue"
+            class="dbx-editor-font-family min-h-28 resize-y rounded-md border bg-[var(--ds-bg-popover)] p-2 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            spellcheck="false"
+            :placeholder="t('redis.createValuePlaceholder')"
+          />
+        </label>
 
-          <label class="grid gap-1.5 text-xs font-medium">
-            <span>{{
-              t(createKeyType === "set" || createKeyType === "zset" ? "redis.createMember" : "redis.createValue")
-            }}</span>
-            <textarea
-              v-model="createKeyValue"
-              class="dbx-editor-font-family min-h-28 resize-y rounded-md border bg-background p-2 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              spellcheck="false"
-              :placeholder="t('redis.createValuePlaceholder')"
-            />
-          </label>
+        <p v-if="createKeyError" class="text-xs text-[var(--ds-red)]">{{ createKeyError }}</p>
+      </div>
 
-          <p v-if="createKeyError" class="text-xs text-destructive">{{ createKeyError }}</p>
-        </div>
-
-        <DialogFooter>
-          <Button variant="ghost" :disabled="creatingKey" @click="showCreateKeyDialog = false">
-            {{ t("dangerDialog.cancel") }}
-          </Button>
-          <Button :disabled="creatingKey" @click="createRedisKey">
-            <Loader2 v-if="creatingKey" class="h-4 w-4 animate-spin" />
-            <Plus v-else class="h-4 w-4" />
-            {{ t("redis.createKeySubmit") }}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <template #footer>
+        <Button variant="ghost" :disabled="creatingKey" @click="showCreateKeyDialog = false">
+          {{ t("common.cancel") }}
+        </Button>
+        <Button :disabled="creatingKey" @click="createRedisKey">
+          <Loader2 v-if="creatingKey" class="h-4 w-4 animate-spin" />
+          <Plus v-else class="h-4 w-4" />
+          {{ t("redis.createKeySubmit") }}
+        </Button>
+      </template>
+    </DsDialog>
   </div>
 </template>
 

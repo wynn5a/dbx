@@ -2,7 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { uuid } from "@/lib/utils";
 import { useI18n } from "vue-i18n";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -379,20 +379,36 @@ const overallRowsLabel = computed(() =>
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-[560px] max-h-[80vh] flex flex-col overflow-hidden" @interact-outside.prevent>
-      <DialogHeader>
-        <DialogTitle class="flex items-center gap-2">
-          <ArrowRightLeft class="w-4 h-4" />
-          {{ t("transfer.title") }}
-        </DialogTitle>
+    <DialogContent
+      class="ds-dialog gap-0 p-0 flex flex-col overflow-hidden sm:max-w-[560px] max-h-[80vh]"
+      :show-close-button="false"
+      @interact-outside.prevent
+    >
+      <DialogHeader
+        class="flex h-14 shrink-0 flex-row items-center gap-3 space-y-0 border-b border-[var(--ds-border)] px-4 text-left"
+      >
+        <div
+          class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+        >
+          <ArrowRightLeft class="h-4 w-4" />
+        </div>
+        <DialogTitle
+          class="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]"
+          >{{ t("transfer.title") }}</DialogTitle
+        >
+        <DialogClose as-child>
+          <Button variant="ghost" size="icon-sm" class="-mr-1 shrink-0"
+            ><X class="h-4 w-4" /><span class="sr-only">{{ t("common.close") }}</span></Button
+          >
+        </DialogClose>
       </DialogHeader>
 
-      <div class="flex-1 min-h-0 overflow-auto">
+      <div class="flex-1 min-h-0 overflow-y-auto px-4 py-4">
         <!-- Config View -->
         <div v-if="!isTransferring" class="grid gap-4 py-3">
           <!-- Source Section -->
           <div class="space-y-3">
-            <div class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <div class="text-xs font-medium text-[var(--ds-text-3)] uppercase tracking-wider">
               {{ t("transfer.source") }}
             </div>
 
@@ -446,7 +462,7 @@ const overallRowsLabel = computed(() =>
 
           <!-- Target Section -->
           <div class="space-y-3">
-            <div class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <div class="text-xs font-medium text-[var(--ds-text-3)] uppercase tracking-wider">
               {{ t("transfer.target") }}
             </div>
 
@@ -501,7 +517,7 @@ const overallRowsLabel = computed(() =>
           <!-- Tables Section -->
           <div class="space-y-2">
             <div class="flex items-center justify-between">
-              <div class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              <div class="text-xs font-medium text-[var(--ds-text-3)] uppercase tracking-wider">
                 {{ t("transfer.tables") }}
                 <span v-if="sourceTables.length" class="text-muted-foreground/60"
                   >({{ selectedTables.size }}/{{ sourceTables.length }})</span
@@ -525,17 +541,20 @@ const overallRowsLabel = computed(() =>
               class="h-7 text-xs"
             />
 
-            <div v-if="loadingTables" class="flex items-center gap-2 text-xs text-muted-foreground py-4 justify-center">
+            <div
+              v-if="loadingTables"
+              class="flex items-center gap-2 text-xs text-[var(--ds-text-3)] py-4 justify-center"
+            >
               <Loader2 class="w-3.5 h-3.5 animate-spin" />
               {{ t("common.loading") }}
             </div>
             <div
               v-else-if="!sourceConnectionId || !sourceDatabase"
-              class="text-xs text-muted-foreground py-4 text-center"
+              class="text-xs text-[var(--ds-text-3)] py-4 text-center"
             >
               {{ t("transfer.selectSourceFirst") }}
             </div>
-            <div v-else-if="sourceTables.length === 0" class="text-xs text-muted-foreground py-4 text-center">
+            <div v-else-if="sourceTables.length === 0" class="text-xs text-[var(--ds-text-3)] py-4 text-center">
               {{ t("transfer.noTables") }}
             </div>
             <div v-else class="border rounded-md max-h-[200px] overflow-y-auto">
@@ -588,7 +607,7 @@ const overallRowsLabel = computed(() =>
 
         <!-- Progress View -->
         <div v-else class="py-3 space-y-3">
-          <div class="flex items-center justify-between text-xs text-muted-foreground">
+          <div class="flex items-center justify-between text-xs text-[var(--ds-text-3)]">
             <span>
               {{ t("transfer.overallProgress") }}: {{ completedTables }} / {{ selectedTables.size }}
               {{ t("transfer.tables").toLowerCase() }} · {{ overallRowsLabel }}
@@ -601,10 +620,12 @@ const overallRowsLabel = computed(() =>
               {{ t("transfer.completedWithErrors", { count: failedTables }) }}
             </span>
             <span v-else-if="overallCancelled" class="text-yellow-600 font-medium">{{ t("transfer.cancelled") }}</span>
-            <span v-else-if="overallError" class="text-destructive font-medium">{{ t("transfer.failed") }}</span>
+            <span v-else-if="overallError" class="text-[var(--ds-red)] font-medium">{{ t("transfer.failed") }}</span>
           </div>
 
-          <div class="w-full bg-muted rounded-full h-2 overflow-hidden">
+          <div
+            class="w-full bg-[var(--ds-bg-canvas)] rounded-full h-2 overflow-hidden border border-[var(--ds-border-soft)]"
+          >
             <div
               class="h-full rounded-full transition-all duration-300"
               :class="
@@ -668,7 +689,7 @@ const overallRowsLabel = computed(() =>
         </div>
       </div>
 
-      <DialogFooter>
+      <DialogFooter class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3">
         <template v-if="!isTransferring">
           <Button variant="outline" size="sm" @click="open = false">
             {{ t("transfer.cancel") }}

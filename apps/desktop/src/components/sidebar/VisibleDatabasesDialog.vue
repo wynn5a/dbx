@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { CheckSquare, Loader2, Search, Square } from "@lucide/vue";
+import { CheckSquare, Database, Loader2, Search, Square } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DsDialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useConnectionStore } from "@/stores/connectionStore";
 import {
@@ -132,17 +132,20 @@ async function saveSelection() {
 </script>
 
 <template>
-  <Dialog :open="open" @update:open="(value: boolean) => emit('update:open', value)">
-    <DialogContent class="sm:max-w-[460px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("visibleDatabases.title") }}</DialogTitle>
-        <p class="text-sm text-muted-foreground">
-          {{ t("visibleDatabases.description", { connection: connectionName }) }}
-        </p>
-      </DialogHeader>
+  <DsDialog
+    :open="open"
+    :title="t('visibleDatabases.title')"
+    :icon="Database"
+    content-class="sm:max-w-[460px]"
+    @update:open="(value: boolean) => emit('update:open', value)"
+  >
+    <div class="grid gap-3">
+      <p class="text-sm text-[var(--ds-text-3)]">
+        {{ t("visibleDatabases.description", { connection: connectionName }) }}
+      </p>
 
-      <div class="flex items-center gap-2 rounded-md border bg-background px-2">
-        <Search class="h-4 w-4 shrink-0 text-muted-foreground" />
+      <div class="flex items-center gap-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] px-2">
+        <Search class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
         <Input
           v-model="searchText"
           :placeholder="t('visibleDatabases.searchPlaceholder')"
@@ -151,7 +154,7 @@ async function saveSelection() {
         />
       </div>
 
-      <div class="flex items-center justify-between text-xs text-muted-foreground">
+      <div class="flex items-center justify-between text-xs text-[var(--ds-text-3)]">
         <span>{{ t("visibleDatabases.selectedCount", { selected: selectedCount, total: totalCount }) }}</span>
         <div class="flex items-center gap-2">
           <button class="hover:text-foreground disabled:opacity-50" :disabled="isLoading" @click="selectAll">
@@ -172,7 +175,7 @@ async function saveSelection() {
 
       <label
         v-if="hasSystemDatabases"
-        class="flex h-8 items-center gap-2 rounded-md px-1 text-xs text-muted-foreground"
+        class="flex h-8 items-center gap-2 rounded-md px-1 text-xs text-[var(--ds-text-3)]"
       >
         <input
           v-model="showSystemDatabases"
@@ -183,15 +186,15 @@ async function saveSelection() {
         <span>{{ t("visibleDatabases.showSystemDatabases") }}</span>
       </label>
 
-      <div class="h-72 overflow-y-auto rounded-md border bg-background/50 p-1">
-        <div v-if="isLoading" class="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+      <div class="h-72 overflow-y-auto rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] p-1">
+        <div v-if="isLoading" class="flex h-full items-center justify-center gap-2 text-sm text-[var(--ds-text-3)]">
           <Loader2 class="h-4 w-4 animate-spin" />
           {{ t("common.loading") }}
         </div>
-        <div v-else-if="errorMessage" class="p-3 text-sm text-destructive">
+        <div v-else-if="errorMessage" class="p-3 text-sm text-[var(--ds-red)]">
           {{ t("visibleDatabases.loadFailed", { message: errorMessage }) }}
         </div>
-        <div v-else-if="!filteredDatabaseNames.length" class="p-3 text-sm text-muted-foreground">
+        <div v-else-if="!filteredDatabaseNames.length" class="p-3 text-sm text-[var(--ds-text-3)]">
           {{ t("grid.noSearchResults") }}
         </div>
         <template v-else>
@@ -203,18 +206,18 @@ async function saveSelection() {
             @click="toggleDatabase(database)"
           >
             <CheckSquare v-if="selectedNames.has(database)" class="h-4 w-4 shrink-0 text-primary" />
-            <Square v-else class="h-4 w-4 shrink-0 text-muted-foreground" />
+            <Square v-else class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
             <span class="truncate">{{ database }}</span>
           </button>
         </template>
       </div>
+    </div>
 
-      <DialogFooter>
-        <Button variant="outline" @click="emit('update:open', false)">{{ t("dangerDialog.cancel") }}</Button>
-        <Button :disabled="isLoading || !!errorMessage" @click="saveSelection">
-          {{ t("visibleDatabases.save") }}
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+    <template #footer>
+      <Button variant="outline" @click="emit('update:open', false)">{{ t("common.cancel") }}</Button>
+      <Button :disabled="isLoading || !!errorMessage" @click="saveSelection">
+        {{ t("visibleDatabases.save") }}
+      </Button>
+    </template>
+  </DsDialog>
 </template>

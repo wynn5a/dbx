@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Dialog, DialogHeader, DialogTitle, DialogFooter, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogHeader, DialogTitle, DialogFooter, DialogContent, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -15,7 +15,7 @@ import type { TableDiff, TableSchemaDetail } from "@/lib/schemaDiff";
 import type { TableInfo } from "@/types/database";
 import { sqlMetadataRefreshTarget } from "@/lib/sqlMetadataRefresh";
 import { useToast } from "@/composables/useToast";
-import { Loader2, Copy, Play, GitCompareArrows, ArrowLeftRight } from "@lucide/vue";
+import { Loader2, Copy, Play, GitCompareArrows, ArrowLeftRight, X } from "@lucide/vue";
 import { useSqlHighlighter } from "@/composables/useSqlHighlighter";
 
 interface SelectableTableDiff extends TableDiff {
@@ -376,17 +376,30 @@ watch(
 <template>
   <Dialog v-model:open="open">
     <DialogContent
-      class="min-w-[min(720px,calc(100vw-2rem))] resize-x sm:max-w-5xl max-h-[80vh] flex flex-col overflow-hidden"
+      class="ds-dialog gap-0 p-0 flex flex-col overflow-hidden min-w-[min(720px,calc(100vw-2rem))] resize-x sm:max-w-5xl max-h-[80vh]"
+      :show-close-button="false"
       @interact-outside.prevent
     >
-      <DialogHeader>
-        <DialogTitle class="flex items-center gap-2">
-          <GitCompareArrows class="w-4 h-4" />
-          {{ t("diff.title") }}
-        </DialogTitle>
+      <DialogHeader
+        class="flex h-14 shrink-0 flex-row items-center gap-3 space-y-0 border-b border-[var(--ds-border)] px-4 text-left"
+      >
+        <div
+          class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+        >
+          <GitCompareArrows class="h-4 w-4" />
+        </div>
+        <DialogTitle
+          class="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]"
+          >{{ t("diff.title") }}</DialogTitle
+        >
+        <DialogClose as-child>
+          <Button variant="ghost" size="icon-sm" class="-mr-1 shrink-0"
+            ><X class="h-4 w-4" /><span class="sr-only">{{ t("common.close") }}</span></Button
+          >
+        </DialogClose>
       </DialogHeader>
 
-      <div class="flex-1 min-h-0 overflow-auto space-y-4 py-2">
+      <div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
         <!-- Source / Target Selection -->
         <div class="grid grid-cols-[1fr_auto_1fr] gap-4 items-start">
           <div class="space-y-2">
@@ -498,7 +511,9 @@ watch(
           </div>
         </div>
 
-        <div class="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2">
+        <div
+          class="flex items-center gap-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] px-3 py-2"
+        >
           <input id="schema-diff-ignore-comments" v-model="ignoreComments" type="checkbox" class="accent-primary" />
           <Label for="schema-diff-ignore-comments" class="cursor-pointer text-xs">
             {{ t("diff.ignoreComments") }}
@@ -506,14 +521,14 @@ watch(
         </div>
 
         <!-- Comparing -->
-        <div v-if="step === 'comparing'" class="flex items-center justify-center py-8 text-sm text-muted-foreground">
+        <div v-if="step === 'comparing'" class="flex items-center justify-center py-8 text-sm text-[var(--ds-text-3)]">
           <Loader2 class="w-4 h-4 animate-spin mr-2" />
           {{ t("diff.comparing") }}
         </div>
 
         <!-- Results -->
         <template v-if="step === 'result'">
-          <div v-if="diffs.length === 0" class="py-6 text-center text-sm text-muted-foreground">
+          <div v-if="diffs.length === 0" class="py-6 text-center text-sm text-[var(--ds-text-3)]">
             {{ t("diff.noDifferences") }}
           </div>
 
@@ -522,7 +537,7 @@ watch(
             <div class="border rounded-lg overflow-hidden">
               <div class="max-h-60 overflow-auto">
                 <table class="w-full text-xs table-fixed">
-                  <thead class="bg-muted sticky top-0 z-10">
+                  <thead class="bg-[var(--ds-bg-canvas)] sticky top-0 z-10">
                     <tr>
                       <th class="px-2 py-2 w-8">
                         <input
@@ -634,14 +649,14 @@ watch(
             <div class="space-y-1">
               <Label class="text-xs font-medium">{{ t("diff.generatedSql") }}</Label>
               <pre
-                class="w-full h-48 overflow-auto rounded-lg border bg-muted/20 p-3 font-mono text-xs whitespace-pre"
+                class="w-full h-48 overflow-auto rounded-lg border border-[var(--ds-border-soft)] bg-[var(--ds-bg-canvas)] p-3 font-mono text-xs whitespace-pre"
                 v-html="highlightedSyncSql"
               ></pre>
             </div>
 
             <!-- Sync Errors -->
             <div v-if="syncErrors.length > 0" class="space-y-1">
-              <Label class="text-xs font-medium text-destructive">
+              <Label class="text-xs font-medium text-[var(--ds-red)]">
                 {{ t("diff.syncSummary", { success: executeTotal - syncErrors.length, failed: syncErrors.length }) }}
               </Label>
               <div class="max-h-32 overflow-auto border rounded-lg bg-destructive/5 p-2 space-y-1">
@@ -657,7 +672,10 @@ watch(
         </template>
       </div>
 
-      <DialogFooter v-if="!(step === 'result' && diffs.length > 0)" class="flex items-center gap-2">
+      <DialogFooter
+        v-if="!(step === 'result' && diffs.length > 0)"
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 flex items-center gap-2"
+      >
         <Button variant="outline" @click="open = false">{{ t("common.close") }}</Button>
         <Button v-if="step === 'select'" size="sm" :disabled="!canCompare || loadingMeta" @click="startCompare">
           <Loader2 v-if="loadingMeta" class="w-3.5 h-3.5 mr-1 animate-spin" />
@@ -666,8 +684,11 @@ watch(
         </Button>
       </DialogFooter>
 
-      <DialogFooter v-if="step === 'result' && diffs.length > 0" class="flex items-center gap-2">
-        <span v-if="executing" class="text-xs text-muted-foreground mr-auto">
+      <DialogFooter
+        v-if="step === 'result' && diffs.length > 0"
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 flex items-center gap-2"
+      >
+        <span v-if="executing" class="text-xs text-[var(--ds-text-3)] mr-auto">
           {{ t("diff.syncProgress", { current: executedCount, total: executeTotal }) }}
         </span>
         <Button variant="outline" size="sm" @click="copySql">

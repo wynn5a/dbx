@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from "vue";
 import { useI18n } from "vue-i18n";
 import { invoke } from "@tauri-apps/api/core";
-import { ChevronsRight } from "@lucide/vue";
+import { ChevronsRight, Save } from "@lucide/vue";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import AppToolbar from "@/components/layout/AppToolbar.vue";
 import AppTabBar from "@/components/layout/AppTabBar.vue";
@@ -61,7 +61,7 @@ import { classifyAiSqlExecution } from "@/lib/aiSqlExecutionPolicy";
 import { buildHistoryAiAnalysisPrompt } from "@/lib/historyAiAnalysis";
 import { countAvailableAgentDriverUpdates, type AgentDriverUpdateBadgeState } from "@/lib/agentDriverUpdateBadge";
 import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/safeStorage";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DsDialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -1251,37 +1251,32 @@ onUnmounted(() => {
         </Transition>
       </div>
 
-      <Dialog v-model:open="showSaveSqlDialog">
-        <DialogContent class="sm:max-w-[420px]">
-          <DialogHeader>
-            <DialogTitle>{{ t("savedSql.saveToLibrary") }}</DialogTitle>
-          </DialogHeader>
-          <div class="space-y-3">
-            <div class="space-y-1.5">
-              <label class="text-xs font-medium text-muted-foreground">{{ t("savedSql.fileName") }}</label>
-              <Input v-model="saveSqlName" @keydown.enter.prevent="confirmSaveSqlToLibrary" />
-            </div>
-            <div class="space-y-1.5">
-              <label class="text-xs font-medium text-muted-foreground">{{ t("savedSql.folder") }}</label>
-              <Select v-model="saveSqlFolderId">
-                <SelectTrigger class="h-8 w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent position="popper">
-                  <SelectItem :value="ROOT_SAVED_SQL_FOLDER">{{ t("savedSql.rootFolder") }}</SelectItem>
-                  <SelectItem v-for="folder in saveSqlFolders" :key="folder.id" :value="folder.id">
-                    {{ folder.name }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+      <DsDialog v-model:open="showSaveSqlDialog" :title="t('savedSql.saveToLibrary')" :icon="Save">
+        <div class="space-y-3">
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium text-[var(--ds-text-3)]">{{ t("savedSql.fileName") }}</label>
+            <Input v-model="saveSqlName" @keydown.enter.prevent="confirmSaveSqlToLibrary" />
           </div>
-          <DialogFooter>
-            <Button variant="outline" @click="showSaveSqlDialog = false">{{ t("dangerDialog.cancel") }}</Button>
-            <Button :disabled="!saveSqlName.trim()" @click="confirmSaveSqlToLibrary">{{ t("savedSql.save") }}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <div class="space-y-1.5">
+            <label class="text-xs font-medium text-[var(--ds-text-3)]">{{ t("savedSql.folder") }}</label>
+            <Select v-model="saveSqlFolderId">
+              <SelectTrigger class="h-8 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="popper">
+                <SelectItem :value="ROOT_SAVED_SQL_FOLDER">{{ t("savedSql.rootFolder") }}</SelectItem>
+                <SelectItem v-for="folder in saveSqlFolders" :key="folder.id" :value="folder.id">
+                  {{ folder.name }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <template #footer>
+          <Button variant="outline" @click="showSaveSqlDialog = false">{{ t("common.cancel") }}</Button>
+          <Button :disabled="!saveSqlName.trim()" @click="confirmSaveSqlToLibrary">{{ t("common.save") }}</Button>
+        </template>
+      </DsDialog>
     </TooltipProvider>
   </div>
 </template>

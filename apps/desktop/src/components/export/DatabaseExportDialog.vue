@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Dialog, DialogHeader, DialogTitle, DialogFooter, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogHeader, DialogTitle, DialogFooter, DialogContent, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -338,15 +338,31 @@ watch(
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-[480px] max-h-[80vh] flex flex-col overflow-hidden" @interact-outside.prevent>
-      <DialogHeader>
-        <DialogTitle class="flex items-center gap-2">
-          <Download class="w-4 h-4" />
-          {{ t("databaseExport.title") }}
-        </DialogTitle>
+    <DialogContent
+      class="ds-dialog gap-0 p-0 flex flex-col overflow-hidden sm:max-w-[480px] max-h-[80vh]"
+      :show-close-button="false"
+      @interact-outside.prevent
+    >
+      <DialogHeader
+        class="flex h-14 shrink-0 flex-row items-center gap-3 space-y-0 border-b border-[var(--ds-border)] px-4 text-left"
+      >
+        <div
+          class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+        >
+          <Download class="h-4 w-4" />
+        </div>
+        <DialogTitle
+          class="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]"
+          >{{ t("databaseExport.title") }}</DialogTitle
+        >
+        <DialogClose as-child>
+          <Button variant="ghost" size="icon-sm" class="-mr-1 shrink-0"
+            ><X class="h-4 w-4" /><span class="sr-only">{{ t("common.close") }}</span></Button
+          >
+        </DialogClose>
       </DialogHeader>
 
-      <div class="flex-1 min-h-0 overflow-auto space-y-4 py-2">
+      <div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
         <!-- Connection / Database / Schema Selection -->
         <div v-if="!isExporting && !exportDone && !exportError && !exportCancelled" class="space-y-3">
           <div class="space-y-1.5">
@@ -396,18 +412,18 @@ watch(
           <div v-if="schema" class="space-y-2">
             <div class="flex items-center justify-between gap-2">
               <Label class="text-xs">{{ t("databaseExport.tableSelection") }}</Label>
-              <div v-if="tables.length" class="text-[11px] text-muted-foreground">
+              <div v-if="tables.length" class="text-[11px] text-[var(--ds-text-3)]">
                 {{ t("databaseExport.selectedTables", { selected: selectedTables.length, total: tables.length }) }}
               </div>
             </div>
 
-            <div v-if="loadingTables" class="text-xs text-muted-foreground">
+            <div v-if="loadingTables" class="text-xs text-[var(--ds-text-3)]">
               {{ t("databaseExport.loadingTables") }}
             </div>
-            <div v-else-if="tableError" class="text-xs text-destructive">
+            <div v-else-if="tableError" class="text-xs text-[var(--ds-red)]">
               {{ t("databaseExport.tableLoadError", { error: tableError }) }}
             </div>
-            <div v-else-if="tables.length" class="space-y-2 rounded border border-border/60 p-2">
+            <div v-else-if="tables.length" class="space-y-2 rounded border border-[var(--ds-border)] p-2">
               <div class="relative">
                 <Search class="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <Input v-model="tableFilter" class="h-7 pl-7 text-xs" :placeholder="t('databaseExport.filterTables')" />
@@ -434,14 +450,14 @@ watch(
                 </button>
               </div>
             </div>
-            <div v-else class="text-xs text-muted-foreground">
+            <div v-else class="text-xs text-[var(--ds-text-3)]">
               {{ t("databaseExport.noTables") }}
             </div>
           </div>
 
           <!-- Options -->
           <div class="space-y-2.5 pt-1">
-            <div class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            <div class="text-xs font-medium text-[var(--ds-text-3)] uppercase tracking-wider">
               {{ t("settings.options") }}
             </div>
             <div class="flex items-center gap-2 cursor-pointer text-xs" @click="includeStructure = !includeStructure">
@@ -474,7 +490,7 @@ watch(
         <!-- Progress View -->
         <div v-if="isExporting || exportDone || exportError || exportCancelled" class="py-3 space-y-3">
           <div v-if="exportProgress" class="space-y-2">
-            <div class="text-xs text-muted-foreground">
+            <div class="text-xs text-[var(--ds-text-3)]">
               {{
                 t("databaseExport.currentTable", {
                   table: exportProgress.currentObject,
@@ -484,7 +500,9 @@ watch(
               }}
             </div>
 
-            <div class="w-full bg-muted rounded-full h-2 overflow-hidden">
+            <div
+              class="w-full bg-[var(--ds-bg-canvas)] rounded-full h-2 overflow-hidden border border-[var(--ds-border-soft)]"
+            >
               <div
                 class="h-full rounded-full transition-all duration-300"
                 :class="exportError ? 'bg-destructive' : exportCancelled ? 'bg-yellow-500' : 'bg-primary'"
@@ -492,7 +510,7 @@ watch(
               />
             </div>
 
-            <div class="text-xs text-muted-foreground">
+            <div class="text-xs text-[var(--ds-text-3)]">
               {{ t("databaseExport.rowsExported", { count: exportProgress.rowsExported.toLocaleString() }) }}
             </div>
           </div>
@@ -501,7 +519,7 @@ watch(
           <div v-if="exportDone" class="text-xs text-green-600 font-medium">
             {{ t("databaseExport.exportSuccess") }}
           </div>
-          <div v-else-if="exportError" class="text-xs text-destructive font-medium">
+          <div v-else-if="exportError" class="text-xs text-[var(--ds-red)] font-medium">
             {{ t("databaseExport.exportError", { error: exportError }) }}
           </div>
           <div v-else-if="exportCancelled" class="text-xs text-yellow-600 font-medium">
@@ -510,7 +528,7 @@ watch(
         </div>
       </div>
 
-      <DialogFooter>
+      <DialogFooter class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3">
         <template v-if="!isExporting && !exportDone && !exportError && !exportCancelled">
           <Button variant="outline" size="sm" @click="open = false">
             {{ t("transfer.cancel") }}

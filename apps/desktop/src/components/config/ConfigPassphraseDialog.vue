@@ -5,7 +5,7 @@ import { Lock } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DsDialog } from "@/components/ui/dialog";
 
 const props = defineProps<{
   open: boolean;
@@ -60,48 +60,44 @@ const displayError = computed(() => error.value || props.externalError || "");
 </script>
 
 <template>
-  <Dialog v-model:open="dialogOpen">
-    <DialogContent class="sm:max-w-[440px]">
-      <DialogHeader>
-        <DialogTitle class="flex items-center gap-2">
-          <Lock class="h-5 w-5" />
-          {{ mode === "export" ? t("configExport.passphraseTitle") : t("configExport.passphraseImportTitle") }}
-        </DialogTitle>
-      </DialogHeader>
+  <DsDialog
+    v-model:open="dialogOpen"
+    :title="mode === 'export' ? t('configExport.passphraseTitle') : t('configExport.passphraseImportTitle')"
+    :icon="Lock"
+    content-class="sm:max-w-[440px]"
+  >
+    <div class="grid gap-4">
+      <p class="text-sm text-[var(--ds-text-3)]">
+        {{ mode === "export" ? t("configExport.passphraseExportHint") : t("configExport.passphraseImportHint") }}
+      </p>
 
-      <div class="grid gap-4 py-4">
-        <p class="text-sm text-muted-foreground">
-          {{ mode === "export" ? t("configExport.passphraseExportHint") : t("configExport.passphraseImportHint") }}
-        </p>
-
-        <div class="grid gap-2">
-          <Label>{{ t("configExport.passphrase") }}</Label>
-          <Input
-            v-model="passphrase"
-            type="password"
-            :placeholder="t('configExport.passphrasePlaceholder')"
-            @keydown.enter="mode === 'import' ? confirm() : undefined"
-          />
-        </div>
-
-        <div v-if="mode === 'export'" class="grid gap-2">
-          <Label>{{ t("configExport.passphraseConfirm") }}</Label>
-          <Input
-            v-model="passphraseConfirm"
-            type="password"
-            :placeholder="t('configExport.passphraseConfirmPlaceholder')"
-            @keydown.enter="confirm"
-          />
-        </div>
-
-        <p v-if="displayError" class="text-sm text-destructive">{{ displayError }}</p>
+      <div class="grid gap-2">
+        <Label>{{ t("configExport.passphrase") }}</Label>
+        <Input
+          v-model="passphrase"
+          type="password"
+          :placeholder="t('configExport.passphrasePlaceholder')"
+          @keydown.enter="mode === 'import' ? confirm() : undefined"
+        />
       </div>
 
-      <DialogFooter>
-        <Button @click="confirm">
-          {{ mode === "export" ? t("configExport.exportEncrypted") : t("configExport.decryptImport") }}
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+      <div v-if="mode === 'export'" class="grid gap-2">
+        <Label>{{ t("configExport.passphraseConfirm") }}</Label>
+        <Input
+          v-model="passphraseConfirm"
+          type="password"
+          :placeholder="t('configExport.passphraseConfirmPlaceholder')"
+          @keydown.enter="confirm"
+        />
+      </div>
+
+      <p v-if="displayError" class="text-sm text-[var(--ds-red)]">{{ displayError }}</p>
+    </div>
+
+    <template #footer>
+      <Button @click="confirm">
+        {{ mode === "export" ? t("configExport.exportEncrypted") : t("configExport.decryptImport") }}
+      </Button>
+    </template>
+  </DsDialog>
 </template>

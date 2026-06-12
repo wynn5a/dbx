@@ -735,6 +735,10 @@ export default {
     loading: "Carregando...",
     stopping: "Parando...",
     close: "Fechar",
+    cancel: "Cancelar",
+    save: "Salvar",
+    create: "Criar",
+    rename: "Renomear",
   },
   explain: {
     title: "Plano de Execução",

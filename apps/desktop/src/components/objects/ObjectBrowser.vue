@@ -82,7 +82,7 @@ import { useQueryStore } from "@/stores/queryStore";
 import QueryEditor from "@/components/editor/QueryEditor.vue";
 import type { SqlFormatDialect } from "@/lib/sqlFormatter";
 import { isCancelSearchShortcut } from "@/lib/keyboardShortcuts";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DsDialog } from "@/components/ui/dialog";
 import {
   buildObjectBrowserRows,
   filterObjectBrowserRows,
@@ -1638,32 +1638,27 @@ function getObjectBrowserMenuItems(item: ObjectBrowserRow): ContextMenuItem[] {
     @confirm="confirmBatchDropTables"
   />
 
-  <Dialog v-model:open="showRenameDialog">
-    <DialogContent class="sm:max-w-[420px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("contextMenu.renameObjectTitle") }}</DialogTitle>
-      </DialogHeader>
-      <div class="grid gap-3">
-        <Input
-          v-model="renameInput"
-          :placeholder="t('contextMenu.renameObjectNamePlaceholder')"
-          @keydown.enter.prevent="confirmRename"
-        />
-        <pre
-          v-if="renamePreviewSqlText"
-          class="max-h-32 overflow-auto rounded bg-muted p-3 text-xs whitespace-pre-wrap"
-          v-html="highlight(renamePreviewSqlText)"
-        ></pre>
-        <p v-if="renameError" class="text-sm text-destructive">{{ renameError }}</p>
-      </div>
-      <DialogFooter>
-        <Button variant="outline" @click="showRenameDialog = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button :disabled="!renameInput.trim() || renameInput.trim() === renameTarget?.name" @click="confirmRename">
-          {{ t("contextMenu.renameObject") }}
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <DsDialog v-model:open="showRenameDialog" :title="t('contextMenu.renameObjectTitle')" :icon="Pencil">
+    <div class="grid gap-3">
+      <Input
+        v-model="renameInput"
+        :placeholder="t('contextMenu.renameObjectNamePlaceholder')"
+        @keydown.enter.prevent="confirmRename"
+      />
+      <pre
+        v-if="renamePreviewSqlText"
+        class="max-h-32 overflow-auto rounded bg-[var(--ds-bg-canvas)] border border-[var(--ds-border-soft)] p-3 text-xs whitespace-pre-wrap"
+        v-html="highlight(renamePreviewSqlText)"
+      ></pre>
+      <p v-if="renameError" class="text-sm text-[var(--ds-red)]">{{ renameError }}</p>
+    </div>
+    <template #footer>
+      <Button variant="outline" @click="showRenameDialog = false">{{ t("common.cancel") }}</Button>
+      <Button :disabled="!renameInput.trim() || renameInput.trim() === renameTarget?.name" @click="confirmRename">
+        {{ t("common.rename") }}
+      </Button>
+    </template>
+  </DsDialog>
 
   <DangerConfirmDialog
     v-model:open="showTruncateConfirm"
@@ -1695,24 +1690,24 @@ function getObjectBrowserMenuItems(item: ObjectBrowserRow): ContextMenuItem[] {
     @execute="executeProcedureSql"
   />
 
-  <Dialog v-model:open="showDuplicateDialog">
-    <DialogContent class="sm:max-w-[400px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("contextMenu.duplicateNameTitle") }}</DialogTitle>
-      </DialogHeader>
-      <Input
-        v-model="duplicateTableName"
-        :placeholder="t('contextMenu.duplicateNamePlaceholder')"
-        @keydown.enter.prevent="confirmDuplicateStructure"
-      />
-      <DialogFooter>
-        <Button variant="outline" @click="showDuplicateDialog = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button :disabled="!duplicateTableName.trim()" @click="confirmDuplicateStructure">
-          {{ t("dangerDialog.confirm") }}
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <DsDialog
+    v-model:open="showDuplicateDialog"
+    :title="t('contextMenu.duplicateNameTitle')"
+    :icon="CopyPlus"
+    content-class="sm:max-w-[400px]"
+  >
+    <Input
+      v-model="duplicateTableName"
+      :placeholder="t('contextMenu.duplicateNamePlaceholder')"
+      @keydown.enter.prevent="confirmDuplicateStructure"
+    />
+    <template #footer>
+      <Button variant="outline" @click="showDuplicateDialog = false">{{ t("common.cancel") }}</Button>
+      <Button :disabled="!duplicateTableName.trim()" @click="confirmDuplicateStructure">
+        {{ t("common.create") }}
+      </Button>
+    </template>
+  </DsDialog>
 </template>
 
 <style scoped>

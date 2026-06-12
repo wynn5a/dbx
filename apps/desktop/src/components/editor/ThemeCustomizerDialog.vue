@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, watch, computed } from "vue";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import type { CustomTheme, CustomThemeColors } from "@/stores/settingsStore";
 import { DEFAULT_CUSTOM_THEME_COLORS } from "@/stores/settingsStore";
-import { Plus, Trash2, Copy, Pencil, ChevronDown, Palette } from "@lucide/vue";
+import { Plus, Trash2, Copy, Pencil, ChevronDown, Palette, X } from "@lucide/vue";
 import { useToast } from "@/composables/useToast";
 import { useI18n } from "vue-i18n";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -439,12 +439,30 @@ function handleImport() {
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="sm:max-w-[860px] max-h-[90vh] overflow-hidden flex flex-col">
-      <DialogHeader>
-        <DialogTitle>{{ t("settings.customThemeTitle") }}</DialogTitle>
+    <DialogContent
+      class="ds-dialog gap-0 p-0 flex flex-col overflow-hidden sm:max-w-[860px] max-h-[90vh]"
+      :show-close-button="false"
+    >
+      <DialogHeader
+        class="flex h-14 shrink-0 flex-row items-center gap-3 space-y-0 border-b border-[var(--ds-border)] px-4 text-left"
+      >
+        <div
+          class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+        >
+          <Palette class="h-4 w-4" />
+        </div>
+        <DialogTitle
+          class="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]"
+          >{{ t("settings.customThemeTitle") }}</DialogTitle
+        >
+        <DialogClose as-child>
+          <Button variant="ghost" size="icon-sm" class="-mr-1 shrink-0"
+            ><X class="h-4 w-4" /><span class="sr-only">{{ t("common.close") }}</span></Button
+          >
+        </DialogClose>
       </DialogHeader>
 
-      <div class="flex-1 min-h-0 flex gap-4">
+      <div class="min-h-0 flex-1 overflow-hidden px-4 py-4 flex gap-4">
         <!-- Theme list sidebar -->
         <div class="w-48 shrink-0 flex flex-col gap-2">
           <div class="text-sm font-medium px-1">{{ t("settings.customThemeMyThemes") }}</div>
@@ -453,7 +471,7 @@ function handleImport() {
               v-for="theme in localThemes"
               :key="theme.id"
               class="group flex items-center gap-2 rounded-md px-2 py-1.5 cursor-pointer text-sm"
-              :class="activeEditId === theme.id ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'"
+              :class="activeEditId === theme.id ? 'bg-[var(--ds-accent)] text-white' : 'hover:bg-[var(--ds-bg-hover)]'"
               @click="activeEditId = theme.id"
             >
               <div class="flex-1 min-w-0">
@@ -499,7 +517,7 @@ function handleImport() {
             <TabsContent value="visual" class="space-y-4 flex-1 min-h-0 overflow-y-auto pr-1">
               <!-- Preview area -->
               <div class="rounded-lg border bg-black/50 p-5 font-mono text-base">
-                <div class="mb-2 text-sm text-muted-foreground">{{ t("settings.customThemeLivePreview") }}</div>
+                <div class="mb-2 text-sm text-[var(--ds-text-3)]">{{ t("settings.customThemeLivePreview") }}</div>
                 <div class="leading-relaxed text-lg">
                   <span v-for="(token, i) in previewCode" :key="i" :style="{ color: token.color }" class="inline">
                     {{ token.text }}<sup v-if="token.num" class="text-xl opacity-60">{{ token.num }}</sup>
@@ -511,9 +529,11 @@ function handleImport() {
               </div>
 
               <!-- Preset color schemes -->
-              <div class="flex items-center gap-2 rounded-lg border p-3 bg-muted/30">
-                <Palette class="h-4 w-4 text-muted-foreground shrink-0" />
-                <span class="text-sm text-muted-foreground shrink-0">{{ t("settings.customThemePreset") }}:</span>
+              <div
+                class="flex items-center gap-2 rounded-lg border border-[var(--ds-border)] p-3 bg-[var(--ds-bg-canvas)]"
+              >
+                <Palette class="h-4 w-4 text-[var(--ds-text-3)] shrink-0" />
+                <span class="text-sm text-[var(--ds-text-3)] shrink-0">{{ t("settings.customThemePreset") }}:</span>
                 <Select v-model="selectedPreset" class="flex-1">
                   <SelectTrigger class="h-8 text-sm">
                     <SelectValue :placeholder="t('settings.customThemeSelectPreset')" />
@@ -540,18 +560,18 @@ function handleImport() {
                   <span class="text-xl font-bold w-8 text-center shrink-0">{{ item.num }}</span>
                   <div class="flex-1 min-w-0">
                     <div class="font-medium text-sm">{{ item.label }}</div>
-                    <div class="text-xs text-muted-foreground truncate">{{ item.example }}</div>
+                    <div class="text-xs text-[var(--ds-text-3)] truncate">{{ item.example }}</div>
                   </div>
                   <div class="flex items-center gap-2 shrink-0">
                     <!-- Color square + dropdown arrow -->
                     <div class="relative">
                       <button
                         type="button"
-                        class="flex items-center gap-0.5 rounded border p-0.5 hover:bg-muted transition-colors"
+                        class="flex items-center gap-0.5 rounded border border-[var(--ds-border)] p-0.5 hover:bg-[var(--ds-bg-hover)] transition-colors"
                         @click.stop="togglePalette(item.key)"
                       >
                         <div class="h-6 w-6 rounded-sm" :style="{ backgroundColor: localColors[item.key] }" />
-                        <ChevronDown class="h-3 w-3 text-muted-foreground pointer-events-none" />
+                        <ChevronDown class="h-3 w-3 text-[var(--ds-text-3)] pointer-events-none" />
                       </button>
                       <!-- Palette popup -->
                       <div
@@ -565,7 +585,7 @@ function handleImport() {
                               v-for="color in row"
                               :key="color"
                               type="button"
-                              class="h-5 w-5 rounded-sm border border-border/50 hover:scale-110 transition-transform"
+                              class="h-5 w-5 rounded-sm border border-[var(--ds-border-soft)] hover:scale-110 transition-transform"
                               :style="{ backgroundColor: color }"
                               @click="applyBasicColor(item.key, color)"
                             />
@@ -612,8 +632,10 @@ function handleImport() {
         </div>
       </div>
 
-      <DialogFooter class="gap-2">
-        <Button variant="outline" @click="emit('update:open', false)">{{ t("settings.cancel") }}</Button>
+      <DialogFooter
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 gap-2"
+      >
+        <Button variant="outline" @click="emit('update:open', false)">{{ t("common.cancel") }}</Button>
         <Button @click="handleSave">{{ t("settings.customThemeSaveAndApply") }}</Button>
       </DialogFooter>
     </DialogContent>

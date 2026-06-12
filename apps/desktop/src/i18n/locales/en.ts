@@ -756,6 +756,8 @@ export default {
     close: "Close",
     cancel: "Cancel",
     save: "Save",
+    create: "Create",
+    rename: "Rename",
   },
   explain: {
     title: "Explain Plan",

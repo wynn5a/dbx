@@ -692,6 +692,10 @@ export default {
     loading: "載入中……",
     stopping: "正在停止……",
     close: "關閉",
+    cancel: "取消",
+    save: "儲存",
+    create: "建立",
+    rename: "重新命名",
   },
   explain: {
     title: "執行計畫",

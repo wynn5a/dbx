@@ -145,7 +145,7 @@ import { formatShortcut } from "@/lib/shortcutRegistry";
 import DatabaseIcon from "@/components/icons/DatabaseIcon.vue";
 import ConnectionErrorIndicator from "@/components/connection/ConnectionErrorIndicator.vue";
 import VisibleDatabasesDialog from "@/components/sidebar/VisibleDatabasesDialog.vue";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { DsDialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -2694,6 +2694,18 @@ const savedSqlNameInput = ref("");
 const showDeleteSavedSqlFileConfirm = ref(false);
 const showDeleteSavedSqlFolderConfirm = ref(false);
 
+const savedSqlNameTitle = computed(() =>
+  savedSqlNameMode.value === "folder-create"
+    ? t("savedSql.newFolder")
+    : savedSqlNameMode.value === "folder-rename"
+      ? t("savedSql.renameFolder")
+      : t("savedSql.renameFile"),
+);
+const savedSqlNameIcon = computed(() => (savedSqlNameMode.value === "folder-create" ? FolderPlus : Pencil));
+const savedSqlNameConfirmLabel = computed(() =>
+  savedSqlNameMode.value === "folder-create" ? t("common.create") : t("common.rename"),
+);
+
 function openCreateSavedSqlFolder() {
   savedSqlNameMode.value = "folder-create";
   savedSqlNameInput.value = t("savedSql.newFolderDefault");
@@ -3477,205 +3489,163 @@ function treeItemMenuItems(): ContextMenuItem[] {
     :connection-name="node.label"
   />
 
-  <Dialog v-model:open="showDeleteConfirm">
-    <DialogContent class="sm:max-w-[400px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("contextMenu.confirmDeleteTitle") }}</DialogTitle>
-      </DialogHeader>
-      <p class="text-sm text-muted-foreground">
-        {{ connectionDeleteConfirmMessage() }}
-      </p>
-      <DialogFooter>
-        <Button variant="outline" @click="showDeleteConfirm = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button
-          variant="destructive"
-          @click="
-            showDeleteConfirm = false;
-            confirmDelete();
-          "
-          >{{ connectionDeleteMenuLabel() }}</Button
-        >
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <DsDialog v-model:open="showDeleteConfirm" :title="t('contextMenu.confirmDeleteTitle')" :icon="Trash2">
+    <p class="text-sm text-[var(--ds-text-2)]">
+      {{ connectionDeleteConfirmMessage() }}
+    </p>
+    <template #footer>
+      <Button variant="outline" @click="showDeleteConfirm = false">{{ t("common.cancel") }}</Button>
+      <Button
+        variant="destructive"
+        @click="
+          showDeleteConfirm = false;
+          confirmDelete();
+        "
+        >{{ connectionDeleteMenuLabel() }}</Button
+      >
+    </template>
+  </DsDialog>
 
-  <Dialog v-model:open="showMoveToNewGroupDialog">
-    <DialogContent class="sm:max-w-[360px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("connectionGroup.createGroup") }}</DialogTitle>
-      </DialogHeader>
+  <DsDialog
+    v-model:open="showMoveToNewGroupDialog"
+    :title="t('connectionGroup.createGroup')"
+    :icon="FolderPlus"
+    content-class="sm:max-w-[400px]"
+  >
+    <Input
+      v-model="moveToNewGroupName"
+      :placeholder="t('connectionGroup.groupNamePlaceholder')"
+      @keydown.enter.prevent="confirmMoveToNewGroup"
+    />
+    <template #footer>
+      <Button variant="outline" @click="showMoveToNewGroupDialog = false">{{ t("common.cancel") }}</Button>
+      <Button :disabled="!moveToNewGroupName.trim()" @click="confirmMoveToNewGroup">{{ t("common.create") }}</Button>
+    </template>
+  </DsDialog>
+
+  <DsDialog v-model:open="showDeleteGroupConfirm" :title="t('connectionGroup.deleteGroupConfirmTitle')" :icon="Trash2">
+    <p class="text-sm text-[var(--ds-text-2)]">
+      {{ t("connectionGroup.deleteGroupConfirmMessage", { name: node.label }) }}
+    </p>
+    <template #footer>
+      <Button variant="outline" @click="showDeleteGroupConfirm = false">{{ t("common.cancel") }}</Button>
+      <Button variant="destructive" @click="confirmDeleteGroup">{{ t("connectionGroup.deleteGroup") }}</Button>
+    </template>
+  </DsDialog>
+
+  <DsDialog v-model:open="showSavedSqlNameDialog" :title="savedSqlNameTitle" :icon="savedSqlNameIcon">
+    <Input v-model="savedSqlNameInput" @keydown.enter.prevent="confirmSavedSqlName" />
+    <template #footer>
+      <Button variant="outline" @click="showSavedSqlNameDialog = false">{{ t("common.cancel") }}</Button>
+      <Button :disabled="!savedSqlNameInput.trim()" @click="confirmSavedSqlName">
+        {{ savedSqlNameConfirmLabel }}
+      </Button>
+    </template>
+  </DsDialog>
+
+  <DsDialog v-model:open="showRenameObjectDialog" :title="t('contextMenu.renameObjectTitle')" :icon="Pencil">
+    <div class="grid gap-3">
       <Input
-        v-model="moveToNewGroupName"
-        :placeholder="t('connectionGroup.groupNamePlaceholder')"
-        @keydown.enter.prevent="confirmMoveToNewGroup"
+        v-model="renameObjectName"
+        :placeholder="t('contextMenu.renameObjectNamePlaceholder')"
+        @keydown.enter.prevent="confirmRenameObject"
       />
-      <DialogFooter>
-        <Button variant="outline" @click="showMoveToNewGroupDialog = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button :disabled="!moveToNewGroupName.trim()" @click="confirmMoveToNewGroup">{{
-          t("connectionGroup.createGroup")
-        }}</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+      <pre
+        v-if="renameObjectPreviewSql"
+        class="max-h-32 overflow-auto rounded bg-[var(--ds-bg-canvas)] border border-[var(--ds-border-soft)] p-3 text-xs whitespace-pre-wrap"
+        v-html="highlight(renameObjectPreviewSql)"
+      ></pre>
+      <p v-if="renameObjectError" class="text-sm text-[var(--ds-red)]">{{ renameObjectError }}</p>
+    </div>
+    <template #footer>
+      <Button variant="outline" @click="showRenameObjectDialog = false">{{ t("common.cancel") }}</Button>
+      <Button
+        :disabled="!renameObjectName.trim() || renameObjectName.trim() === node.label"
+        @click="confirmRenameObject"
+      >
+        {{ t("contextMenu.renameObject") }}
+      </Button>
+    </template>
+  </DsDialog>
 
-  <Dialog v-model:open="showDeleteGroupConfirm">
-    <DialogContent class="sm:max-w-[400px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("connectionGroup.deleteGroupConfirmTitle") }}</DialogTitle>
-      </DialogHeader>
-      <p class="text-sm text-muted-foreground">
-        {{ t("connectionGroup.deleteGroupConfirmMessage", { name: node.label }) }}
-      </p>
-      <DialogFooter>
-        <Button variant="outline" @click="showDeleteGroupConfirm = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button variant="destructive" @click="confirmDeleteGroup">{{ t("connectionGroup.deleteGroup") }}</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
-
-  <Dialog v-model:open="showSavedSqlNameDialog">
-    <DialogContent class="sm:max-w-[380px]">
-      <DialogHeader>
-        <DialogTitle>
-          {{
-            savedSqlNameMode === "folder-create"
-              ? t("savedSql.newFolder")
-              : savedSqlNameMode === "folder-rename"
-                ? t("savedSql.renameFolder")
-                : t("savedSql.renameFile")
-          }}
-        </DialogTitle>
-      </DialogHeader>
-      <Input v-model="savedSqlNameInput" @keydown.enter.prevent="confirmSavedSqlName" />
-      <DialogFooter>
-        <Button variant="outline" @click="showSavedSqlNameDialog = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button :disabled="!savedSqlNameInput.trim()" @click="confirmSavedSqlName">{{
-          t("dangerDialog.confirm")
-        }}</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
-
-  <Dialog v-model:open="showRenameObjectDialog">
-    <DialogContent class="sm:max-w-[420px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("contextMenu.renameObjectTitle") }}</DialogTitle>
-      </DialogHeader>
-      <div class="grid gap-3">
-        <Input
-          v-model="renameObjectName"
-          :placeholder="t('contextMenu.renameObjectNamePlaceholder')"
-          @keydown.enter.prevent="confirmRenameObject"
-        />
-        <pre
-          v-if="renameObjectPreviewSql"
-          class="max-h-32 overflow-auto rounded bg-muted p-3 text-xs whitespace-pre-wrap"
-          v-html="highlight(renameObjectPreviewSql)"
-        ></pre>
-        <p v-if="renameObjectError" class="text-sm text-destructive">{{ renameObjectError }}</p>
+  <DsDialog
+    v-model:open="showStructurePreviewDialog"
+    :title="structurePreviewTitle || t('contextMenu.exportStructure')"
+    :icon="FileCode"
+    content-class="sm:max-w-[760px]"
+  >
+    <div class="grid gap-3">
+      <div v-if="isLoadingStructurePreview" class="flex items-center gap-2 text-sm text-[var(--ds-text-3)]">
+        <Loader2 class="h-4 w-4 animate-spin" />
+        <span>{{ t("contextMenu.exportStructureLoading") }}</span>
       </div>
-      <DialogFooter>
-        <Button variant="outline" @click="showRenameObjectDialog = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button
-          :disabled="!renameObjectName.trim() || renameObjectName.trim() === node.label"
-          @click="confirmRenameObject"
-        >
-          {{ t("contextMenu.renameObject") }}
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+      <p v-else-if="structurePreviewError" class="text-sm text-[var(--ds-red)]">{{ structurePreviewError }}</p>
+      <pre
+        v-else
+        class="max-h-[56vh] min-h-64 overflow-auto rounded bg-[var(--ds-bg-canvas)] border border-[var(--ds-border-soft)] p-3 text-xs whitespace-pre-wrap"
+        v-html="highlight(structurePreviewSql)"
+      ></pre>
+    </div>
+    <template #footer>
+      <Button variant="outline" @click="showStructurePreviewDialog = false">{{ t("common.cancel") }}</Button>
+      <Button
+        variant="outline"
+        :disabled="isLoadingStructurePreview || !structurePreviewSql"
+        @click="copyStructurePreview"
+      >
+        <Clipboard class="h-4 w-4" />
+        {{ t("contextMenu.copyStructure") }}
+      </Button>
+      <Button :disabled="isLoadingStructurePreview || !structurePreviewSql" @click="saveStructurePreview">
+        <Download class="h-4 w-4" />
+        {{ t("contextMenu.saveStructure") }}
+      </Button>
+    </template>
+  </DsDialog>
 
-  <Dialog v-model:open="showStructurePreviewDialog">
-    <DialogContent class="sm:max-w-[760px]">
-      <DialogHeader>
-        <DialogTitle>{{ structurePreviewTitle || t("contextMenu.exportStructure") }}</DialogTitle>
-      </DialogHeader>
-      <div class="grid gap-3">
-        <div v-if="isLoadingStructurePreview" class="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 class="h-4 w-4 animate-spin" />
-          <span>{{ t("contextMenu.exportStructureLoading") }}</span>
-        </div>
-        <p v-else-if="structurePreviewError" class="text-sm text-destructive">{{ structurePreviewError }}</p>
-        <pre
-          v-else
-          class="max-h-[56vh] min-h-64 overflow-auto rounded bg-muted p-3 text-xs whitespace-pre-wrap"
-          v-html="highlight(structurePreviewSql)"
-        ></pre>
-      </div>
-      <DialogFooter>
-        <Button variant="outline" @click="showStructurePreviewDialog = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button
-          variant="outline"
-          :disabled="isLoadingStructurePreview || !structurePreviewSql"
-          @click="copyStructurePreview"
-        >
-          <Clipboard class="h-4 w-4" />
-          {{ t("contextMenu.copyStructure") }}
-        </Button>
-        <Button :disabled="isLoadingStructurePreview || !structurePreviewSql" @click="saveStructurePreview">
-          <Download class="h-4 w-4" />
-          {{ t("contextMenu.saveStructure") }}
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <DsDialog
+    v-model:open="showStructureDocCopyDialog"
+    :title="structureDocCopyTitle || t('contextMenu.copyStructureAs')"
+    :icon="Clipboard"
+    content-class="sm:max-w-[760px]"
+  >
+    <div class="grid gap-3">
+      <p class="text-sm text-[var(--ds-text-3)]">{{ t("contextMenu.structureDocCopyFallbackHint") }}</p>
+      <textarea
+        readonly
+        class="max-h-[56vh] min-h-64 resize-y overflow-auto rounded bg-[var(--ds-bg-canvas)] border border-[var(--ds-border-soft)] p-3 font-mono text-xs whitespace-pre"
+        :value="structureDocCopyText"
+        @focus="selectTextareaContent"
+      ></textarea>
+    </div>
+    <template #footer>
+      <Button variant="outline" @click="showStructureDocCopyDialog = false">{{ t("common.cancel") }}</Button>
+      <Button :disabled="!structureDocCopyText" @click="copyStructureDocText">
+        <Clipboard class="h-4 w-4" />
+        {{ t("contextMenu.copyStructure") }}
+      </Button>
+    </template>
+  </DsDialog>
 
-  <Dialog v-model:open="showStructureDocCopyDialog">
-    <DialogContent class="sm:max-w-[760px]">
-      <DialogHeader>
-        <DialogTitle>{{ structureDocCopyTitle || t("contextMenu.copyStructureAs") }}</DialogTitle>
-      </DialogHeader>
-      <div class="grid gap-3">
-        <p class="text-sm text-muted-foreground">{{ t("contextMenu.structureDocCopyFallbackHint") }}</p>
-        <textarea
-          readonly
-          class="max-h-[56vh] min-h-64 resize-y overflow-auto rounded bg-muted p-3 font-mono text-xs whitespace-pre"
-          :value="structureDocCopyText"
-          @focus="selectTextareaContent"
-        ></textarea>
-      </div>
-      <DialogFooter>
-        <Button variant="outline" @click="showStructureDocCopyDialog = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button :disabled="!structureDocCopyText" @click="copyStructureDocText">
-          <Clipboard class="h-4 w-4" />
-          {{ t("contextMenu.copyStructure") }}
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <DsDialog v-model:open="showDeleteSavedSqlFileConfirm" :title="t('savedSql.deleteFile')" :icon="Trash2">
+    <p class="text-sm text-[var(--ds-text-2)]">
+      {{ t("savedSql.deleteFileConfirm", { name: node.label }) }}
+    </p>
+    <template #footer>
+      <Button variant="outline" @click="showDeleteSavedSqlFileConfirm = false">{{ t("common.cancel") }}</Button>
+      <Button variant="destructive" @click="confirmDeleteSavedSqlFile">{{ t("savedSql.deleteFile") }}</Button>
+    </template>
+  </DsDialog>
 
-  <Dialog v-model:open="showDeleteSavedSqlFileConfirm">
-    <DialogContent class="sm:max-w-[400px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("savedSql.deleteFile") }}</DialogTitle>
-      </DialogHeader>
-      <p class="text-sm text-muted-foreground">
-        {{ t("savedSql.deleteFileConfirm", { name: node.label }) }}
-      </p>
-      <DialogFooter>
-        <Button variant="outline" @click="showDeleteSavedSqlFileConfirm = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button variant="destructive" @click="confirmDeleteSavedSqlFile">{{ t("savedSql.deleteFile") }}</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
-
-  <Dialog v-model:open="showDeleteSavedSqlFolderConfirm">
-    <DialogContent class="sm:max-w-[400px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("savedSql.deleteFolder") }}</DialogTitle>
-      </DialogHeader>
-      <p class="text-sm text-muted-foreground">
-        {{ t("savedSql.deleteFolderConfirm", { name: node.label }) }}
-      </p>
-      <DialogFooter>
-        <Button variant="outline" @click="showDeleteSavedSqlFolderConfirm = false">{{
-          t("dangerDialog.cancel")
-        }}</Button>
-        <Button variant="destructive" @click="confirmDeleteSavedSqlFolder">{{ t("savedSql.deleteFolder") }}</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <DsDialog v-model:open="showDeleteSavedSqlFolderConfirm" :title="t('savedSql.deleteFolder')" :icon="Trash2">
+    <p class="text-sm text-[var(--ds-text-2)]">
+      {{ t("savedSql.deleteFolderConfirm", { name: node.label }) }}
+    </p>
+    <template #footer>
+      <Button variant="outline" @click="showDeleteSavedSqlFolderConfirm = false">{{ t("common.cancel") }}</Button>
+      <Button variant="destructive" @click="confirmDeleteSavedSqlFolder">{{ t("savedSql.deleteFolder") }}</Button>
+    </template>
+  </DsDialog>
 
   <DangerConfirmDialog
     v-model:open="showDropTableConfirm"
@@ -3743,38 +3713,32 @@ function treeItemMenuItems(): ContextMenuItem[] {
     @execute="executeProcedureSql"
   />
 
-  <Dialog v-model:open="showDuplicateDialog">
-    <DialogContent class="sm:max-w-[400px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("contextMenu.duplicateNameTitle") }}</DialogTitle>
-      </DialogHeader>
-      <Input
-        v-model="duplicateTableName"
-        :placeholder="t('contextMenu.duplicateNamePlaceholder')"
-        @keydown.enter.prevent="confirmDuplicateStructure"
-      />
-      <DialogFooter>
-        <Button variant="outline" @click="showDuplicateDialog = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button :disabled="!duplicateTableName.trim()" @click="confirmDuplicateStructure">{{
-          t("dangerDialog.confirm")
-        }}</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <DsDialog v-model:open="showDuplicateDialog" :title="t('contextMenu.duplicateNameTitle')" :icon="CopyPlus">
+    <Input
+      v-model="duplicateTableName"
+      :placeholder="t('contextMenu.duplicateNamePlaceholder')"
+      @keydown.enter.prevent="confirmDuplicateStructure"
+    />
+    <template #footer>
+      <Button variant="outline" @click="showDuplicateDialog = false">{{ t("common.cancel") }}</Button>
+      <Button :disabled="!duplicateTableName.trim()" @click="confirmDuplicateStructure">{{
+        t("common.create")
+      }}</Button>
+    </template>
+  </DsDialog>
 
-  <Dialog v-model:open="showCreateDatabaseDialog">
-    <DialogContent class="sm:max-w-[400px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("contextMenu.createDatabase") }}</DialogTitle>
-      </DialogHeader>
+  <DsDialog v-model:open="showCreateDatabaseDialog" :title="t('contextMenu.createDatabase')" :icon="Database">
+    <div class="grid gap-3">
       <Input
         v-model="createDatabaseName"
         :placeholder="t('contextMenu.createDatabaseNamePlaceholder')"
         @keydown.enter.prevent="confirmCreateDatabase"
       />
-      <div v-if="canSetCreateDatabaseCharset" class="grid gap-2">
+      <div v-if="canSetCreateDatabaseCharset" class="grid gap-3">
         <div class="grid gap-1.5">
-          <label class="text-xs font-medium text-muted-foreground">{{ t("contextMenu.createDatabaseCharset") }}</label>
+          <label class="text-xs font-medium text-[var(--ds-text-3)]">{{
+            t("contextMenu.createDatabaseCharset")
+          }}</label>
           <Input
             v-model="createDatabaseCharset"
             :placeholder="t('contextMenu.createDatabaseCharsetPlaceholder')"
@@ -3782,7 +3746,7 @@ function treeItemMenuItems(): ContextMenuItem[] {
           />
         </div>
         <div class="grid gap-1.5">
-          <label class="text-xs font-medium text-muted-foreground">{{
+          <label class="text-xs font-medium text-[var(--ds-text-3)]">{{
             t("contextMenu.createDatabaseCollation")
           }}</label>
           <Input
@@ -3792,14 +3756,12 @@ function treeItemMenuItems(): ContextMenuItem[] {
           />
         </div>
       </div>
-      <DialogFooter>
-        <Button variant="outline" @click="showCreateDatabaseDialog = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button :disabled="!createDatabaseName.trim()" @click="confirmCreateDatabase">{{
-          t("dangerDialog.confirm")
-        }}</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+    </div>
+    <template #footer>
+      <Button variant="outline" @click="showCreateDatabaseDialog = false">{{ t("common.cancel") }}</Button>
+      <Button :disabled="!createDatabaseName.trim()" @click="confirmCreateDatabase">{{ t("common.create") }}</Button>
+    </template>
+  </DsDialog>
 
   <DangerConfirmDialog
     v-model:open="showDropDatabaseConfirm"
@@ -3819,24 +3781,17 @@ function treeItemMenuItems(): ContextMenuItem[] {
     @confirm="confirmFlushRedisDb"
   />
 
-  <Dialog v-model:open="showCreateSchemaDialog">
-    <DialogContent class="sm:max-w-[400px]">
-      <DialogHeader>
-        <DialogTitle>{{ t("contextMenu.createSchema") }}</DialogTitle>
-      </DialogHeader>
-      <Input
-        v-model="createSchemaName"
-        :placeholder="t('contextMenu.createSchemaNamePlaceholder')"
-        @keydown.enter.prevent="confirmCreateSchema"
-      />
-      <DialogFooter>
-        <Button variant="outline" @click="showCreateSchemaDialog = false">{{ t("dangerDialog.cancel") }}</Button>
-        <Button :disabled="!createSchemaName.trim()" @click="confirmCreateSchema">{{
-          t("dangerDialog.confirm")
-        }}</Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+  <DsDialog v-model:open="showCreateSchemaDialog" :title="t('contextMenu.createSchema')" :icon="ListTree">
+    <Input
+      v-model="createSchemaName"
+      :placeholder="t('contextMenu.createSchemaNamePlaceholder')"
+      @keydown.enter.prevent="confirmCreateSchema"
+    />
+    <template #footer>
+      <Button variant="outline" @click="showCreateSchemaDialog = false">{{ t("common.cancel") }}</Button>
+      <Button :disabled="!createSchemaName.trim()" @click="confirmCreateSchema">{{ t("common.create") }}</Button>
+    </template>
+  </DsDialog>
 
   <DangerConfirmDialog
     v-model:open="showDropSchemaConfirm"

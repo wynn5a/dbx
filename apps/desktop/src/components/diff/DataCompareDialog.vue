@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +31,7 @@ import {
   Loader2,
   Play,
   Square,
+  X,
 } from "@lucide/vue";
 
 type CompareColumn = ColumnInfo;
@@ -983,15 +984,31 @@ watch(
 
 <template>
   <Dialog v-model:open="open">
-    <DialogContent class="sm:max-w-5xl max-h-[85vh] flex flex-col overflow-hidden" @interact-outside.prevent>
-      <DialogHeader>
-        <DialogTitle class="flex items-center gap-2">
-          <GitCompareArrows class="w-4 h-4" />
-          {{ t("dataCompare.title") }}
-        </DialogTitle>
+    <DialogContent
+      class="ds-dialog gap-0 p-0 flex flex-col overflow-hidden sm:max-w-5xl max-h-[85vh]"
+      :show-close-button="false"
+      @interact-outside.prevent
+    >
+      <DialogHeader
+        class="flex h-14 shrink-0 flex-row items-center gap-3 space-y-0 border-b border-[var(--ds-border)] px-4 text-left"
+      >
+        <div
+          class="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+        >
+          <GitCompareArrows class="h-4 w-4" />
+        </div>
+        <DialogTitle
+          class="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]"
+          >{{ t("dataCompare.title") }}</DialogTitle
+        >
+        <DialogClose as-child>
+          <Button variant="ghost" size="icon-sm" class="-mr-1 shrink-0"
+            ><X class="h-4 w-4" /><span class="sr-only">{{ t("common.close") }}</span></Button
+          >
+        </DialogClose>
       </DialogHeader>
 
-      <div class="flex-1 min-h-0 overflow-auto space-y-4 py-2">
+      <div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
         <div class="grid grid-cols-[1fr_auto_1fr] gap-4 items-start">
           <div class="space-y-2">
             <Label class="text-xs font-medium">{{ t("diff.source") }}</Label>
@@ -1037,7 +1054,7 @@ watch(
             <div class="space-y-2 rounded-lg border p-2">
               <div class="flex items-center justify-between gap-2">
                 <Label class="text-xs font-medium">{{ t("dataCompare.sourceTables") }}</Label>
-                <div v-if="sourceTables.length" class="text-[11px] text-muted-foreground">
+                <div v-if="sourceTables.length" class="text-[11px] text-[var(--ds-text-3)]">
                   {{
                     t("dataCompare.selectedTables", {
                       selected: selectedSourceTableNames.length,
@@ -1068,10 +1085,13 @@ watch(
                 </Button>
               </div>
 
-              <div v-if="!sourceConnectionId || !sourceDatabase" class="text-xs text-muted-foreground py-3 text-center">
+              <div
+                v-if="!sourceConnectionId || !sourceDatabase"
+                class="text-xs text-[var(--ds-text-3)] py-3 text-center"
+              >
                 {{ t("dataCompare.selectSourceTables") }}
               </div>
-              <div v-else-if="sourceTables.length === 0" class="text-xs text-muted-foreground py-3 text-center">
+              <div v-else-if="sourceTables.length === 0" class="text-xs text-[var(--ds-text-3)] py-3 text-center">
                 {{ t("dataCompare.noTables") }}
               </div>
               <div v-else class="max-h-40 overflow-auto rounded border">
@@ -1150,15 +1170,18 @@ watch(
             </div>
             <div v-else class="space-y-2 rounded-lg border p-3 text-xs">
               <div class="font-medium">{{ t("dataCompare.autoMatchHint") }}</div>
-              <div class="text-muted-foreground">
+              <div class="text-[var(--ds-text-3)]">
                 {{
                   t("dataCompare.matchedTables", { matched: matchedTaskCount, total: selectedSourceTableNames.length })
                 }}
               </div>
-              <div v-if="missingTargetTables.length" class="text-destructive">
+              <div v-if="missingTargetTables.length" class="text-[var(--ds-red)]">
                 {{ t("dataCompare.missingTargetTables", { tables: missingTargetTables.join(", ") }) }}
               </div>
-              <div v-if="compareTasksPreview.length" class="max-h-36 overflow-auto rounded border bg-muted/20">
+              <div
+                v-if="compareTasksPreview.length"
+                class="max-h-36 overflow-auto rounded border bg-[var(--ds-bg-canvas)] border-[var(--ds-border-soft)]"
+              >
                 <div
                   v-for="task in compareTasksPreview"
                   :key="`${task.sourceTable}:${task.targetTable}`"
@@ -1178,7 +1201,7 @@ watch(
         <div class="space-y-1">
           <Label class="text-xs font-medium">{{ t("dataCompare.keyColumns") }}</Label>
           <Input v-model="keyColumnsText" class="h-8 text-xs" :placeholder="t('dataCompare.keyColumnsPlaceholder')" />
-          <div class="text-[11px] text-muted-foreground">
+          <div class="text-[11px] text-[var(--ds-text-3)]">
             {{ t("dataCompare.keyColumnsAutoHint") }}
           </div>
         </div>
@@ -1186,7 +1209,7 @@ watch(
         <div v-if="hasResults" class="space-y-3">
           <div class="rounded-lg border p-3 text-sm space-y-2">
             <div>{{ summary }}</div>
-            <div class="text-xs text-muted-foreground">{{ selectedSummary }}</div>
+            <div class="text-xs text-[var(--ds-text-3)]">{{ selectedSummary }}</div>
           </div>
 
           <div class="rounded-lg border p-3 space-y-3">
@@ -1250,7 +1273,7 @@ watch(
           <div class="rounded-lg border overflow-hidden">
             <div class="max-h-64 overflow-auto">
               <table class="w-full text-xs">
-                <thead class="bg-muted sticky top-0 z-10">
+                <thead class="bg-[var(--ds-bg-canvas)] sticky top-0 z-10">
                   <tr>
                     <th class="px-3 py-2 text-left font-medium">{{ t("diff.table") }}</th>
                     <th class="px-3 py-2 text-left font-medium">{{ t("dataCompare.targetTable") }}</th>
@@ -1405,7 +1428,7 @@ watch(
             </div>
           </div>
 
-          <div v-if="planningSync" class="text-sm text-muted-foreground">
+          <div v-if="planningSync" class="text-sm text-[var(--ds-text-3)]">
             {{ t("dataCompare.planningSync") }}
           </div>
           <div v-else-if="syncPlan.syncSql.trim()" class="space-y-1">
@@ -1413,19 +1436,19 @@ watch(
             <textarea
               :value="syncPlan.syncSql"
               readonly
-              class="w-full h-48 rounded-lg border bg-muted/20 p-3 font-mono text-xs resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+              class="w-full h-48 rounded-lg border border-[var(--ds-border-soft)] bg-[var(--ds-bg-canvas)] p-3 font-mono text-xs resize-none focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
-          <div v-else-if="differentTableCount === 0 && failedTableCount === 0" class="text-sm text-muted-foreground">
+          <div v-else-if="differentTableCount === 0 && failedTableCount === 0" class="text-sm text-[var(--ds-text-3)]">
             {{ t("dataCompare.noDifferences") }}
           </div>
-          <div v-else class="text-sm text-muted-foreground">
+          <div v-else class="text-sm text-[var(--ds-text-3)]">
             {{ t("dataCompare.noSelectedDifferences") }}
           </div>
         </div>
 
         <div v-if="syncErrors.length > 0" class="space-y-1">
-          <Label class="text-xs font-medium text-destructive">
+          <Label class="text-xs font-medium text-[var(--ds-red)]">
             {{ t("diff.syncSummary", { success: executeTotal - syncErrors.length, failed: syncErrors.length }) }}
           </Label>
           <div class="max-h-32 overflow-auto border rounded-lg bg-destructive/5 p-2 space-y-1">
@@ -1439,9 +1462,12 @@ watch(
         </div>
       </div>
 
-      <DialogFooter v-if="!hasResults">
+      <DialogFooter
+        v-if="!hasResults"
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3"
+      >
         <Button variant="outline" @click="open = false">{{ t("common.close") }}</Button>
-        <span v-if="compareProgressLabel" class="text-xs text-muted-foreground self-center">{{
+        <span v-if="compareProgressLabel" class="text-xs text-[var(--ds-text-3)] self-center">{{
           compareProgressLabel
         }}</span>
         <Button size="sm" :disabled="!canCompare || comparing" @click="startCompare">
@@ -1451,15 +1477,18 @@ watch(
         </Button>
       </DialogFooter>
 
-      <DialogFooter v-else class="flex items-center gap-2">
+      <DialogFooter
+        v-else
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 flex items-center gap-2"
+      >
         <Button variant="outline" @click="open = false">{{ t("common.close") }}</Button>
-        <span v-if="executing" class="text-xs text-muted-foreground mr-auto">
+        <span v-if="executing" class="text-xs text-[var(--ds-text-3)] mr-auto">
           {{ t("diff.syncProgress", { current: executedCount, total: executeTotal }) }}
         </span>
-        <span v-else-if="planningSync" class="text-xs text-muted-foreground mr-auto">
+        <span v-else-if="planningSync" class="text-xs text-[var(--ds-text-3)] mr-auto">
           {{ t("dataCompare.planningSync") }}
         </span>
-        <span v-else class="text-xs text-muted-foreground mr-auto">
+        <span v-else class="text-xs text-[var(--ds-text-3)] mr-auto">
           {{
             t("dataCompare.planSummary", {
               inserts: syncPlan.insertCount,
