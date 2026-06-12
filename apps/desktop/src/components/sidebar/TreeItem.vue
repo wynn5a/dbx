@@ -1937,7 +1937,11 @@ async function confirmDuplicateStructure() {
 function createTable() {
   const node = props.node;
   if (!node.connectionId || !node.database) return;
-  queryStore.openTableStructure(node.connectionId, node.database, node.schema, "");
+  connectionStore.createTableSource = {
+    connectionId: node.connectionId,
+    database: node.database,
+    schema: node.schema,
+  };
 }
 
 function createView() {

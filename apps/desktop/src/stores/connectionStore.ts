@@ -141,6 +141,7 @@ export const useConnectionStore = defineStore("connection", () => {
     { filter: string; candidates: IndexedCompletionTable[]; truncated: boolean }
   >();
   const completionInFlight = new Map<string, Promise<unknown>>();
+  const createTableSource = ref<{ connectionId: string; database: string; schema?: string } | null>(null);
   const transferSource = ref<{ connectionId: string; database: string } | null>(null);
   const schemaDiffSource = ref<{ connectionId: string; database: string; schema?: string } | null>(null);
   const dataCompareSource = ref<{
@@ -2674,6 +2675,7 @@ export const useConnectionStore = defineStore("connection", () => {
     importConnectionsFromFile,
     applySidebarLayout,
     transferSource,
+    createTableSource,
     schemaDiffSource,
     dataCompareSource,
     sqlFileSource,

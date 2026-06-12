@@ -7,6 +7,7 @@ import { DsDialog } from "@/components/ui/dialog";
 const ConnectionDialog = defineAsyncComponent(() => import("@/components/connection/ConnectionDialog.vue"));
 const EditorSettingsDialog = defineAsyncComponent(() => import("@/components/editor/EditorSettingsDialog.vue"));
 const DangerConfirmDialog = defineAsyncComponent(() => import("@/components/editor/DangerConfirmDialog.vue"));
+const CreateTableDialog = defineAsyncComponent(() => import("@/components/structure/CreateTableDialog.vue"));
 const DataTransferDialog = defineAsyncComponent(() => import("@/components/transfer/DataTransferDialog.vue"));
 const SchemaDiffDialog = defineAsyncComponent(() => import("@/components/diff/SchemaDiffDialog.vue"));
 const DataCompareDialog = defineAsyncComponent(() => import("@/components/diff/DataCompareDialog.vue"));
@@ -123,6 +124,13 @@ watch(
     @update:open="emit('update:showDangerDialog', $event)"
     @update:suppress-future-prompts="emit('update:suppressDangerConfirm', $event)"
     @confirm="emit('dangerConfirm')"
+  />
+  <CreateTableDialog
+    v-if="dialogs.showCreateTableDialog.value"
+    v-model:open="dialogs.showCreateTableDialog.value"
+    :prefill-connection-id="dialogs.createTablePrefillConnectionId.value"
+    :prefill-database="dialogs.createTablePrefillDatabase.value"
+    :prefill-schema="dialogs.createTablePrefillSchema.value"
   />
   <DataTransferDialog
     v-if="dialogs.showTransferDialog.value"

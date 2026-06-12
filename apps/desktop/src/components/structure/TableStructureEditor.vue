@@ -4,12 +4,14 @@ import { uuid } from "@/lib/utils";
 import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
   Copy,
   Database,
+  GripVertical,
   Info,
   KeyRound,
   Link2,
@@ -81,12 +83,21 @@ const highlightedSql = computed(() => {
 });
 const previewSqlText = computed(() => pendingStatements.value.join("\n"));
 
-const props = defineProps<{
-  connectionId: string;
-  database: string;
-  schema?: string;
-  tableName: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    connectionId: string;
+    database: string;
+    schema?: string;
+    tableName: string;
+    /** "tab" renders the full self-contained editor; "dialog" hides the top bar + footer so the wrapping dialog supplies the chrome. */
+    presentation?: "tab" | "dialog";
+  }>(),
+  {
+    presentation: "tab",
+  },
+);
+
+const isDialog = computed(() => props.presentation === "dialog");
 
 const emit = defineEmits<{
   saved: [commentChanged: boolean];
@@ -122,6 +133,9 @@ const warnings = ref<string[]>([]);
 const foreignKeys = ref<ForeignKeyInfo[]>([]);
 const triggers = ref<TriggerInfo[]>([]);
 
+const activeColumnCount = computed(() => columns.value.filter((column) => !column.markedForDrop).length);
+const activeIndexCount = computed(() => indexes.value.filter((index) => !index.markedForDrop).length);
+
 function isPlainModShortcut(event: KeyboardEvent, key: string): boolean {
   if (event.isComposing || event.altKey || event.shiftKey) return false;
   if (!event.metaKey && !event.ctrlKey) return false;
@@ -149,7 +163,7 @@ const structureDensityMetrics: Record<
   }
 > = {
   compact: {
-    columns: [28, 120, 136, 82, 60, 52, 108, 124, 128, 108],
+    columns: [28, 120, 136, 82, 52, 60, 108, 124, 128, 108],
     indexes: [120, 180, 60, 88, 124, 144, 120, 70],
     minColumnWidth: 24,
     minIndexColumnWidth: 48,
@@ -165,7 +179,7 @@ const structureDensityMetrics: Record<
     lineHeight: 1.35,
   },
   standard: {
-    columns: [32, 144, 160, 104, 72, 64, 128, 152, 152, 136],
+    columns: [32, 144, 160, 104, 64, 72, 128, 152, 152, 136],
     indexes: [148, 224, 72, 108, 148, 180, 148, 84],
     minColumnWidth: 28,
     minIndexColumnWidth: 60,
@@ -181,7 +195,7 @@ const structureDensityMetrics: Record<
     lineHeight: 1.4,
   },
   comfortable: {
-    columns: [36, 168, 188, 116, 84, 76, 152, 188, 176, 148],
+    columns: [36, 168, 188, 116, 76, 84, 152, 188, 176, 148],
     indexes: [176, 260, 84, 124, 176, 216, 176, 104],
     minColumnWidth: 32,
     minIndexColumnWidth: 64,
@@ -208,11 +222,14 @@ function metricsForDensity(density: StructureEditorDensity) {
 
 const structureDensity = computed(() => settingsStore.editorSettings.structureEditorDensity);
 const structureDensityMetric = computed(() => metricsForDensity(structureDensity.value));
-const structureDensityOptions = computed(() => [
-  { value: "compact", label: t("structureEditor.densityCompact") },
-  { value: "standard", label: t("structureEditor.densityStandard") },
-  { value: "comfortable", label: t("structureEditor.densityComfortable") },
-]);
+const densitySegmentOptions = computed(
+  () =>
+    [
+      { value: "compact", label: t("structureEditor.densityCompact") },
+      { value: "standard", label: t("structureEditor.densityCozy") },
+      { value: "comfortable", label: t("structureEditor.densityComfy") },
+    ] as const,
+);
 const structureDensityStyle = computed(() => {
   const metric = structureDensityMetric.value;
   return {
@@ -238,7 +255,7 @@ const structureIconClass = "h-[var(--structure-icon-size)] w-[var(--structure-ic
 const structureCheckboxClass =
   "h-[var(--structure-checkbox-size)] w-[var(--structure-checkbox-size)] cursor-pointer accent-[var(--ds-accent)] disabled:cursor-default";
 const structureHeaderCellClass =
-  "relative border-b border-r border-[var(--ds-border)] px-[var(--structure-cell-px)] py-[var(--structure-header-py)] text-left font-medium text-[var(--ds-text-2)]";
+  "relative border-b border-r border-[var(--ds-border)] px-[var(--structure-cell-px)] py-[var(--structure-header-py)] text-left text-[10.5px] font-semibold uppercase tracking-[0.05em] text-[var(--ds-text-4)]";
 const structureCellClass =
   "border-b border-r border-[var(--ds-border-soft)] px-[var(--structure-cell-px)] py-[var(--structure-cell-py)]";
 const structureLastCellClass =
@@ -247,7 +264,26 @@ const structureTabClass =
   "flex h-8 shrink-0 select-none items-center border-b-2 border-transparent px-3 text-[length:var(--structure-font-size)] font-medium transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)]";
 const structureTabActiveClass = "border-[var(--ds-accent)] bg-[var(--ds-bg-active)] text-[var(--ds-accent)]";
 const structureTabIdleClass = "text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]";
+const structureTabBadgeClass =
+  "ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--ds-bg-elevated)] px-1 font-mono text-[10px] leading-none text-[var(--ds-text-2)]";
+const structureSegmentClass =
+  "flex items-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-base)] p-0.5 text-[length:var(--structure-font-size)]";
+const structureSegmentButtonBase =
+  "h-[calc(var(--structure-control-height)-4px)] rounded-[5px] px-2 font-medium transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)]";
+const structureSegmentButtonActive = "bg-[var(--ds-bg-panel)] text-[var(--ds-text-1)] shadow-[var(--ds-shadow-card)]";
+const structureSegmentButtonIdle = "text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]";
 const modKey = isMacOS() ? "⌘" : "Ctrl";
+
+// Color-codes the leading dot in the TYPE cell by broad data-type family (matches the create-table mockup).
+function typeDotColor(dataType: string): string {
+  const base = splitDataType(dataType).baseType.toLowerCase();
+  if (/(serial|int|decimal|numeric|float|double|real|money|number|bit)/.test(base)) return "var(--ds-blue)";
+  if (/(char|text|string|clob|enum|uuid)/.test(base)) return "var(--ds-green)";
+  if (/(date|time|timestamp|year|interval)/.test(base)) return "var(--ds-purple)";
+  if (/(bool)/.test(base)) return "var(--ds-amber)";
+  if (/(json|xml|blob|bytea|binary|geo|array)/.test(base)) return "var(--ds-teal)";
+  return "var(--ds-text-4)";
+}
 
 function applyStructureDensityWidths(density: StructureEditorDensity) {
   const metric = metricsForDensity(density);
@@ -362,8 +398,8 @@ const colLabels = computed(() => {
     t("structureEditor.columnName"),
     t("structureEditor.dataType"),
     t("structureEditor.length"),
-    t("structureEditor.nullable"),
-    t("structureEditor.primaryKey"),
+    "PK",
+    "NULL",
     t("structureEditor.defaultValue"),
     t("structureEditor.comment"),
   ];
@@ -808,6 +844,9 @@ watch(activeTab, (tab) => {
     void fetchDdl();
   }
 });
+
+// Exposed so a wrapping dialog (CreateTableDialog) can drive the Create action from its own header.
+defineExpose({ applyChanges, canApply, saving, isCreateMode, newTableName });
 </script>
 
 <template>
@@ -818,6 +857,7 @@ watch(activeTab, (tab) => {
     :style="structureDensityStyle"
   >
     <div
+      v-if="!isDialog"
       class="flex shrink-0 items-center gap-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-elevated)] px-[var(--structure-cell-px)] py-[var(--structure-header-py)] text-[length:var(--structure-font-size)]"
     >
       <Database :class="[structureIconClass, 'shrink-0 text-[var(--ds-text-3)]']" />
@@ -842,16 +882,36 @@ watch(activeTab, (tab) => {
       </Button>
     </div>
 
-    <div v-if="isCreateMode" class="flex shrink-0 items-center gap-2">
-      <label class="shrink-0 font-medium text-[var(--ds-text-2)]">{{ t("structureEditor.tableName") }}</label>
-      <Input
-        v-model="newTableName"
-        :placeholder="t('contextMenu.duplicateNamePlaceholder')"
-        :class="[structureControlClass, 'max-w-[220px]']"
-      />
+    <!-- Create mode: table name + comment side by side, labels stacked above inputs -->
+    <div v-if="isCreateMode" class="grid shrink-0 grid-cols-1 gap-3 sm:grid-cols-2">
+      <div class="flex flex-col gap-1.5">
+        <label class="font-medium text-[var(--ds-text-2)]">{{ t("structureEditor.tableName") }}</label>
+        <Input
+          v-model="newTableName"
+          :placeholder="t('contextMenu.duplicateNamePlaceholder')"
+          :class="[structureControlClass, 'w-full']"
+        />
+      </div>
+      <div class="flex flex-col gap-1.5">
+        <span class="flex items-center gap-1.5 font-medium text-[var(--ds-text-2)]">
+          {{ t("structureEditor.comment") }}
+          <Tooltip v-if="isTableCommentDisabled">
+            <TooltipTrigger as-child>
+              <Info :class="[structureIconClass, 'shrink-0 text-[var(--ds-text-3)]']" />
+            </TooltipTrigger>
+            <TooltipContent>{{ t("structureEditor.tableCommentUnsupported") }}</TooltipContent>
+          </Tooltip>
+        </span>
+        <Input
+          v-model="tableComment"
+          :placeholder="t('structureEditor.tableCommentPlaceholder')"
+          :class="[structureControlClass, 'w-full']"
+          :disabled="isTableCommentDisabled"
+        />
+      </div>
     </div>
 
-    <div class="flex shrink-0 items-center gap-2">
+    <div v-else class="flex shrink-0 items-center gap-2">
       <label class="shrink-0 font-medium text-[var(--ds-text-2)]">{{ t("structureEditor.comment") }}</label>
       <Input
         v-model="tableComment"
@@ -886,6 +946,7 @@ watch(activeTab, (tab) => {
               @click="activeTab = 'columns'"
             >
               {{ t("structureEditor.columns") }}
+              <span v-if="activeColumnCount" :class="structureTabBadgeClass">{{ activeColumnCount }}</span>
             </button>
             <button
               type="button"
@@ -894,6 +955,7 @@ watch(activeTab, (tab) => {
               @click="activeTab = 'indexes'"
             >
               {{ t("structureEditor.indexes") }}
+              <span v-if="activeIndexCount" :class="structureTabBadgeClass">{{ activeIndexCount }}</span>
             </button>
             <button
               type="button"
@@ -905,6 +967,7 @@ watch(activeTab, (tab) => {
               @click="activeTab = 'foreignKeys'"
             >
               {{ t("structureEditor.foreignKeys") }}
+              <span v-if="foreignKeys.length" :class="structureTabBadgeClass">{{ foreignKeys.length }}</span>
             </button>
             <button
               type="button"
@@ -913,6 +976,7 @@ watch(activeTab, (tab) => {
               @click="activeTab = 'triggers'"
             >
               {{ t("structureEditor.triggers") }}
+              <span v-if="triggers.length" :class="structureTabBadgeClass">{{ triggers.length }}</span>
             </button>
             <button
               v-if="!isCreateMode"
@@ -929,20 +993,21 @@ watch(activeTab, (tab) => {
             </button>
           </div>
           <div class="flex shrink-0 items-center gap-1.5">
-            <Select :model-value="structureDensity" @update:model-value="setStructureDensity">
-              <SelectTrigger
-                size="sm"
-                class="h-[var(--structure-control-height)] w-[108px] rounded-md px-[var(--structure-control-px)] text-[length:var(--structure-font-size)]"
-                :aria-label="t('structureEditor.density')"
+            <div :class="structureSegmentClass" role="group" :aria-label="t('structureEditor.density')">
+              <button
+                v-for="option in densitySegmentOptions"
+                :key="option.value"
+                type="button"
+                :class="[
+                  structureSegmentButtonBase,
+                  structureDensity === option.value ? structureSegmentButtonActive : structureSegmentButtonIdle,
+                ]"
+                :aria-pressed="structureDensity === option.value"
+                @click="setStructureDensity(option.value)"
               >
-                <SelectValue :placeholder="t('structureEditor.density')" />
-              </SelectTrigger>
-              <SelectContent align="end" class="min-w-28">
-                <SelectItem v-for="option in structureDensityOptions" :key="option.value" :value="option.value">
-                  {{ option.label }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+                {{ option.label }}
+              </button>
+            </div>
             <Button
               v-if="activeTab === 'columns'"
               size="sm"
@@ -952,6 +1017,11 @@ watch(activeTab, (tab) => {
             >
               <Plus :class="structureIconClass" />
               {{ t("structureEditor.addColumn") }}
+              <span
+                class="ml-1 rounded bg-[rgb(255_255_255/0.16)] px-1.5 py-px font-mono text-[10px] leading-none text-[rgb(255_255_255/0.9)]"
+              >
+                {{ modKey }}N
+              </span>
             </Button>
             <Button
               v-if="activeTab === 'indexes'"
@@ -962,6 +1032,11 @@ watch(activeTab, (tab) => {
             >
               <Plus :class="structureIconClass" />
               {{ t("structureEditor.addIndex") }}
+              <span
+                class="ml-1 rounded bg-[rgb(255_255_255/0.16)] px-1.5 py-px font-mono text-[10px] leading-none text-[rgb(255_255_255/0.9)]"
+              >
+                {{ modKey }}N
+              </span>
             </Button>
           </div>
         </div>
@@ -998,6 +1073,10 @@ watch(activeTab, (tab) => {
               >
                 <td :class="[structureCellClass, 'font-mono tabular-nums text-[var(--ds-text-4)]']">
                   <div class="flex items-center gap-1">
+                    <GripVertical
+                      v-if="canShowColumnMoveControls"
+                      :class="[structureIconClass, 'shrink-0 cursor-grab text-[var(--ds-text-4)] opacity-60']"
+                    />
                     <span>{{ index + 1 }}</span>
                     <KeyRound v-if="column.isPrimaryKey" :class="[structureIconClass, 'text-[var(--ds-amber)]']" />
                   </div>
@@ -1011,31 +1090,37 @@ watch(activeTab, (tab) => {
                   />
                 </td>
                 <td :class="structureCellClass">
-                  <SearchableSelect
-                    v-if="!isColumnTypeDisabled(column)"
-                    :model-value="splitDataType(column.dataType).baseType"
-                    :options="dataTypeOptions"
-                    :placeholder="t('structureEditor.typePlaceholder')"
-                    :search-placeholder="t('structureEditor.typePlaceholder')"
-                    :empty-text="t('structureEditor.noMatchingType')"
-                    :loading-text="t('common.loading')"
-                    :allow-custom="true"
-                    :trigger-class="[structureMonoControlClass, 'w-full']"
-                    @update:model-value="
-                      (v: string) =>
-                        (column.dataType = combineDataTypeForDatabase(
-                          databaseType,
-                          v,
-                          getDefaultLengthForType(databaseType, v),
-                        ))
-                    "
-                  />
-                  <Input
-                    v-else
-                    :model-value="splitDataType(column.dataType).baseType"
-                    :class="[structureMonoControlClass, 'w-full']"
-                    disabled
-                  />
+                  <div class="flex min-w-0 items-center gap-2">
+                    <span
+                      class="h-1.5 w-1.5 shrink-0 rounded-full"
+                      :style="{ backgroundColor: typeDotColor(column.dataType) }"
+                    />
+                    <SearchableSelect
+                      v-if="!isColumnTypeDisabled(column)"
+                      :model-value="splitDataType(column.dataType).baseType"
+                      :options="dataTypeOptions"
+                      :placeholder="t('structureEditor.typePlaceholder')"
+                      :search-placeholder="t('structureEditor.typePlaceholder')"
+                      :empty-text="t('structureEditor.noMatchingType')"
+                      :loading-text="t('common.loading')"
+                      :allow-custom="true"
+                      :trigger-class="[structureMonoControlClass, 'w-full']"
+                      @update:model-value="
+                        (v: string) =>
+                          (column.dataType = combineDataTypeForDatabase(
+                            databaseType,
+                            v,
+                            getDefaultLengthForType(databaseType, v),
+                          ))
+                      "
+                    />
+                    <Input
+                      v-else
+                      :model-value="splitDataType(column.dataType).baseType"
+                      :class="[structureMonoControlClass, 'w-full']"
+                      disabled
+                    />
+                  </div>
                 </td>
                 <td :class="structureCellClass">
                   <Input
@@ -1051,28 +1136,36 @@ watch(activeTab, (tab) => {
                     "
                   />
                 </td>
-                <td :class="structureCellClass">
-                  <label class="flex items-center gap-1.5">
-                    <input
-                      v-model="column.isNullable"
-                      type="checkbox"
-                      :class="structureCheckboxClass"
-                      :disabled="isColumnNullableDisabled(column)"
-                    />
-                    <span>{{ column.isNullable ? t("structureEditor.yes") : t("structureEditor.no") }}</span>
-                  </label>
-                </td>
                 <td :class="[structureCellClass, 'text-center']">
-                  <input
-                    v-model="column.isPrimaryKey"
-                    type="checkbox"
-                    :class="structureCheckboxClass"
+                  <button
+                    type="button"
+                    :class="[
+                      'inline-flex h-[var(--structure-control-height)] w-[var(--structure-control-height)] items-center justify-center rounded-md border transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] disabled:cursor-not-allowed disabled:opacity-50',
+                      column.isPrimaryKey
+                        ? 'border-[color-mix(in_srgb,var(--ds-amber)_45%,transparent)] bg-[color-mix(in_srgb,var(--ds-amber)_16%,transparent)] text-[var(--ds-amber)]'
+                        : 'border-[var(--ds-border)] text-[var(--ds-text-4)] hover:text-[var(--ds-text-2)]',
+                    ]"
                     :disabled="isPrimaryKeyDisabled(column)"
-                    @change="
+                    :aria-pressed="column.isPrimaryKey"
+                    :aria-label="t('structureEditor.primaryKey')"
+                    :title="t('structureEditor.primaryKey')"
+                    @click="
                       () => {
+                        if (isPrimaryKeyDisabled(column)) return;
+                        column.isPrimaryKey = !column.isPrimaryKey;
                         if (column.isPrimaryKey) column.isNullable = false;
                       }
                     "
+                  >
+                    <KeyRound :class="structureIconClass" />
+                  </button>
+                </td>
+                <td :class="structureCellClass">
+                  <Switch
+                    v-model="column.isNullable"
+                    size="sm"
+                    :disabled="isColumnNullableDisabled(column)"
+                    :aria-label="t('structureEditor.nullable')"
                   />
                 </td>
                 <td :class="structureCellClass">
@@ -1272,29 +1365,40 @@ watch(activeTab, (tab) => {
                     <Button
                       v-if="column.original"
                       variant="ghost"
-                      size="sm"
-                      :class="structureToolbarButtonClass"
+                      size="icon"
+                      :class="structureIconButtonClass"
                       :disabled="!canDropColumn(column)"
+                      :title="column.markedForDrop ? t('structureEditor.restore') : t('structureEditor.drop')"
+                      :aria-label="column.markedForDrop ? t('structureEditor.restore') : t('structureEditor.drop')"
                       @click="toggleDropColumn(column)"
                     >
                       <Trash2 :class="structureIconClass" />
-                      {{ column.markedForDrop ? t("structureEditor.restore") : t("structureEditor.drop") }}
                     </Button>
                     <Button
                       v-else
                       variant="ghost"
-                      size="sm"
-                      :class="structureToolbarButtonClass"
+                      size="icon"
+                      :class="structureIconButtonClass"
+                      :title="t('structureEditor.remove')"
+                      :aria-label="t('structureEditor.remove')"
                       @click="removeNewColumn(column)"
                     >
                       <X :class="structureIconClass" />
-                      {{ t("structureEditor.remove") }}
                     </Button>
                   </div>
                 </td>
               </tr>
             </tbody>
           </table>
+          <button
+            type="button"
+            class="flex w-full items-center gap-1.5 px-[var(--structure-cell-px)] py-[var(--structure-header-py)] text-left text-[length:var(--structure-font-size)] font-medium text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:text-[var(--ds-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="!structureCapabilities.addColumn"
+            @click="addColumn"
+          >
+            <Plus :class="structureIconClass" />
+            {{ t("structureEditor.addAnotherColumn") }}
+          </button>
         </div>
 
         <div v-show="activeTab === 'indexes'" class="m-0 min-h-0 flex-1 overflow-auto p-0">
@@ -1380,15 +1484,12 @@ watch(activeTab, (tab) => {
                   }}</span>
                 </td>
                 <td :class="structureCellClass">
-                  <label class="flex items-center gap-1.5">
-                    <input
-                      v-model="index.isUnique"
-                      type="checkbox"
-                      :class="structureCheckboxClass"
-                      :disabled="!canEditIndexDraft(index)"
-                    />
-                    <span>{{ index.isUnique ? t("structureEditor.yes") : t("structureEditor.no") }}</span>
-                  </label>
+                  <Switch
+                    v-model="index.isUnique"
+                    size="sm"
+                    :disabled="!canEditIndexDraft(index)"
+                    :aria-label="t('structureEditor.unique')"
+                  />
                 </td>
                 <td :class="structureCellClass">
                   <Select
@@ -1479,23 +1580,25 @@ watch(activeTab, (tab) => {
                   <Button
                     v-else-if="index.original"
                     variant="ghost"
-                    size="sm"
-                    :class="structureToolbarButtonClass"
+                    size="icon"
+                    :class="structureIconButtonClass"
                     :disabled="!canDropIndex(index)"
+                    :title="index.markedForDrop ? t('structureEditor.restore') : t('structureEditor.drop')"
+                    :aria-label="index.markedForDrop ? t('structureEditor.restore') : t('structureEditor.drop')"
                     @click="toggleDropIndex(index)"
                   >
                     <Trash2 :class="structureIconClass" />
-                    {{ index.markedForDrop ? t("structureEditor.restore") : t("structureEditor.drop") }}
                   </Button>
                   <Button
                     v-else
                     variant="ghost"
-                    size="sm"
-                    :class="structureToolbarButtonClass"
+                    size="icon"
+                    :class="structureIconButtonClass"
+                    :title="t('structureEditor.remove')"
+                    :aria-label="t('structureEditor.remove')"
                     @click="removeNewIndex(index)"
                   >
                     <X :class="structureIconClass" />
-                    {{ t("structureEditor.remove") }}
                   </Button>
                 </td>
               </tr>
@@ -1571,7 +1674,14 @@ watch(activeTab, (tab) => {
           <div class="flex items-center gap-1.5">
             <span>{{ t("structureEditor.sqlPreview") }}</span>
             <span
-              v-if="!saving && pendingStatements.length && warnings.length === 0"
+              v-if="isCreateMode && !newTableName.trim()"
+              class="inline-flex items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--ds-amber)_14%,transparent)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-amber)]"
+            >
+              <span class="h-[5px] w-[5px] rounded-full bg-[var(--ds-amber)]" />
+              {{ t("structureEditor.nameYourTable") }}
+            </span>
+            <span
+              v-else-if="!saving && pendingStatements.length && warnings.length === 0"
               class="inline-flex items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--ds-green)_14%,transparent)] px-2 py-0.5 text-[11px] font-medium text-[var(--ds-green)]"
             >
               <span class="h-[5px] w-[5px] rounded-full bg-[var(--ds-green)]" />
@@ -1629,7 +1739,7 @@ watch(activeTab, (tab) => {
       {{ errorMessage }}
     </div>
 
-    <div class="flex shrink-0 items-center justify-end gap-2">
+    <div v-if="!isDialog" class="flex shrink-0 items-center justify-end gap-2">
       <Button :class="structureToolbarButtonClass" :disabled="!canApply" @click="applyChanges">
         <Loader2 v-if="saving" :class="[structureIconClass, 'mr-1.5 animate-spin']" />
         <Save v-else :class="[structureIconClass, 'mr-1.5']" />

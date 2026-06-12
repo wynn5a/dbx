@@ -4,6 +4,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useToast } from "@/composables/useToast";
 import type { SidebarLayout } from "@/types/database";
 
+const showCreateTableDialog = ref(false);
 const showTransferDialog = ref(false);
 const showSchemaDiffDialog = ref(false);
 const showDataCompareDialog = ref(false);
@@ -20,6 +21,9 @@ const configPassphraseMode = ref<"export" | "import">("export");
 const configPassphraseError = ref("");
 const pendingImportContent = ref("");
 
+const createTablePrefillConnectionId = ref("");
+const createTablePrefillDatabase = ref("");
+const createTablePrefillSchema = ref("");
 const transferPrefillConnectionId = ref("");
 const transferPrefillDatabase = ref("");
 const schemaDiffPrefillConnectionId = ref("");
@@ -63,6 +67,19 @@ export function useDialogSources() {
   // Watchers for store source triggers (register only once)
   if (!watchersRegistered) {
     watchersRegistered = true;
+
+    watch(
+      () => connectionStore.createTableSource,
+      (v) => {
+        if (v) {
+          createTablePrefillConnectionId.value = v.connectionId;
+          createTablePrefillDatabase.value = v.database;
+          createTablePrefillSchema.value = v.schema ?? "";
+          showCreateTableDialog.value = true;
+          connectionStore.createTableSource = null;
+        }
+      },
+    );
 
     watch(
       () => connectionStore.transferSource,
@@ -256,6 +273,7 @@ export function useDialogSources() {
   }
 
   return {
+    showCreateTableDialog,
     showTransferDialog,
     showSchemaDiffDialog,
     showDataCompareDialog,
@@ -271,6 +289,9 @@ export function useDialogSources() {
     configPassphraseMode,
     configPassphraseError,
     pendingImportContent,
+    createTablePrefillConnectionId,
+    createTablePrefillDatabase,
+    createTablePrefillSchema,
     transferPrefillConnectionId,
     transferPrefillDatabase,
     schemaDiffPrefillConnectionId,
