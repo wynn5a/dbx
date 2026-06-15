@@ -509,10 +509,19 @@ where
         tokio::select! {
             biased;
             _ = token.cancelled() => Err(canceled_error()),
-            result = timeout(timeout_duration, future) => result.map_err(|_| timeout_error())?,
+            result = timeout(timeout_duration, future) => {
+                if result.is_err() {
+                    log::warn!("[query] backend query timeout fired after {}s", timeout_duration.as_secs());
+                }
+                result.map_err(|_| timeout_error())?
+            },
         }
     } else {
-        timeout(timeout_duration, future).await.map_err(|_| timeout_error())?
+        let result = timeout(timeout_duration, future).await;
+        if result.is_err() {
+            log::warn!("[query] backend query timeout fired after {}s", timeout_duration.as_secs());
+        }
+        result.map_err(|_| timeout_error())?
     }
 }
 
@@ -569,7 +578,12 @@ pub async fn do_execute(
         .map(|config| config.attached_databases.iter().map(|database| database.name.clone()).collect::<Vec<_>>())
         .unwrap_or_default();
     let pool_db_type = connection_database_type_for_pool_key(state, pool_key).await;
+    let lock_start = std::time::Instant::now();
     let connections = state.connections.read().await;
+    let lock_wait_ms = lock_start.elapsed().as_millis();
+    if lock_wait_ms > 500 {
+        log::warn!("[query][do_execute] connections read-lock waited {}ms for pool_key={}", lock_wait_ms, pool_key);
+    }
     let pool = connections.get(pool_key).ok_or("Connection not found")?;
 
     match pool {

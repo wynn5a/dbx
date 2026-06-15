@@ -23,11 +23,23 @@ pub async fn execute_query(
     client_session_id: Option<String>,
     timeout_secs: Option<u64>,
 ) -> Result<db::QueryResult, String> {
+    let trace_id = execution_id.clone().as_deref().unwrap_or("no-execution-id").to_string();
+    let started_at = Instant::now();
+    log::info!(
+        "[query][execute_query:start] trace_id={} connection_id={} database={} schema={:?} timeout_secs={:?} sql={}",
+        trace_id,
+        connection_id,
+        database,
+        schema,
+        timeout_secs,
+        sql
+    );
+
     let registered_query =
         execution_id.as_ref().filter(|id| !id.trim().is_empty()).map(|id| state.running_queries.register(id.clone()));
     let cancel_token = registered_query.as_ref().map(|query| query.token());
 
-    dbx_core::query::execute_sql_statement_with_options(
+    let result = dbx_core::query::execute_sql_statement_with_options(
         &state,
         &connection_id,
         &database,
@@ -44,7 +56,23 @@ pub async fn execute_query(
             execution_id: execution_id.filter(|id| !id.trim().is_empty()),
         },
     )
-    .await
+    .await;
+    match &result {
+        Ok(r) => log::info!(
+            "[query][execute_query:done] trace_id={} elapsed_ms={} rows={} backend_ms={}",
+            trace_id,
+            started_at.elapsed().as_millis(),
+            r.rows.len(),
+            r.execution_time_ms
+        ),
+        Err(e) => log::error!(
+            "[query][execute_query:error] trace_id={} elapsed_ms={} error={}",
+            trace_id,
+            started_at.elapsed().as_millis(),
+            e
+        ),
+    }
+    result
 }
 
 #[tauri::command]

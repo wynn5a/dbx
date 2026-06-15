@@ -1320,6 +1320,9 @@ export const useQueryStore = defineStore("query", () => {
       }
     } catch (e: any) {
       console.error("[DBX][executeTabSql:error]", { traceId, elapsed: elapsed(), error: e });
+      // If the frontend timeout fired, the backend query is still running with no one listening.
+      // Fire-and-forget cancel so the backend doesn't keep a zombie connection.
+      void api.cancelQuery(executionId);
       const current = tabs.value.find((t) => t.id === id);
       if (current?.executionId === executionId) {
         current.result = toErrorResult(e);
