@@ -1512,6 +1512,9 @@ const rowStatusFilter = ref<RowStatusFilter>("all");
 const gridRef = ref<HTMLDivElement>();
 const headerRef = ref<HTMLDivElement>();
 const gridScrollbarGutter = ref(0);
+// Live inner (client) width of the grid scroller. Used as the authoritative
+// fill target for column widths so they never stretch past what actually fits.
+const gridViewportWidth = ref(0);
 const hiddenColumnIndexes = ref<Set<number>>(new Set());
 const nullColumnsHidden = ref(false);
 const autoHiddenNullColumnIndexes = ref<Set<number>>(new Set());
@@ -1670,6 +1673,7 @@ const { initColumnWidths, onResizeStart, autoFitColumn, renderedColumnWidths, to
     columnIndexes: visibleColumnIndexes,
     gridRef,
     scrollbarGutter: gridScrollbarGutter,
+    viewportWidth: gridViewportWidth,
   });
 const gridStyle = computed(() => ({
   ...columnVars.value,
@@ -1677,7 +1681,6 @@ const gridStyle = computed(() => ({
   "--grid-scrollbar-gutter": `${gridScrollbarGutter.value}px`,
 }));
 const gridHorizontalScrollLeft = ref(0);
-const gridViewportWidth = ref(0);
 const renderedColumnOffsets = computed(() => {
   const widths = renderedColumnWidths.value;
   const offsets = Array.from({ length: widths.length + 1 }, () => 0);
@@ -4008,9 +4011,25 @@ function resumeCanvasGridWork() {
   nextTick(attachCanvasResizeObserver);
 }
 
+// Keep the scroller's measured client width / gutter fresh on any layout change
+// (window resize, panel or drawer toggle), so the fill-to-width column sizing
+// always tracks the real client area. Canvas mode has its own scroller observer
+// (attachCanvasResizeObserver); this covers the DOM-rows scroller too.
+let gridResizeObserver: ResizeObserver | null = null;
+function attachGridResizeObserver() {
+  gridResizeObserver?.disconnect();
+  gridResizeObserver = null;
+  if (typeof ResizeObserver === "undefined" || !gridRef.value) return;
+  gridResizeObserver = new ResizeObserver(() => {
+    if (!useCanvasGridRows.value) refreshGridScrollerMetrics();
+  });
+  gridResizeObserver.observe(gridRef.value);
+}
+
 onMounted(resumeCanvasGridWork);
 onActivated(resumeCanvasGridWork);
 onMounted(() => {
+  attachGridResizeObserver();
   if (typeof window === "undefined") return;
   window.addEventListener("resize", scheduleCanvasPixelRatioRefresh);
   window.visualViewport?.addEventListener("resize", scheduleCanvasPixelRatioRefresh);
@@ -4019,6 +4038,8 @@ onMounted(() => {
 onDeactivated(pauseCanvasGridWork);
 onUnmounted(() => {
   pauseCanvasGridWork();
+  gridResizeObserver?.disconnect();
+  gridResizeObserver = null;
   if (typeof window === "undefined") return;
   window.removeEventListener("resize", scheduleCanvasPixelRatioRefresh);
   window.visualViewport?.removeEventListener("resize", scheduleCanvasPixelRatioRefresh);
@@ -5362,7 +5383,11 @@ const cellDetailPanelLayout = computed(() => settingsStore.editorSettings.cellDe
 const cellDetailPanelIsBottom = computed(() => cellDetailPanelLayout.value === "bottom");
 
 watch([showCellDetail, showTableInfo], () => {
+  // Opening/closing a side or bottom panel resizes the grid scroller. Re-measure
+  // its client width and scrollbar gutter so the fill-to-width columns stay sized
+  // to the new client area instead of leaving a spurious horizontal scrollbar.
   if (useCanvasGridRows.value) nextTick(syncCanvasViewport);
+  else nextTick(refreshGridScrollerMetrics);
 });
 
 watch(activeTableInfoTab, () => {

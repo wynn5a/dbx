@@ -16,10 +16,12 @@ export interface UseDataGridColumnResizeOptions {
   columnIndexes: ComputedRef<number[]>;
   gridRef: Ref<HTMLDivElement | undefined>;
   scrollbarGutter?: Ref<number>;
+  /** Live inner (client) width of the grid scroller, when measured. */
+  viewportWidth?: Ref<number>;
 }
 
 export function useDataGridColumnResize(options: UseDataGridColumnResizeOptions) {
-  const { columns, sourceRows, columnIndexes, gridRef, scrollbarGutter } = options;
+  const { columns, sourceRows, columnIndexes, gridRef, scrollbarGutter, viewportWidth } = options;
 
   const columnWidths = ref<number[]>([]);
   const { width: gridWidth } = useElementSize(gridRef);
@@ -81,7 +83,15 @@ export function useDataGridColumnResize(options: UseDataGridColumnResizeOptions)
     const widths = columnWidths.value;
     if (widths.length === 0) return widths;
 
-    const availableWidth = Math.max(0, gridWidth.value - (scrollbarGutter?.value ?? 0));
+    // Fill the columns to the scroller's content area. The root-width-minus-gutter
+    // estimate can transiently over-shoot the real client width (e.g. a stale
+    // scrollbar gutter right after the cell-detail panel resizes the grid), which
+    // would stretch the columns a scrollbar-width past what fits and leave a
+    // spurious horizontal scrollbar. Clamp to the directly-measured viewport width
+    // when we have it so the fill can never exceed the visible client area.
+    const estimatedWidth = Math.max(0, gridWidth.value - (scrollbarGutter?.value ?? 0));
+    const measuredWidth = viewportWidth?.value ?? 0;
+    const availableWidth = measuredWidth > 0 ? Math.min(estimatedWidth, measuredWidth) : estimatedWidth;
     const extraWidth = Math.max(0, availableWidth - DATA_GRID_ROW_NUM_WIDTH - baseTotalWidth.value);
     if (extraWidth === 0) return widths;
 
