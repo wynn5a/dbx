@@ -3950,7 +3950,17 @@ function drawCanvasGrid() {
   });
 }
 
-watch(useCanvasGridRows, () => nextTick(attachCanvasResizeObserver), { immediate: true });
+// Re-sync the canvas viewport whenever the canvas scroller is (re)mounted. The
+// scroller element only exists while there are visible rows; an empty grid shows
+// the empty-state branch instead (no scrollerRef). So watching useCanvasGridRows
+// alone misses the empty -> first-row transition (e.g. "Add row" on an empty
+// table), leaving canvasViewportWidth/Height at 0 — which collapses the cell
+// editor overlay to 0x0 and makes inline editing invisible/unfocusable.
+watch(
+  () => useCanvasGridRows.value && hasVisibleRows.value,
+  () => nextTick(attachCanvasResizeObserver),
+  { immediate: true },
+);
 watch(
   [
     displayRowRefs,

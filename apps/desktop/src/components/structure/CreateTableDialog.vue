@@ -77,17 +77,17 @@ function onDialogKeydown(event: KeyboardEvent) {
           <DialogTitle class="truncate text-[15px] font-semibold tracking-[-0.012em] text-[var(--ds-text-1)]">
             {{ t("structureEditor.newTable") }}
           </DialogTitle>
-          <span v-if="breadcrumb" class="flex min-w-0 items-center gap-1 text-xs text-[var(--ds-text-3)]">
+          <span v-if="breadcrumb" class="flex min-w-0 items-center gap-1.5 text-xs text-[var(--ds-text-3)]">
             <Database class="h-3 w-3 shrink-0 text-[var(--ds-text-4)]" />
             <span class="truncate">{{ breadcrumb }}</span>
+            <span
+              v-if="driverLabel"
+              class="inline-flex h-[18px] shrink-0 items-center rounded border border-[var(--ds-border)] px-1.5 font-mono text-[10.5px] leading-none text-[var(--ds-text-2)]"
+            >
+              {{ driverLabel }}
+            </span>
           </span>
         </div>
-        <span
-          v-if="driverLabel"
-          class="inline-flex h-6 shrink-0 items-center rounded-md border border-[var(--ds-border)] px-2 font-mono text-[11px] text-[var(--ds-text-2)]"
-        >
-          {{ driverLabel }}
-        </span>
         <Button variant="outline" size="sm" @click="open = false">{{ t("common.cancel") }}</Button>
         <Button size="sm" :disabled="!canCreate" class="gap-1.5" @click="create">
           <Loader2 v-if="saving" class="h-3.5 w-3.5 animate-spin" />

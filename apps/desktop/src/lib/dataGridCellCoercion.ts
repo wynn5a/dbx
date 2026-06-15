@@ -11,7 +11,16 @@ export interface CoerceDataGridCellValueOptions {
 export function coerceDataGridCellValue(options: CoerceDataGridCellValueOptions): GridCellValue {
   const { value, oldValue } = options;
   if (value.toUpperCase() === "NULL") return null;
-  if (value === "" && oldValue === null) return null;
+  if (value === "") {
+    // An empty cell means "clear this value" → NULL. The only exception is a
+    // text-like column that already holds a string, where an empty string is a
+    // meaningful, distinct value the user may want to keep (type "NULL" above to
+    // force null there). Without this, clearing a previously-filled cell stored
+    // "" — e.g. INSERT ... VALUES ('', ...) on an int `id` — and clearing a
+    // numeric cell coerced to 0 via Number("").
+    if (typeof oldValue === "string" && isTextLikeColumn(options.columnInfo)) return "";
+    return null;
+  }
   const postgresArrayValue = coercePostgresArrayValue(options);
   if (postgresArrayValue !== undefined) return postgresArrayValue;
   if (typeof oldValue === "number") {
@@ -83,6 +92,15 @@ function coercePostgresArrayValue(options: CoerceDataGridCellValueOptions): unkn
 
 function deepEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+// Types where an empty string is a valid, distinct value (vs. NULL). Anything
+// else — numeric, temporal, boolean, uuid, json, blob, array — can't hold ''
+// meaningfully, so clearing such a cell should yield NULL.
+function isTextLikeColumn(columnInfo: Pick<ColumnInfo, "data_type"> | undefined): boolean {
+  const dataType = columnInfo?.data_type.trim().toLowerCase() ?? "";
+  if (!dataType) return false;
+  return /char|text|string|clob|enum|set|\bname\b/.test(dataType);
 }
 
 function isPostgresArrayColumn(
