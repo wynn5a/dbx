@@ -47,6 +47,7 @@ Thumbs.db
 
 # Temp
 tmp/
+wynn5a-*.md
 
 # Logs
 *.log

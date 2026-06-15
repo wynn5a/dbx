@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useToast } from "@/composables/useToast";
+import { useSqlHighlighter } from "@/composables/useSqlHighlighter";
 import { isSchemaAware } from "@/lib/databaseCapabilities";
 import { copyToClipboard } from "@/lib/clipboard";
 import type {
@@ -84,8 +85,15 @@ const PREVIEW_LIMIT_OPTIONS = [50, 100, 200, 500];
 
 const { t } = useI18n();
 const { toast } = useToast();
+const { highlight } = useSqlHighlighter();
 const store = useConnectionStore();
 const open = defineModel<boolean>("open", { default: false });
+
+const KIND_COLOR: Record<DiffKind, string> = {
+  added: "var(--ds-green)",
+  removed: "var(--ds-red)",
+  modified: "var(--ds-amber)",
+};
 
 const props = defineProps<{
   prefillConnectionId?: string;
@@ -181,48 +189,18 @@ const keyColumns = computed(() =>
 );
 const detailPreviewLimitNumber = computed(() => Number(detailPreviewLimit.value) || PREVIEW_LIMIT_OPTIONS[1]);
 
-const sameTableCount = computed(() => batchResults.value.filter((item) => item.status === "same").length);
 const differentTableCount = computed(() => batchResults.value.filter((item) => item.status === "different").length);
 const failedTableCount = computed(() => batchResults.value.filter((item) => item.status === "error").length);
 const totalAdded = computed(() => batchResults.value.reduce((sum, item) => sum + item.added, 0));
 const totalRemoved = computed(() => batchResults.value.reduce((sum, item) => sum + item.removed, 0));
 const totalModified = computed(() => batchResults.value.reduce((sum, item) => sum + item.modified, 0));
 const hasResults = computed(() => batchResults.value.length > 0);
+const highlightedSyncSql = computed(() => highlight(syncPlan.value.syncSql));
 const visibleKinds = computed(() => [
   ...(showAdded.value ? (["added"] as DiffKind[]) : []),
   ...(showRemoved.value ? (["removed"] as DiffKind[]) : []),
   ...(showModified.value ? (["modified"] as DiffKind[]) : []),
 ]);
-const selectedAddedCount = computed(() => selectedDiffCount("added"));
-const selectedRemovedCount = computed(() => selectedDiffCount("removed"));
-const selectedModifiedCount = computed(() => selectedDiffCount("modified"));
-const summary = computed(() => {
-  if (!hasResults.value) return "";
-  if (batchResults.value.length === 1 && batchResults.value[0]?.status !== "error") {
-    const item = batchResults.value[0];
-    return t("dataCompare.summary", {
-      added: item.added,
-      removed: item.removed,
-      modified: item.modified,
-    });
-  }
-  return t("dataCompare.batchSummary", {
-    tables: batchResults.value.length,
-    different: differentTableCount.value,
-    same: sameTableCount.value,
-    failed: failedTableCount.value,
-    added: totalAdded.value,
-    removed: totalRemoved.value,
-    modified: totalModified.value,
-  });
-});
-const selectedSummary = computed(() =>
-  t("dataCompare.selectedSummary", {
-    added: selectedAddedCount.value,
-    removed: selectedRemovedCount.value,
-    modified: selectedModifiedCount.value,
-  }),
-);
 const compareProgressLabel = computed(() => {
   if (!comparing.value || compareProgressTotal.value === 0) return "";
   return t("dataCompare.comparingTable", {
@@ -482,10 +460,18 @@ function resultStatusLabel(status: DataCompareTableStatus): string {
   return t("dataCompare.statusError");
 }
 
-function resultStatusClass(status: DataCompareTableStatus): string {
-  if (status === "different") return "bg-amber-500/15 text-amber-700";
-  if (status === "same") return "bg-emerald-500/15 text-emerald-700";
-  return "bg-destructive/15 text-destructive";
+function resultStatusColor(status: DataCompareTableStatus): string {
+  if (status === "different") return "var(--ds-amber)";
+  if (status === "same") return "var(--ds-green)";
+  return "var(--ds-red)";
+}
+
+function resultStatusStyle(status: DataCompareTableStatus) {
+  const color = resultStatusColor(status);
+  return {
+    color,
+    background: `color-mix(in srgb, ${color} 14%, transparent)`,
+  };
 }
 
 function toSelectableDiff(diff: DataCompareResult): SelectableDataCompareResult {
@@ -569,10 +555,6 @@ function clearAllSelections() {
 function toggleRowSelection(row: SelectableDataCompareRow | SelectableDataCompareModifiedRow) {
   row.selected = !row.selected;
   rebuildSyncPlan().catch((e) => toast(String(e), 5000));
-}
-
-function selectedDiffCount(kind: DiffKind) {
-  return batchResults.value.reduce((sum, table) => sum + selectedRows(table, kind), 0);
 }
 
 function buildSyncPlanTables(): DataCompareSyncPlanTableOptions[] {
@@ -1011,7 +993,7 @@ watch(
       <div class="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-4">
         <div class="grid grid-cols-[1fr_auto_1fr] gap-4 items-start">
           <div class="space-y-2">
-            <Label class="text-xs font-medium">{{ t("diff.source") }}</Label>
+            <span class="ds-section-label">{{ t("diff.source") }}</span>
             <Select
               :model-value="sourceConnectionId"
               @update:model-value="(v: any) => (sourceConnectionId = String(v))"
@@ -1051,9 +1033,9 @@ watch(
               </SelectContent>
             </Select>
 
-            <div class="space-y-2 rounded-lg border p-2">
+            <div class="ds-card space-y-2 p-2">
               <div class="flex items-center justify-between gap-2">
-                <Label class="text-xs font-medium">{{ t("dataCompare.sourceTables") }}</Label>
+                <span class="ds-section-label">{{ t("dataCompare.sourceTables") }}</span>
                 <div v-if="sourceTables.length" class="text-[11px] text-[var(--ds-text-3)]">
                   {{
                     t("dataCompare.selectedTables", {
@@ -1094,30 +1076,36 @@ watch(
               <div v-else-if="sourceTables.length === 0" class="text-xs text-[var(--ds-text-3)] py-3 text-center">
                 {{ t("dataCompare.noTables") }}
               </div>
-              <div v-else class="max-h-40 overflow-auto rounded border">
+              <div
+                v-else
+                class="max-h-40 overflow-auto rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)]"
+              >
                 <button
                   v-for="table in filteredSourceTables"
                   :key="table"
                   type="button"
-                  class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-muted/50"
+                  class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-[var(--ds-text-2)] transition-colors hover:bg-[var(--ds-bg-hover)]"
                   @click="toggleSourceTable(table)"
                 >
-                  <CheckSquare v-if="selectedSourceTables.has(table)" class="w-3.5 h-3.5 text-primary shrink-0" />
-                  <Square v-else class="w-3.5 h-3.5 text-muted-foreground/40 shrink-0" />
-                  <span class="truncate">{{ table }}</span>
+                  <CheckSquare
+                    v-if="selectedSourceTables.has(table)"
+                    class="w-3.5 h-3.5 text-[var(--ds-accent)] shrink-0"
+                  />
+                  <Square v-else class="w-3.5 h-3.5 text-[var(--ds-text-4)] shrink-0" />
+                  <span class="truncate font-mono">{{ table }}</span>
                 </button>
               </div>
             </div>
           </div>
 
-          <div class="flex items-center pt-6">
+          <div class="flex items-center pt-5">
             <Button variant="ghost" size="icon" :title="t('diff.swap')" @click="swapSourceTarget">
               <ArrowLeftRight class="w-3.5 h-3.5" />
             </Button>
           </div>
 
           <div class="space-y-2">
-            <Label class="text-xs font-medium">{{ t("diff.target") }}</Label>
+            <span class="ds-section-label">{{ t("diff.target") }}</span>
             <Select
               :model-value="targetConnectionId"
               @update:model-value="(v: any) => (targetConnectionId = String(v))"
@@ -1158,7 +1146,7 @@ watch(
             </Select>
 
             <div v-if="!isBatchCompare" class="space-y-1">
-              <Label class="text-xs font-medium">{{ t("dataCompare.targetTable") }}</Label>
+              <span class="ds-section-label">{{ t("dataCompare.targetTable") }}</span>
               <Select :model-value="targetTable" @update:model-value="(v: any) => (targetTable = String(v))">
                 <SelectTrigger class="h-8 text-xs">
                   <SelectValue :placeholder="t('dataCompare.selectTable')" />
@@ -1168,8 +1156,8 @@ watch(
                 </SelectContent>
               </Select>
             </div>
-            <div v-else class="space-y-2 rounded-lg border p-3 text-xs">
-              <div class="font-medium">{{ t("dataCompare.autoMatchHint") }}</div>
+            <div v-else class="ds-card space-y-2 p-3 text-xs">
+              <span class="ds-section-label">{{ t("dataCompare.autoMatchHint") }}</span>
               <div class="text-[var(--ds-text-3)]">
                 {{
                   t("dataCompare.matchedTables", { matched: matchedTaskCount, total: selectedSourceTableNames.length })
@@ -1180,16 +1168,19 @@ watch(
               </div>
               <div
                 v-if="compareTasksPreview.length"
-                class="max-h-36 overflow-auto rounded border bg-[var(--ds-bg-canvas)] border-[var(--ds-border-soft)]"
+                class="max-h-36 overflow-auto rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)]"
               >
                 <div
                   v-for="task in compareTasksPreview"
                   :key="`${task.sourceTable}:${task.targetTable}`"
-                  class="flex items-center justify-between gap-2 border-b px-2 py-1 last:border-b-0"
+                  class="flex items-center justify-between gap-2 border-b border-[var(--ds-border-soft)] px-2 py-1 last:border-b-0"
                 >
-                  <span class="truncate font-mono">{{ task.sourceTable }}</span>
-                  <span class="text-muted-foreground">→</span>
-                  <span class="truncate font-mono" :class="task.matched ? '' : 'text-destructive'">
+                  <span class="truncate font-mono text-[var(--ds-text-2)]">{{ task.sourceTable }}</span>
+                  <span class="text-[var(--ds-text-4)]">→</span>
+                  <span
+                    class="truncate font-mono"
+                    :class="task.matched ? 'text-[var(--ds-text-2)]' : 'text-[var(--ds-red)]'"
+                  >
                     {{ task.targetTable || t("dataCompare.targetTableMissing", { table: task.sourceTable }) }}
                   </span>
                 </div>
@@ -1199,7 +1190,7 @@ watch(
         </div>
 
         <div class="space-y-1">
-          <Label class="text-xs font-medium">{{ t("dataCompare.keyColumns") }}</Label>
+          <span class="ds-section-label">{{ t("dataCompare.keyColumns") }}</span>
           <Input v-model="keyColumnsText" class="h-8 text-xs" :placeholder="t('dataCompare.keyColumnsPlaceholder')" />
           <div class="text-[11px] text-[var(--ds-text-3)]">
             {{ t("dataCompare.keyColumnsAutoHint") }}
@@ -1207,40 +1198,33 @@ watch(
         </div>
 
         <div v-if="hasResults" class="space-y-3">
-          <div class="rounded-lg border p-3 text-sm space-y-2">
-            <div>{{ summary }}</div>
-            <div class="text-xs text-[var(--ds-text-3)]">{{ selectedSummary }}</div>
-          </div>
-
-          <div class="rounded-lg border p-3 space-y-3">
+          <div class="ds-card p-3 space-y-3">
             <div class="flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                class="h-7 text-xs"
-                :class="showAdded ? 'border-primary' : ''"
-                @click="showAdded = !showAdded"
-              >
-                {{ t("diff.added") }} · {{ totalAdded }}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                class="h-7 text-xs"
-                :class="showRemoved ? 'border-primary' : ''"
+              <button type="button" class="ds-diff-toggle" :data-active="showAdded" @click="showAdded = !showAdded">
+                <span class="ds-diff-dot" :style="{ background: KIND_COLOR.added }" />
+                {{ t("diff.added") }}
+                <span class="font-mono tabular-nums text-[var(--ds-text-1)]">{{ totalAdded }}</span>
+              </button>
+              <button
+                type="button"
+                class="ds-diff-toggle"
+                :data-active="showRemoved"
                 @click="showRemoved = !showRemoved"
               >
-                {{ t("diff.removed") }} · {{ totalRemoved }}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                class="h-7 text-xs"
-                :class="showModified ? 'border-primary' : ''"
+                <span class="ds-diff-dot" :style="{ background: KIND_COLOR.removed }" />
+                {{ t("diff.removed") }}
+                <span class="font-mono tabular-nums text-[var(--ds-text-1)]">{{ totalRemoved }}</span>
+              </button>
+              <button
+                type="button"
+                class="ds-diff-toggle"
+                :data-active="showModified"
                 @click="showModified = !showModified"
               >
-                {{ t("diff.modified") }} · {{ totalModified }}
-              </Button>
+                <span class="ds-diff-dot" :style="{ background: KIND_COLOR.modified }" />
+                {{ t("diff.modified") }}
+                <span class="font-mono tabular-nums text-[var(--ds-text-1)]">{{ totalModified }}</span>
+              </button>
               <span class="flex-1" />
               <Select v-model="detailPreviewLimit">
                 <SelectTrigger class="h-7 w-32 text-xs">
@@ -1270,11 +1254,11 @@ watch(
             </div>
           </div>
 
-          <div class="rounded-lg border overflow-hidden">
+          <div class="rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden">
             <div class="max-h-64 overflow-auto">
               <table class="w-full text-xs">
                 <thead class="bg-[var(--ds-bg-canvas)] sticky top-0 z-10">
-                  <tr>
+                  <tr class="text-[var(--ds-text-3)]">
                     <th class="px-3 py-2 text-left font-medium">{{ t("diff.table") }}</th>
                     <th class="px-3 py-2 text-left font-medium">{{ t("dataCompare.targetTable") }}</th>
                     <th class="px-3 py-2 text-left font-medium">{{ t("diff.status") }}</th>
@@ -1282,16 +1266,24 @@ watch(
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="item in batchResults" :key="`${item.sourceTable}:${item.targetTable}`" class="border-t">
-                    <td class="px-3 py-2 align-top font-mono">{{ item.sourceTable }}</td>
-                    <td class="px-3 py-2 align-top font-mono text-muted-foreground">{{ item.targetTable }}</td>
+                  <tr
+                    v-for="item in batchResults"
+                    :key="`${item.sourceTable}:${item.targetTable}`"
+                    class="border-t border-[var(--ds-border-soft)]"
+                  >
+                    <td class="px-3 py-2 align-top font-mono text-[var(--ds-text-1)]">{{ item.sourceTable }}</td>
+                    <td class="px-3 py-2 align-top font-mono text-[var(--ds-text-3)]">{{ item.targetTable }}</td>
                     <td class="px-3 py-2 align-top">
-                      <span class="inline-flex rounded px-2 py-0.5 text-[11px]" :class="resultStatusClass(item.status)">
+                      <span
+                        class="inline-flex items-center gap-1.5 rounded-[var(--ds-radius-pill)] px-2 py-0.5 text-[11px] font-medium"
+                        :style="resultStatusStyle(item.status)"
+                      >
+                        <span class="size-1.5 rounded-full" :style="{ background: resultStatusColor(item.status) }" />
                         {{ resultStatusLabel(item.status) }}
                       </span>
                     </td>
-                    <td class="px-3 py-2 align-top text-muted-foreground">
-                      <div v-if="item.status === 'error'" class="text-destructive">{{ item.error }}</div>
+                    <td class="px-3 py-2 align-top text-[var(--ds-text-3)]">
+                      <div v-if="item.status === 'error'" class="text-[var(--ds-red)]">{{ item.error }}</div>
                       <template v-else>
                         <div>
                           {{
@@ -1336,30 +1328,35 @@ watch(
             <div
               v-for="item in batchResults.filter((entry) => entry.status === 'different')"
               :key="`details-${item.sourceTable}:${item.targetTable}`"
-              class="rounded-lg border overflow-hidden"
+              class="rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden"
             >
               <button
                 type="button"
-                class="flex w-full items-center gap-2 border-b bg-muted/30 px-3 py-2 text-left text-sm font-medium"
+                class="flex w-full items-center gap-2 border-b border-[var(--ds-border-soft)] bg-[var(--ds-bg-canvas)] px-3 py-2 text-left text-sm font-medium transition-colors hover:bg-[var(--ds-bg-hover)]"
                 @click="toggleTableExpanded(item)"
               >
-                <ChevronDown v-if="item.expanded" class="h-4 w-4 shrink-0" />
-                <ChevronRight v-else class="h-4 w-4 shrink-0" />
-                <span class="font-mono">{{ item.sourceTable }}</span>
-                <span class="text-muted-foreground">→</span>
-                <span class="font-mono text-muted-foreground">{{ item.targetTable }}</span>
+                <ChevronDown v-if="item.expanded" class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
+                <ChevronRight v-else class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
+                <span class="font-mono text-[var(--ds-text-1)]">{{ item.sourceTable }}</span>
+                <span class="text-[var(--ds-text-4)]">→</span>
+                <span class="font-mono text-[var(--ds-text-3)]">{{ item.targetTable }}</span>
               </button>
 
               <div v-if="item.expanded" class="space-y-3 p-3">
                 <div
                   v-for="kind in visibleKinds"
                   :key="`${item.sourceTable}:${kind}`"
-                  class="rounded-lg border"
+                  class="rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)]"
                   v-show="hasDiffRows(item, kind)"
                 >
-                  <div class="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-3 py-2 text-xs">
-                    <span class="font-medium">{{ t(`diff.${kind}`) }}</span>
-                    <span class="text-muted-foreground"
+                  <div
+                    class="flex flex-wrap items-center gap-2 border-b border-[var(--ds-border-soft)] bg-[var(--ds-bg-canvas)] px-3 py-2 text-xs"
+                  >
+                    <span class="inline-flex items-center gap-1.5 font-medium text-[var(--ds-text-1)]">
+                      <span class="size-1.5 rounded-full" :style="{ background: KIND_COLOR[kind] }" />
+                      {{ t(`diff.${kind}`) }}
+                    </span>
+                    <span class="font-mono tabular-nums text-[var(--ds-text-3)]"
                       >{{ selectedRows(item, kind) }}/{{ item.diff[kind].length }}</span
                     >
                     <span class="flex-1" />
@@ -1394,19 +1391,19 @@ watch(
                     </Button>
                   </div>
 
-                  <div class="max-h-72 overflow-auto divide-y">
+                  <div class="max-h-72 overflow-auto divide-y divide-[var(--ds-border-soft)]">
                     <button
                       v-for="row in rowsForDisplay(item, kind)"
                       :key="`${item.sourceTable}:${kind}:${row.key}`"
                       type="button"
-                      class="flex w-full items-start gap-3 px-3 py-2 text-left text-xs hover:bg-muted/40"
+                      class="flex w-full items-start gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-[var(--ds-bg-hover)]"
                       @click="toggleRowSelection(row)"
                     >
-                      <CheckSquare v-if="row.selected" class="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-                      <Square v-else class="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                      <CheckSquare v-if="row.selected" class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--ds-accent)]" />
+                      <Square v-else class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--ds-text-4)]" />
                       <div class="min-w-0 flex-1">
-                        <div class="font-mono">{{ formatKeyValues(row.keyValues) }}</div>
-                        <div class="mt-1 text-muted-foreground break-words">
+                        <div class="font-mono text-[var(--ds-text-2)]">{{ formatKeyValues(row.keyValues) }}</div>
+                        <div class="mt-1 text-[var(--ds-text-3)] break-words">
                           {{
                             kind === "modified"
                               ? formatModifiedSummary(row as SelectableDataCompareModifiedRow)
@@ -1419,7 +1416,7 @@ watch(
 
                   <div
                     v-if="remainingRows(item, kind) > 0 && !item.showAll[kind]"
-                    class="border-t px-3 py-2 text-xs text-muted-foreground"
+                    class="border-t border-[var(--ds-border-soft)] px-3 py-2 text-xs text-[var(--ds-text-3)]"
                   >
                     {{ t("dataCompare.remainingRows", { count: remainingRows(item, kind) }) }}
                   </div>
@@ -1432,12 +1429,11 @@ watch(
             {{ t("dataCompare.planningSync") }}
           </div>
           <div v-else-if="syncPlan.syncSql.trim()" class="space-y-1">
-            <Label class="text-xs font-medium">{{ t("diff.generatedSql") }}</Label>
-            <textarea
-              :value="syncPlan.syncSql"
-              readonly
-              class="w-full h-48 rounded-lg border border-[var(--ds-border-soft)] bg-[var(--ds-bg-canvas)] p-3 font-mono text-xs resize-none focus:outline-none focus:ring-1 focus:ring-ring"
-            />
+            <span class="ds-section-label">{{ t("diff.generatedSql") }}</span>
+            <pre
+              class="w-full h-48 overflow-auto rounded-[var(--ds-radius)] border border-[var(--ds-border-soft)] bg-[var(--ds-bg-canvas)] p-3 font-mono text-xs whitespace-pre"
+              v-html="highlightedSyncSql"
+            ></pre>
           </div>
           <div v-else-if="differentTableCount === 0 && failedTableCount === 0" class="text-sm text-[var(--ds-text-3)]">
             {{ t("dataCompare.noDifferences") }}
@@ -1451,10 +1447,12 @@ watch(
           <Label class="text-xs font-medium text-[var(--ds-red)]">
             {{ t("diff.syncSummary", { success: executeTotal - syncErrors.length, failed: syncErrors.length }) }}
           </Label>
-          <div class="max-h-32 overflow-auto border rounded-lg bg-destructive/5 p-2 space-y-1">
+          <div
+            class="max-h-32 overflow-auto rounded-[var(--ds-radius)] border border-[color-mix(in_srgb,var(--ds-red)_25%,transparent)] bg-[color-mix(in_srgb,var(--ds-red)_7%,transparent)] p-2 space-y-1"
+          >
             <div v-for="(err, i) in syncErrors" :key="i" class="text-xs font-mono">
-              <span class="text-destructive">{{ err.error }}</span>
-              <span class="text-muted-foreground ml-1"
+              <span class="text-[var(--ds-red)]">{{ err.error }}</span>
+              <span class="text-[var(--ds-text-3)] ml-1"
                 >— {{ err.sql.slice(0, 80) }}{{ err.sql.length > 80 ? "..." : "" }}</span
               >
             </div>
@@ -1464,7 +1462,7 @@ watch(
 
       <DialogFooter
         v-if="!hasResults"
-        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3"
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-[var(--ds-bg-base)] px-4 py-3"
       >
         <Button variant="outline" @click="open = false">{{ t("common.close") }}</Button>
         <span v-if="compareProgressLabel" class="text-xs text-[var(--ds-text-3)] self-center">{{
@@ -1479,7 +1477,7 @@ watch(
 
       <DialogFooter
         v-else
-        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3 flex items-center gap-2"
+        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-[var(--ds-bg-base)] px-4 py-3 flex items-center gap-2"
       >
         <Button variant="outline" @click="open = false">{{ t("common.close") }}</Button>
         <span v-if="executing" class="text-xs text-[var(--ds-text-3)] mr-auto">
@@ -1510,3 +1508,40 @@ watch(
     </DialogContent>
   </Dialog>
 </template>
+
+<style scoped>
+.ds-diff-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--ds-radius-pill);
+  border: 1px solid var(--ds-border);
+  background: var(--ds-bg-panel);
+  color: var(--ds-text-2);
+  transition:
+    background var(--ds-speed) var(--ds-ease),
+    border-color var(--ds-speed) var(--ds-ease),
+    color var(--ds-speed) var(--ds-ease);
+}
+.ds-diff-toggle:hover {
+  background: var(--ds-bg-hover);
+}
+.ds-diff-toggle[data-active="true"] {
+  border-color: var(--ds-accent-line);
+  background: var(--ds-accent-soft);
+  color: var(--ds-text-1);
+}
+.ds-diff-toggle[data-active="false"] {
+  opacity: 0.6;
+}
+.ds-diff-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  flex-shrink: 0;
+}
+</style>
