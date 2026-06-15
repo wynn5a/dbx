@@ -60,14 +60,20 @@ const dsTooltipStyle = computed(() => ({
   padding: 0,
   textStyle: { color: "var(--ds-text-1)" },
   extraCssText: [
-    "background:var(--ds-bg-elevated)",
+    "display:inline-flex",
+    "align-items:center",
+    "gap:8px",
+    "max-width:36ch",
+    "padding:4.5px 9px",
     "border:1px solid var(--ds-border-strong)",
     "border-radius:6px",
-    "padding:5px 10px",
+    "background:linear-gradient(180deg,rgb(255 255 255 / 0.02),transparent 40%),var(--ds-bg-elevated)",
     "font-size:11.5px",
+    "font-weight:500",
+    "line-height:1.4",
     isDark.value
-      ? "box-shadow:0 4px 12px -2px rgb(0 0 0 / 0.5), 0 2px 4px -2px rgb(0 0 0 / 0.35)"
-      : "box-shadow:0 4px 12px -2px rgb(0 0 0 / 0.12), 0 2px 4px -2px rgb(0 0 0 / 0.08)",
+      ? "box-shadow:inset 0 1px 0 rgb(255 255 255 / 0.07),0 4px 12px -2px rgb(0 0 0 / 0.5)"
+      : "box-shadow:inset 0 1px 0 rgb(255 255 255 / 0.6),0 4px 12px -2px rgb(0 0 0 / 0.12)",
   ].join(";"),
 }));
 

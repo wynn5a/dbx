@@ -62,6 +62,7 @@ import { buildHistoryAiAnalysisPrompt } from "@/lib/historyAiAnalysis";
 import { countAvailableAgentDriverUpdates, type AgentDriverUpdateBadgeState } from "@/lib/agentDriverUpdateBadge";
 import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/safeStorage";
 import { DsDialog } from "@/components/ui/dialog";
+import { DsToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -83,7 +84,14 @@ const connectionStore = useConnectionStore();
 const queryStore = useQueryStore();
 const settingsStore = useSettingsStore();
 const savedSqlStore = useSavedSqlStore();
-const { message: toastMessage, visible: toastVisible, toast } = useToast();
+const {
+  title: toastTitle,
+  description: toastDescription,
+  variant: toastVariant,
+  visible: toastVisible,
+  toast,
+  dismiss: dismissToast,
+} = useToast();
 const { isDark, themeMode, applyTheme, setThemeMode } = useTheme();
 const {
   checkingUpdates,
@@ -1000,7 +1008,7 @@ onUnmounted(() => {
     @authenticated="onLoginSuccess"
   />
   <div v-show="!setupRequired && (!needsAuth || authenticated)" class="h-screen w-screen overflow-hidden">
-    <TooltipProvider :delay-duration="300">
+    <TooltipProvider>
       <div
         class="h-screen w-screen max-w-full min-w-[760px] min-h-[600px] flex flex-col bg-background text-foreground overflow-hidden"
       >
@@ -1241,14 +1249,18 @@ onUnmounted(() => {
           @download-and-install="downloadAndInstallUpdate"
           @restart="restartApp"
         />
-        <Transition name="toast">
-          <div
-            v-if="toastVisible"
-            class="fixed bottom-6 left-1/2 -translate-x-1/2 z-100 px-4 py-2 rounded-lg bg-foreground text-background text-sm shadow-lg"
-          >
-            {{ toastMessage }}
-          </div>
-        </Transition>
+        <Teleport to="body">
+          <Transition name="ds-toast">
+            <div v-if="toastVisible" class="ds-toast-host">
+              <DsToast
+                :title="toastTitle"
+                :description="toastDescription"
+                :variant="toastVariant"
+                @dismiss="dismissToast"
+              />
+            </div>
+          </Transition>
+        </Teleport>
       </div>
 
       <DsDialog v-model:open="showSaveSqlDialog" :title="t('savedSql.saveToLibrary')" :icon="Save">
@@ -1282,12 +1294,14 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.toast-enter-active,
-.toast-leave-active {
-  transition: all 0.25s ease;
+.ds-toast-enter-active,
+.ds-toast-leave-active {
+  transition:
+    opacity 180ms var(--ds-ease),
+    transform 180ms var(--ds-ease);
 }
-.toast-enter-from,
-.toast-leave-to {
+.ds-toast-enter-from,
+.ds-toast-leave-to {
   opacity: 0;
   transform: translate(-50%, 8px);
 }

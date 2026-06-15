@@ -132,6 +132,173 @@
   .palette .pitem { display:flex; align-items:center; gap:11px; padding:8px 12px; border-radius:7px; font-size:13.5px; color:var(--text-2); }
   .palette .pitem.active { background:var(--accent-soft); color:var(--text-1); }
   .palette .pbody { padding:6px; }
+
+  /* full-width spec */
+  .spec.wide { grid-column: 1 / -1; }
+
+  /* ---- toggle switch (product .db-toggle) ---- */
+  .db-toggle {
+    position:relative; width:38px; height:22px; flex-shrink:0;
+    border-radius:99px; border:1px solid var(--border); background:var(--bg-active);
+    padding:0; cursor:pointer;
+    transition: background-color var(--speed) var(--ease), border-color var(--speed) var(--ease);
+  }
+  .db-toggle::after {
+    content:''; position:absolute; top:2px; left:2px; width:16px; height:16px;
+    border-radius:99px; background:var(--text-2); box-shadow:0 1px 2px rgba(0,0,0,0.45);
+    transition: transform var(--speed) var(--ease), background-color var(--speed) var(--ease);
+  }
+  .db-toggle[aria-checked="true"] { background:var(--accent); border-color:color-mix(in srgb, var(--accent) 60%, rgba(255,255,255,0.2)); }
+  .db-toggle[aria-checked="true"]::after { transform:translateX(16px); background:#fff; }
+
+  /* ---- range slider (product .db-range) ---- */
+  .db-range {
+    -webkit-appearance:none; appearance:none; width:100%; height:4px; border-radius:99px;
+    background:var(--bg-active); outline:none; cursor:pointer;
+  }
+  .db-range::-webkit-slider-runnable-track { height:4px; border-radius:99px; background:transparent; }
+  .db-range::-webkit-slider-thumb {
+    -webkit-appearance:none; appearance:none; margin-top:-6px;
+    width:16px; height:16px; border-radius:99px; background:var(--text-1);
+    border:1px solid rgba(0,0,0,0.35); box-shadow:var(--sheen), 0 1px 3px rgba(0,0,0,0.5);
+    transition: transform var(--speed) var(--ease);
+  }
+  .db-range::-moz-range-track { height:4px; border-radius:99px; background:var(--bg-active); }
+  .db-range::-moz-range-progress { height:4px; border-radius:99px; background:var(--accent); }
+  .db-range::-moz-range-thumb { width:16px; height:16px; border:1px solid rgba(0,0,0,0.35); border-radius:99px; background:var(--text-1); box-shadow:var(--sheen), 0 1px 3px rgba(0,0,0,0.5); }
+  .db-range:hover::-webkit-slider-thumb { transform:scale(1.08); }
+  .valchip { font-family:var(--mono); font-size:11.5px; color:var(--text-1); padding:2.5px 9px; border-radius:6px; background:var(--bg-input); border:1px solid var(--border); }
+
+  /* ---- segmented control ---- */
+  .seg { display:inline-flex; padding:3px; gap:2px; border-radius:8px; background:var(--bg-input); border:1px solid var(--border); }
+  .seg button { border:none; background:transparent; color:var(--text-3); font-size:12px; font-family:var(--font); padding:5px 13px; border-radius:6px; cursor:pointer; transition: color var(--speed) var(--ease), background-color var(--speed) var(--ease); }
+  .seg button.active { background:var(--bg-elevated); color:var(--text-1); box-shadow:var(--sheen), 0 1px 2px rgba(0,0,0,0.3); }
+
+  /* ---- select (DS popover) ---- */
+  .sel-trigger {
+    display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+    padding:8px 10px 8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border);
+    background:var(--bg-input); color:var(--text-1); font-size:12.5px; font-family:var(--font); cursor:pointer;
+  }
+  .sel-trigger.open { box-shadow:0 0 0 2px var(--accent-line); }
+  .sel-pop {
+    width:100%; padding:5px; border-radius:10px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 38%), var(--bg-elevated);
+    border:1px solid var(--border-strong); box-shadow:var(--shadow-pop);
+  }
+  .sel-opt { display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:6px; font-size:12.5px; color:var(--text-2); }
+  .sel-opt.active { background:var(--accent-soft); color:var(--text-1); }
+  .sel-opt.hover { background:var(--bg-hover); color:var(--text-1); }
+
+  /* ---- checkbox & radio ---- */
+  .optrow { display:flex; align-items:center; gap:10px; font-size:12.5px; color:var(--text-2); cursor:pointer; }
+  .cbx { width:18px; height:18px; border-radius:5px; border:1px solid var(--border-strong); background:var(--bg-input); display:grid; place-items:center; flex-shrink:0; }
+  .cbx.on { background:var(--accent); border-color:color-mix(in srgb, var(--accent) 60%, rgba(255,255,255,0.2)); }
+  .rdo { width:18px; height:18px; border-radius:99px; border:1px solid var(--border-strong); background:var(--bg-input); display:grid; place-items:center; flex-shrink:0; }
+  .rdo.on { border-color:var(--accent); }
+  .rdo.on::after { content:''; width:9px; height:9px; border-radius:99px; background:var(--accent); }
+  .optrow.on { color:var(--text-1); }
+
+  /* ---- setting row (grouped card) ---- */
+  .setcard { width:100%; border-radius:var(--radius); border:1px solid var(--border); overflow:hidden;
+    background: linear-gradient(180deg, rgba(255,255,255,0.016), transparent 42%), var(--bg-panel); box-shadow:var(--shadow-card); }
+  .setrow { display:flex; align-items:flex-start; gap:14px; padding:13px 15px; }
+  .setrow-txt { flex:1; min-width:0; }
+  .setrow-h { display:flex; align-items:center; gap:7px; margin-bottom:6px; font-size:13px; font-weight:600; color:var(--text-1); }
+  .setrow-txt p { margin:0; font-size:11.5px; line-height:1.55; color:var(--text-3); }
+  .setdiv { height:1px; background:var(--border-soft); }
+
+  /* ---- editor tabs ---- */
+  .tabs { display:flex; gap:1px; width:100%; border-bottom:1px solid var(--border); }
+  .tab { display:flex; align-items:center; gap:8px; padding:9px 13px; font-size:12.5px; color:var(--text-3);
+    border-bottom:2px solid transparent; margin-bottom:-1px; cursor:pointer; transition: color var(--speed) var(--ease); }
+  .tab:hover { color:var(--text-2); }
+  .tab.active { color:var(--text-1); border-bottom-color:var(--accent); }
+  .tab .tdot { width:6px; height:6px; border-radius:99px; background:var(--accent); }
+  .tab .tx { display:grid; place-items:center; width:16px; height:16px; border-radius:4px; color:var(--text-4); }
+  .tab .tx:hover { background:var(--bg-active); color:var(--text-2); }
+  .tab.tadd { color:var(--text-4); padding:9px 11px; }
+
+  /* ---- context menu ---- */
+  .menu { width:210px; padding:5px; border-radius:10px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 36%), var(--bg-elevated);
+    border:1px solid var(--border-strong); box-shadow:var(--shadow-pop); }
+  .mi { display:flex; align-items:center; gap:10px; padding:7px 9px; border-radius:6px; font-size:12.5px; color:var(--text-2); }
+  .mi.active { background:var(--bg-hover); color:var(--text-1); }
+  .mi.danger { color:var(--red); }
+  .mi .mk { margin-left:auto; font-family:var(--mono); font-size:10.5px; color:var(--text-4); }
+  .msep { height:1px; background:var(--border-soft); margin:5px 6px; }
+
+  /* ---- progress ---- */
+  .prog { width:100%; height:6px; border-radius:99px; background:var(--bg-active); overflow:hidden; }
+  .prog > i { display:block; height:100%; border-radius:99px; background:var(--accent); }
+  .prog.indet > i { width:40%; animation:indet 1.3s var(--ease) infinite; }
+  @keyframes indet { 0% { margin-left:-40%; } 100% { margin-left:100%; } }
+
+  /* ---- toast ---- */
+  .toast { display:flex; align-items:flex-start; gap:11px; width:340px; padding:12px 13px; border-radius:10px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%), var(--bg-elevated);
+    border:1px solid var(--border-strong); box-shadow:var(--shadow-pop); font-size:12.5px; }
+  .toast .tic { display:grid; place-items:center; width:26px; height:26px; border-radius:7px; flex-shrink:0; }
+  .toast b { font-weight:600; color:var(--text-1); }
+  .toast p { margin:3px 0 0; color:var(--text-3); line-height:1.5; }
+
+  /* ---- dialog ---- */
+  .dialog { width:100%; max-width:460px; border-radius:14px; overflow:hidden;
+    background: linear-gradient(180deg, rgba(255,255,255,0.022), transparent 22%), var(--bg-elevated);
+    border:1px solid var(--border-strong); box-shadow:var(--shadow-pop); }
+  .dlg-head { display:flex; align-items:flex-start; gap:12px; padding:15px 16px; border-bottom:1px solid var(--border); }
+  .dlg-ic { display:grid; place-items:center; width:30px; height:30px; border-radius:8px; flex-shrink:0; }
+  .dlg-title { font-size:14.5px; font-weight:600; color:var(--text-1); }
+  .dlg-sub { font-size:11.5px; color:var(--text-3); margin-top:2px; line-height:1.45; }
+  .dlg-body { padding:15px 16px; }
+  .codeblock { font-family:var(--mono); font-size:12px; padding:11px 13px; border-radius:8px;
+    background:var(--bg-canvas); border:1px solid var(--border); color:var(--text-2); line-height:1.5; }
+  .dlg-foot { display:flex; align-items:center; gap:10px; justify-content:flex-end; padding:13px 16px; border-top:1px solid var(--border); background:var(--bg-base); }
+  .btn-danger {
+    display:inline-flex; align-items:center; gap:7px; padding:6px 14px; white-space:nowrap;
+    border-radius:var(--radius-sm); color:#fff; font-size:12.5px; font-weight:500; font-family:var(--font); cursor:pointer;
+    border:1px solid color-mix(in srgb, var(--red) 55%, rgba(255,255,255,0.18));
+    background: linear-gradient(180deg, color-mix(in srgb, var(--red) 94%, #fff), color-mix(in srgb, var(--red) 90%, #000));
+    box-shadow:var(--sheen), 0 1px 2px rgba(0,0,0,0.35);
+  }
+
+  /* ---- button hierarchy ---- */
+  .btn-secondary {
+    display:inline-flex; align-items:center; gap:7px; padding:5.5px 12px; white-space:nowrap;
+    border-radius:var(--radius-sm); border:1px solid var(--border-strong);
+    background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent 55%), var(--bg-elevated);
+    color:var(--text-1); font-size:12.5px; font-weight:500; font-family:var(--font); cursor:pointer;
+    box-shadow:var(--shadow-card);
+    transition: background-color var(--speed) var(--ease), border-color var(--speed) var(--ease);
+  }
+  .btn-secondary:hover { background-color:var(--bg-input); }
+  .btn-ghost {
+    display:inline-flex; align-items:center; gap:7px; padding:5.5px 11px; white-space:nowrap;
+    border-radius:var(--radius-sm); border:1px solid transparent; background:transparent;
+    color:var(--text-2); font-size:12.5px; font-family:var(--font); cursor:pointer;
+    transition: background-color var(--speed) var(--ease), color var(--speed) var(--ease);
+  }
+  .btn-ghost:hover { background:var(--bg-hover); color:var(--text-1); }
+  .btn-danger-outline {
+    display:inline-flex; align-items:center; gap:6px; padding:5.5px 11px; white-space:nowrap;
+    border-radius:var(--radius-sm); border:1px solid color-mix(in srgb, var(--red) 30%, transparent); background:transparent;
+    color:var(--red); font-size:12.5px; font-family:var(--font); cursor:pointer;
+    transition: background-color var(--speed) var(--ease);
+  }
+  .btn-danger-outline:hover { background:color-mix(in srgb, var(--red) 10%, transparent); }
+  /* sizes (apply to any text button) */
+  .btn-primary.sm, .btn-secondary.sm, .btn-chip.sm, .btn-ghost.sm { padding:3px 9px; font-size:11.5px; }
+  .btn-primary.lg, .btn-secondary.lg, .btn-chip.lg, .btn-ghost.lg { padding:8px 16px; font-size:13.5px; }
+  .btn-primary.disabled { opacity:.4; cursor:not-allowed; }
+
+  /* button gallery layout */
+  .bgroup + .bgroup { margin-top:20px; }
+  .bgroup .lbl { font-family:var(--mono); font-size:10.5px; font-weight:600; letter-spacing:0.06em; text-transform:uppercase; color:var(--text-3); margin:0 0 13px; }
+  .brow { display:flex; flex-wrap:wrap; gap:16px 22px; align-items:flex-start; }
+  .bcell { display:flex; flex-direction:column; gap:9px; align-items:flex-start; min-width:78px; }
+  .bcap { font-family:var(--mono); font-size:10px; line-height:1.5; color:var(--text-4); }
+  .bcap b { display:block; color:var(--text-2); font-weight:500; font-size:11px; letter-spacing:0; margin-bottom:1px; white-space:nowrap; }
 </style>
 </head>
 <body class="ds">
@@ -141,15 +308,60 @@
 
   <div class="grid2">
 
-    <div class="spec">
+    <div class="spec wide">
       <h3>Buttons</h3>
-      <p>Primary uses a vertical accent gradient with a top sheen and 1px luminous border — a soft “lit from above” read. Secondary “chips” are hairline-bordered and ghost-filled; the active variant fills with <code class="mono">--bg-active</code>. Destructive borrows the red border.</p>
-      <div class="demo">
-        <button class="btn-primary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>New row</button>
-        <button class="btn-primary"><svg width="12" height="12" viewBox="0 0 24 24" fill="#fff" stroke="none"><path d="M7 4v16l13-8L7 4Z"/></svg>Run<span class="kbd" style="background:rgba(0,0,0,0.22);color:#fff;border:none;">⌘↵</span></button>
-        <button class="btn-chip">Explain</button>
-        <button class="btn-chip active">Filter</button>
-        <button class="btn-chip danger">Delete row</button>
+      <p>One hierarchy, four weights. <b style="color:var(--text-2);font-weight:500;">Primary</b> is the lone accent action per view; <b style="color:var(--text-2);font-weight:500;">secondary</b> is a filled neutral for the next-most-likely action; <b style="color:var(--text-2);font-weight:500;">outline</b> is the everyday hairline chip; <b style="color:var(--text-2);font-weight:500;">ghost</b> is borderless for low-stakes or in-toolbar actions. All share 6px radius, 12.5px medium text, and a 120ms ease.</p>
+      <div class="demo col" style="align-items:stretch;">
+
+        <div class="bgroup">
+          <div class="lbl">Hierarchy</div>
+          <div class="brow">
+            <div class="bcell"><button class="btn-primary">New row</button><span class="bcap"><b>Primary</b>.btn-primary</span></div>
+            <div class="bcell"><button class="btn-secondary">Save changes</button><span class="bcap"><b>Secondary</b>.btn-secondary</span></div>
+            <div class="bcell"><button class="btn-chip">Explain</button><span class="bcap"><b>Outline</b>.btn-chip</span></div>
+            <div class="bcell"><button class="btn-ghost">Cancel</button><span class="bcap"><b>Ghost</b>.btn-ghost</span></div>
+            <div class="bcell"><button class="icon-btn hover" style="border:1px solid var(--border);"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg></button><span class="bcap"><b>Icon-only</b>.icon-btn</span></div>
+          </div>
+        </div>
+
+        <div class="bgroup">
+          <div class="lbl">Intent &amp; selection</div>
+          <div class="brow">
+            <div class="bcell"><button class="btn-danger">Drop table</button><span class="bcap"><b>Danger</b>.btn-danger</span></div>
+            <div class="bcell"><button class="btn-danger-outline">Delete row</button><span class="bcap"><b>Danger outline</b>.btn-danger-outline</span></div>
+            <div class="bcell"><button class="btn-chip active">Filter</button><span class="bcap"><b>Selected / on</b>.btn-chip.active</span></div>
+          </div>
+        </div>
+
+        <div class="bgroup">
+          <div class="lbl">With content</div>
+          <div class="brow">
+            <div class="bcell"><button class="btn-primary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>New row</button><span class="bcap"><b>Leading icon</b>icon + label</span></div>
+            <div class="bcell"><button class="btn-primary"><svg width="12" height="12" viewBox="0 0 24 24" fill="#fff" stroke="none"><path d="M7 4v16l13-8L7 4Z"/></svg>Run<span class="kbd" style="background:rgba(0,0,0,0.22);color:#fff;border:none;">⌘↵</span></button><span class="bcap"><b>Trailing shortcut</b>label + .kbd</span></div>
+            <div class="bcell"><button class="btn-secondary">Export<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button><span class="bcap"><b>Trailing icon</b>label + chevron</span></div>
+          </div>
+        </div>
+
+        <div class="bgroup">
+          <div class="lbl">Size</div>
+          <div class="brow" style="align-items:flex-end;">
+            <div class="bcell"><button class="btn-primary sm">Small</button><span class="bcap"><b>sm</b>3·9 · 11.5px</span></div>
+            <div class="bcell"><button class="btn-primary">Default</button><span class="bcap"><b>md</b>5·12 · 12.5px</span></div>
+            <div class="bcell"><button class="btn-primary lg">Large</button><span class="bcap"><b>lg</b>8·16 · 13.5px</span></div>
+          </div>
+        </div>
+
+        <div class="bgroup">
+          <div class="lbl">State</div>
+          <div class="brow">
+            <div class="bcell"><button class="btn-chip">Default</button><span class="bcap">rest</span></div>
+            <div class="bcell"><button class="btn-chip" style="background:var(--bg-hover);color:var(--text-1);border-color:var(--border-strong);">Hover</button><span class="bcap">:hover</span></div>
+            <div class="bcell"><button class="btn-chip" style="outline:2px solid var(--accent);outline-offset:1px;color:var(--text-1);">Focus</button><span class="bcap">:focus-visible</span></div>
+            <div class="bcell"><button class="btn-chip active">Active</button><span class="bcap">:active / on</span></div>
+            <div class="bcell"><button class="btn-primary disabled">Disabled</button><span class="bcap">:disabled</span></div>
+          </div>
+        </div>
+
       </div>
     </div>
 
@@ -275,6 +487,172 @@
             <div class="pgroup">Actions</div>
             <div class="pitem active"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/></svg><span style="flex:1;">Export current table to CSV</span><span class="kbd">↵</span></div>
             <div class="pitem"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg><span style="flex:1;">Refresh connection</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Toggle switch</h3>
+      <p>38×22 pill, 16px knob. Off rests on <code class="mono">--bg-active</code> with a secondary-text knob; on fills with the accent and the knob goes white. Used for every boolean setting.</p>
+      <div class="demo" style="gap:28px;">
+        <span style="display:flex;align-items:center;gap:10px;"><button class="db-toggle" aria-checked="false"></button><span style="font-size:12.5px;color:var(--text-3);">Off</span></span>
+        <span style="display:flex;align-items:center;gap:10px;"><button class="db-toggle" aria-checked="true"></button><span style="font-size:12.5px;color:var(--text-1);">On</span></span>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Slider</h3>
+      <p>4px track on <code class="mono">--bg-active</code>, accent fill, 16px light knob that scales on hover. Pairs with a mono value chip and quaternary range ends. Used for font size and density dials.</p>
+      <div class="demo col" style="gap:0;align-items:stretch;">
+        <div style="display:flex;align-items:center;margin-bottom:12px;">
+          <span style="font-size:11.5px;color:var(--text-2);white-space:nowrap;">Font size</span><span style="flex:1;"></span>
+          <span class="valchip">13px</span>
+        </div>
+        <input class="db-range" type="range" min="10" max="24" value="13" style="background:linear-gradient(90deg, var(--accent) 21%, var(--bg-active) 21%);" />
+        <div class="mono" style="display:flex;justify-content:space-between;margin-top:8px;font-size:10.5px;color:var(--text-4);"><span>10px</span><span>24px</span></div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Segmented control</h3>
+      <p>An inline switcher for 2–4 exclusive options. Inset track, the active segment lifts onto <code class="mono">--bg-elevated</code> with a top sheen. Prefer over a dropdown when every option fits.</p>
+      <div class="demo">
+        <div class="seg">
+          <button class="active">Statement</button>
+          <button>Editor</button>
+          <button>Selection</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Select</h3>
+      <p>Reads like an input, opens a DS popover. Trigger shows a 2px accent-line ring while open; the chosen option fills accent-soft with a trailing check. Chevron flips on open.</p>
+      <div class="demo col" style="gap:12px;align-items:stretch;">
+        <button class="sel-trigger open"><span style="flex:1;" class="mono">IBM Plex Mono</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(180deg);"><path d="m6 9 6 6 6-6"/></svg></button>
+        <div class="sel-pop">
+          <div class="sel-opt active mono"><span style="flex:1;">IBM Plex Mono</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+          <div class="sel-opt hover mono">JetBrains Mono</div>
+          <div class="sel-opt mono">SF Mono</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Checkbox &amp; radio</h3>
+      <p>18px controls. Checked boxes fill with the accent and a white tick; the radio keeps an accent ring with a filled dot. Labels go primary when selected.</p>
+      <div class="demo" style="gap:40px;align-items:flex-start;">
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <label class="optrow on"><span class="cbx on"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>Word wrap</label>
+          <label class="optrow"><span class="cbx"></span>Auto-format on run</label>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <label class="optrow on"><span class="rdo on"></span>Statement at cursor</label>
+          <label class="optrow"><span class="rdo"></span>Entire editor</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Setting row</h3>
+      <p>The borderless row that stacks inside a grouped settings card: leading icon, bold title, secondary description, trailing toggle. Rows divide on <code class="mono">--border-soft</code>.</p>
+      <div class="demo" style="padding:0;">
+        <div class="setcard">
+          <div class="setrow">
+            <div class="setrow-txt">
+              <div class="setrow-h"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-2)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h13a4 4 0 0 1 0 8h-3m2 0-2 2m2-2-2-2M3 18h5"/></svg>Word wrap</div>
+              <p>Wrap long SQL lines within the editor width instead of scrolling.</p>
+            </div>
+            <button class="db-toggle" aria-checked="true"></button>
+          </div>
+          <div class="setdiv"></div>
+          <div class="setrow">
+            <div class="setrow-txt">
+              <div class="setrow-h"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-2)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.4 7.6 8 9 4.6-1.4 8-4 8-9V6l-8-3Z"/></svg>Confirm dangerous SQL</div>
+              <p>Ask before <span class="mono" style="color:var(--red);font-size:11px;">DROP · DELETE · TRUNCATE</span> run.</p>
+            </div>
+            <button class="db-toggle" aria-checked="false"></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Editor tabs</h3>
+      <p>Open queries as a tab strip. Active tab keeps an accent underline and primary text; an accent dot flags unsaved edits; idle tabs reveal a close affordance on hover.</p>
+      <div class="demo" style="padding:0 0 0;align-items:stretch;">
+        <div class="tabs">
+          <div class="tab active"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m8 9 3 3-3 3M13 15h3"/><rect x="3" y="4" width="18" height="16" rx="2"/></svg>query.sql<span class="tdot"></span></div>
+          <div class="tab">users.sql<span class="tx"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></span></div>
+          <div class="tab">schema.sql</div>
+          <div class="tab tadd"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Context menu</h3>
+      <p>Right-click overlay on cells and rows. Elevated surface, pop shadow, 6px items that fill <code class="mono">--bg-hover</code> on hover. Shortcuts trail in mono; destructive actions sit below a hairline in red.</p>
+      <div class="demo" style="justify-content:center;">
+        <div class="menu">
+          <div class="mi active"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy cell<span class="mk">⌘C</span></div>
+          <div class="mi"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>Edit value<span class="mk">↵</span></div>
+          <div class="mi"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h18l-7 8v6l-4 2v-8L3 4Z"/></svg>Filter by value</div>
+          <div class="msep"></div>
+          <div class="mi danger"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2m-9 0v14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V6"/></svg>Delete row<span class="mk">⌫</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Progress</h3>
+      <p>6px track on <code class="mono">--bg-active</code> with an accent fill. Determinate carries a mono percentage; indeterminate sweeps a 40% bar for unknown-length work like streaming results.</p>
+      <div class="demo col" style="gap:16px;align-items:stretch;">
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px;font-size:11.5px;"><span style="color:var(--text-2);">Importing rows</span><span class="mono" style="color:var(--text-3);">62%</span></div>
+          <div class="prog"><i style="width:62%;"></i></div>
+        </div>
+        <div class="prog indet"><i></i></div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Toast</h3>
+      <p>Transient confirmation, bottom-corner. Elevated surface + pop shadow, a tinted icon tile keyed to outcome, optional trailing action or close. Auto-dismisses; errors persist with a retry.</p>
+      <div class="demo col" style="gap:12px;align-items:flex-start;">
+        <div class="toast">
+          <span class="tic" style="background:color-mix(in srgb, var(--green) 16%, transparent);"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+          <div style="flex:1;"><b>Exported 4,820 rows</b><p>customers.csv saved to Downloads.</p></div>
+          <button class="icon-btn" style="width:22px;height:22px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+        <div class="toast">
+          <span class="tic" style="background:color-mix(in srgb, var(--red) 16%, transparent);"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg></span>
+          <div style="flex:1;"><b>Query failed</b><p>syntax error near "SELCT".</p></div>
+          <button class="btn-chip" style="align-self:center;padding:4px 10px;">Retry</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec wide">
+      <h3>Dialog</h3>
+      <p>A focused decision overlay. 14px-radius elevated surface with a pop shadow over a dimmed page. Header pairs a tinted glyph tile with title and subtext; the footer right-aligns a ghost cancel and a single primary — destructive variants fill the primary with red.</p>
+      <div class="demo" style="justify-content:center;background:var(--bg-base);padding:30px;">
+        <div class="dialog">
+          <div class="dlg-head">
+            <span class="dlg-ic" style="background:color-mix(in srgb, var(--red) 15%, transparent);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20L12 3Z"/><path d="M12 9v5M12 17h.01"/></svg></span>
+            <div style="flex:1;min-width:0;">
+              <div class="dlg-title">Run destructive statement?</div>
+              <div class="dlg-sub">This affects rows permanently and cannot be undone.</div>
+            </div>
+            <button class="icon-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+          </div>
+          <div class="dlg-body">
+            <div class="codeblock"><span style="color:var(--red);">DELETE</span> <span style="color:var(--accent);">FROM</span> users <span style="color:var(--accent);">WHERE</span> last_seen &lt; <span style="color:var(--t-text);">'2023-01-01'</span>;</div>
+          </div>
+          <div class="dlg-foot">
+            <button class="btn-chip">Cancel</button>
+            <button class="btn-danger">Run statement<span class="kbd" style="background:rgba(0,0,0,0.22);color:#fff;border:none;">⌘↵</span></button>
           </div>
         </div>
       </div>

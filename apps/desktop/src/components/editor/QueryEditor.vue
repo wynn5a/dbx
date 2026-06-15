@@ -518,7 +518,7 @@ function sqlDataTypeColorClass(dataType: string): string {
 
 function createHoverDom(kind: SqlHoverKind, title: string, typeInfo?: string, rows: string[] = []) {
   const dom = document.createElement("div");
-  dom.className = "ds-tooltip px-2.5 py-1.5 text-xs text-[var(--ds-text-1)]";
+  dom.className = "ds-tooltip";
 
   const heading = document.createElement("div");
   heading.className = "flex items-center gap-2";
@@ -554,7 +554,7 @@ function createHoverDom(kind: SqlHoverKind, title: string, typeInfo?: string, ro
 
 function createSignatureDom(signature: ReturnType<typeof getSqlFunctionSignatureHelp>) {
   const dom = document.createElement("div");
-  dom.className = "ds-tooltip px-2.5 py-1.5 text-xs text-[var(--ds-text-1)]";
+  dom.className = "ds-tooltip";
   if (!signature) return dom;
 
   const signatureNode = document.createElement("div");

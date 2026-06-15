@@ -377,7 +377,7 @@ function activateTab(tabId: string) {
                 </button>
               </div>
             </TooltipTrigger>
-            <TooltipContent side="bottom" class="text-xs grid grid-cols-[auto_1fr] gap-x-2">
+            <TooltipContent side="bottom" class="grid w-max max-w-none grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-xs">
               <template v-for="line in tabTooltipLines(tab, t)" :key="line.label">
                 <span class="text-[var(--ds-text-3)]">{{ line.label }}</span>
                 <span>{{ line.value }}</span>
