@@ -175,7 +175,7 @@ pub fn default_ssh_connect_timeout_secs() -> u64 {
 }
 
 pub fn default_connect_timeout_secs() -> u64 {
-    5
+    30
 }
 
 pub fn default_query_timeout_secs() -> u64 {

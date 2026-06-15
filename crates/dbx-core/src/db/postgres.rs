@@ -1099,6 +1099,17 @@ fn postgres_connection_url(url: &str) -> Result<PostgresConnectionUrl, String> {
                 }
                 _ => kept_params.push(param.to_string()),
             }
+        } else if key.eq_ignore_ascii_case("channel_binding") {
+            // The bundled tokio-postgres driver cannot satisfy SCRAM-SHA-256 channel binding
+            // against some poolers (notably Neon's `-pooler` endpoint), so `channel_binding=require`
+            // fails with an "authentication error" before the password is ever checked. Downgrade
+            // the hard requirement to `prefer` so the driver falls back to plain SCRAM over TLS,
+            // matching libpq's behavior. Leave `prefer`/`disable` untouched.
+            if value.eq_ignore_ascii_case("require") {
+                kept_params.push("channel_binding=prefer".to_string());
+            } else {
+                kept_params.push(param.to_string());
+            }
         } else {
             kept_params.push(param.to_string());
         }
@@ -2312,6 +2323,24 @@ mod tests {
         let _ = std::fs::remove_file(cert);
         let _ = std::fs::remove_file(key);
         let _ = std::fs::remove_file(root);
+    }
+
+    #[test]
+    fn postgres_connection_url_downgrades_channel_binding_require_to_prefer() {
+        let parsed =
+            postgres_connection_url("postgres://localhost/db?sslmode=require&channel_binding=require").unwrap();
+
+        assert_eq!(parsed.url, "postgres://localhost/db?sslmode=require&channel_binding=prefer");
+        tokio_postgres::Config::from_str(&parsed.url).unwrap();
+    }
+
+    #[test]
+    fn postgres_connection_url_keeps_non_require_channel_binding() {
+        for value in ["prefer", "disable"] {
+            let url = format!("postgres://localhost/db?channel_binding={value}");
+            let parsed = postgres_connection_url(&url).unwrap();
+            assert_eq!(parsed.url, url);
+        }
     }
 
     #[test]
