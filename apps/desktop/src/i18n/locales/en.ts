@@ -1810,6 +1810,7 @@ export default {
     debugLogsDownload: "Download logs",
     debugLogsDownloaded: "Downloaded",
     debugLogsClear: "Clear logs",
+    debugLogsCleared: "Cleared",
     systemSection: "System",
     dataGridDisplay: "Data grid display",
     showColumnCommentsInHeader: "Show column comments under names",

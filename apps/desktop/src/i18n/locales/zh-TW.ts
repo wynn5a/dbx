@@ -1656,6 +1656,7 @@ export default {
     debugLogsDownload: "下載日誌",
     debugLogsDownloaded: "已下載",
     debugLogsClear: "清空日誌",
+    debugLogsCleared: "已清空",
     systemSection: "系統",
     dataGridDisplay: "資料表格顯示",
     showColumnCommentsInHeader: "在欄位名稱下方顯示註解",

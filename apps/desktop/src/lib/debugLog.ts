@@ -110,8 +110,20 @@ export function setDebugLoggingEnabled(enabled: boolean) {
   }
 }
 
-export function clearDebugLogs() {
+export async function clearDebugLogs() {
   safeLocalStorageRemove(DEBUG_LOG_ENTRIES_KEY);
+  await clearNativeDebugLogs();
+}
+
+async function clearNativeDebugLogs(): Promise<void> {
+  if (!isTauriRuntimeLike()) return;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("clear_native_debug_logs");
+  } catch (error) {
+    // Keep the frontend clear working even if native logs can't be wiped.
+    originalConsole.warn?.("[DBX][debug-log] failed to clear native logs", error);
+  }
 }
 
 export function getDebugLogText(): string {

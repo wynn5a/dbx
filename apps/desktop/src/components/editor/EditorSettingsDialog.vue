@@ -151,6 +151,7 @@ const editShowTrayIcon = ref(settingsStore.desktopSettings.show_tray_icon);
 const editDebugLoggingEnabled = ref(settingsStore.desktopSettings.debug_logging_enabled);
 const debugLogCopied = ref(false);
 const debugLogDownloaded = ref(false);
+const debugLogCleared = ref(false);
 const editShowColumnCommentsInHeader = ref(settingsStore.editorSettings.showColumnCommentsInHeader);
 const editShowColumnTypesInHeader = ref(settingsStore.editorSettings.showColumnTypesInHeader);
 const editCompactColumnHeaderActions = ref(settingsStore.editorSettings.compactColumnHeaderActions);
@@ -841,10 +842,14 @@ async function copyDebugLogs() {
   }, 1500);
 }
 
-function clearDebugLogs() {
-  clearStoredDebugLogs();
+async function clearDebugLogs() {
+  await clearStoredDebugLogs();
   debugLogCopied.value = false;
   debugLogDownloaded.value = false;
+  debugLogCleared.value = true;
+  window.setTimeout(() => {
+    debugLogCleared.value = false;
+  }, 1500);
 }
 
 async function exportDebugLogs() {
@@ -1895,8 +1900,9 @@ watch(
                     </div>
                     <div class="flex flex-wrap gap-2">
                       <Button type="button" variant="outline" size="sm" @click="clearDebugLogs">
-                        <RotateCcw class="mr-1.5 h-3.5 w-3.5" />
-                        {{ t("settings.debugLogsClear") }}
+                        <Check v-if="debugLogCleared" class="mr-1.5 h-3.5 w-3.5" />
+                        <RotateCcw v-else class="mr-1.5 h-3.5 w-3.5" />
+                        {{ debugLogCleared ? t("settings.debugLogsCleared") : t("settings.debugLogsClear") }}
                       </Button>
                       <Button type="button" variant="outline" size="sm" @click="copyDebugLogs">
                         <Copy class="mr-1.5 h-3.5 w-3.5" />

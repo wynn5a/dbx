@@ -1733,6 +1733,7 @@ export default {
     debugLogsDownload: "Baixar logs",
     debugLogsDownloaded: "Baixado",
     debugLogsClear: "Limpar logs",
+    debugLogsCleared: "Limpo",
     systemSection: "Sistema",
     dataGridDisplay: "Exibição da grade de dados",
     showColumnCommentsInHeader: "Mostrar comentários de coluna sob os nomes",

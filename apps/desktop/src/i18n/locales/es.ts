@@ -1600,6 +1600,7 @@ export default {
     debugLogsDownload: "Descargar logs",
     debugLogsDownloaded: "Descargado",
     debugLogsClear: "Borrar logs",
+    debugLogsCleared: "Borrado",
     systemSection: "Sistema",
     dataGridDisplay: "Visualización de la tabla",
     showColumnCommentsInHeader: "Mostrar comentarios bajo los nombres",

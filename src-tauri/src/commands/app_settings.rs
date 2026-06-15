@@ -36,6 +36,33 @@ pub async fn save_pinned_tree_node_ids(state: State<'_, Arc<AppState>>, ids: Vec
 }
 
 #[tauri::command]
+pub async fn clear_native_debug_logs(app: AppHandle) -> Result<(), String> {
+    let log_dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    if !log_dir.exists() {
+        return Ok(());
+    }
+    let entries = std::fs::read_dir(&log_dir).map_err(|e| e.to_string())?;
+    let mut last_err: Option<String> = None;
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        if !entry.metadata().map(|metadata| metadata.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let path = entry.path();
+        // Truncate rather than delete: tauri-plugin-log holds the active file
+        // open in append mode, so O_APPEND keeps writing from the new (empty)
+        // end-of-file, and Windows refuses to delete a file that is in use.
+        if let Err(err) = std::fs::OpenOptions::new().write(true).truncate(true).open(&path) {
+            log::warn!("[logs] failed to clear native log file {}: {}", path.display(), err);
+            last_err = Some(format!("{}: {err}", path.display()));
+        }
+    }
+    match last_err {
+        Some(err) => Err(format!("Failed to clear some native log files ({err})")),
+        None => Ok(()),
+    }
+}
+
+#[tauri::command]
 pub async fn load_native_debug_logs(app: AppHandle) -> Result<String, String> {
     const MAX_FILES: usize = 6;
     const MAX_FILE_BYTES: u64 = 512 * 1024;

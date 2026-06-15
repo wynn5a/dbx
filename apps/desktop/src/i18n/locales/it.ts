@@ -1743,6 +1743,7 @@ export default {
     debugLogsDownload: "Scarica log",
     debugLogsDownloaded: "Scaricati",
     debugLogsClear: "Cancella log",
+    debugLogsCleared: "Cancellati",
     systemSection: "Sistema",
     dataGridDisplay: "Visualizzazione griglia dati",
     showColumnCommentsInHeader: "Mostra i commenti delle colonne sotto i nomi",

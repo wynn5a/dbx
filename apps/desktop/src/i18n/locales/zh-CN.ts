@@ -1776,6 +1776,7 @@ export default {
     debugLogsDownload: "下载日志",
     debugLogsDownloaded: "已下载",
     debugLogsClear: "清空日志",
+    debugLogsCleared: "已清空",
     systemSection: "系统",
     dataGridDisplay: "数据表格显示",
     showColumnCommentsInHeader: "在字段名下方显示注释",

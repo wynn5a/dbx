@@ -479,7 +479,22 @@ fn is_os_connection_error(lower: &str) -> bool {
 }
 
 pub fn timeout_error() -> String {
-    format!("Query timed out after {} seconds", QUERY_TIMEOUT.as_secs())
+    timeout_error_after(QUERY_TIMEOUT)
+}
+
+/// Error message for a timeout in the query-execution phase. Worded distinctly
+/// from connection-establishment timeouts (e.g. "Postgres connection timed
+/// out") so logs and users can tell the two phases apart, and reports the
+/// timeout that actually applied rather than always the default.
+pub fn timeout_error_after(duration: Duration) -> String {
+    format!("Query execution timed out after {} seconds", duration.as_secs())
+}
+
+/// Whether an error is the query-execution-phase timeout produced above.
+/// Used to keep query timeouts out of the connection-drop reconnect path:
+/// retrying would just run an already-slow statement a second time.
+pub fn is_query_execution_timeout(err: &str) -> bool {
+    err.to_lowercase().contains("query execution timed out")
 }
 
 pub fn canceled_error() -> String {
@@ -511,17 +526,23 @@ where
             _ = token.cancelled() => Err(canceled_error()),
             result = timeout(timeout_duration, future) => {
                 if result.is_err() {
-                    log::warn!("[query] backend query timeout fired after {}s", timeout_duration.as_secs());
+                    log::warn!(
+                        "[query][phase:execute:timeout] query-execution phase timed out after {}s (connection already established)",
+                        timeout_duration.as_secs()
+                    );
                 }
-                result.map_err(|_| timeout_error())?
+                result.map_err(|_| timeout_error_after(timeout_duration))?
             },
         }
     } else {
         let result = timeout(timeout_duration, future).await;
         if result.is_err() {
-            log::warn!("[query] backend query timeout fired after {}s", timeout_duration.as_secs());
+            log::warn!(
+                "[query][phase:execute:timeout] query-execution phase timed out after {}s (connection already established)",
+                timeout_duration.as_secs()
+            );
         }
-        result.map_err(|_| timeout_error())?
+        result.map_err(|_| timeout_error_after(timeout_duration))?
     }
 }
 
@@ -831,35 +852,97 @@ pub async fn execute_sql_statement_with_options(
         return Err("Use MongoDB-specific commands".to_string());
     }
 
+    let trace_id = options.execution_id.clone().unwrap_or_else(|| "no-execution-id".to_string());
+
+    // Phase 1 — connection. Acquire (and, on first use, establish) the pool.
     // When a query tab has a client session, keep even database-less execution
     // on that tab-scoped pool so connection-level state (for example MySQL @vars)
-    // survives across runs.
-    let pool_key = if database.is_empty() {
-        state.get_or_create_pool_for_session(connection_id, None, options.client_session_id.as_deref()).await?
+    // survives across runs. A pool-cache hit returns in microseconds; a slow
+    // phase here means the database connection/handshake is the bottleneck, not
+    // query execution.
+    let connect_started = std::time::Instant::now();
+    let pool_result = if database.is_empty() {
+        state.get_or_create_pool_for_session(connection_id, None, options.client_session_id.as_deref()).await
     } else {
-        state
-            .get_or_create_pool_for_session(connection_id, Some(database), options.client_session_id.as_deref())
-            .await?
+        state.get_or_create_pool_for_session(connection_id, Some(database), options.client_session_id.as_deref()).await
+    };
+    let connect_ms = connect_started.elapsed().as_millis();
+    let pool_key = match pool_result {
+        Ok(pool_key) => {
+            log::info!(
+                "[query][phase:connect:done] trace_id={} connection_id={} database={} elapsed_ms={}",
+                trace_id,
+                connection_id,
+                database,
+                connect_ms
+            );
+            pool_key
+        }
+        Err(e) => {
+            // Connection establishment failed (or timed out) before the query
+            // ever ran — `e` typically already reads "... connection timed out".
+            log::error!(
+                "[query][phase:connect:error] trace_id={} connection_id={} database={} elapsed_ms={} error={}",
+                trace_id,
+                connection_id,
+                database,
+                connect_ms,
+                e
+            );
+            return Err(e);
+        }
     };
 
     if is_canceled(&cancel_token) {
         return Err(canceled_error());
     }
 
+    // Phase 2 — query execution against the established pool.
+    let exec_started = std::time::Instant::now();
     let mysql_dialect = connection_mysql_query_dialect(state, connection_id).await;
-    let result =
+    let mut result =
         do_execute(state, &pool_key, mysql_dialect, Some(database), sql, schema, cancel_token.clone(), options.clone())
             .await;
 
-    match &result {
-        Err(e) if is_connection_error(e) && !is_canceled(&cancel_token) => {
-            let db_opt = if database.is_empty() { None } else { Some(database) };
-            let new_key =
-                state.reconnect_pool_for_session(connection_id, db_opt, options.client_session_id.as_deref()).await?;
-            do_execute(state, &new_key, mysql_dialect, Some(database), sql, schema, cancel_token, options).await
+    // A genuine connection drop (broken pipe, reset, closed) is worth one
+    // reconnect + retry. A query-execution timeout is NOT: the connection is
+    // healthy and retrying would just run the already-slow statement twice.
+    let should_retry = matches!(&result, Err(e) if is_connection_error(e) && !is_query_execution_timeout(e))
+        && !is_canceled(&cancel_token);
+    if should_retry {
+        if let Err(e) = &result {
+            log::warn!(
+                "[query][phase:execute:reconnect] trace_id={} elapsed_ms={} error={} — reconnecting and retrying once",
+                trace_id,
+                exec_started.elapsed().as_millis(),
+                e
+            );
         }
-        _ => result,
+        let db_opt = if database.is_empty() { None } else { Some(database) };
+        let new_key =
+            state.reconnect_pool_for_session(connection_id, db_opt, options.client_session_id.as_deref()).await?;
+        result = do_execute(state, &new_key, mysql_dialect, Some(database), sql, schema, cancel_token.clone(), options)
+            .await;
     }
+
+    let exec_ms = exec_started.elapsed().as_millis();
+    match &result {
+        Ok(r) => log::info!(
+            "[query][phase:execute:done] trace_id={} elapsed_ms={} rows={} backend_ms={}",
+            trace_id,
+            exec_ms,
+            r.rows.len(),
+            r.execution_time_ms
+        ),
+        Err(e) if is_query_execution_timeout(e) => {
+            log::warn!("[query][phase:execute:timeout] trace_id={} elapsed_ms={} error={}", trace_id, exec_ms, e)
+        }
+        Err(e) if e == &canceled_error() => {
+            log::info!("[query][phase:execute:canceled] trace_id={} elapsed_ms={}", trace_id, exec_ms)
+        }
+        Err(e) => log::error!("[query][phase:execute:error] trace_id={} elapsed_ms={} error={}", trace_id, exec_ms, e),
+    }
+    result
 }
 
 pub async fn close_query_session(
@@ -1523,7 +1606,8 @@ mod tests {
 
     #[tokio::test]
     async fn wait_for_query_without_token_still_times_out() {
-        let result = wait_for_query_with_timeout(None, Duration::from_millis(10), async {
+        let timeout_duration = Duration::from_millis(10);
+        let result = wait_for_query_with_timeout(None, timeout_duration, async {
             tokio::time::sleep(Duration::from_secs(1)).await;
             Ok(db::QueryResult {
                 columns: vec![],
@@ -1538,7 +1622,19 @@ mod tests {
         })
         .await;
 
-        assert_eq!(result.unwrap_err(), timeout_error());
+        assert_eq!(result.unwrap_err(), timeout_error_after(timeout_duration));
+    }
+
+    #[test]
+    fn query_execution_timeout_is_not_treated_as_connection_drop_for_retry() {
+        // The timeout message contains "timed out", so it looks like a
+        // connection error — but it must be excluded from the reconnect+retry
+        // path so a slow query is not executed twice.
+        let err = timeout_error();
+        assert!(is_connection_error(&err));
+        assert!(is_query_execution_timeout(&err));
+        assert!(is_query_execution_timeout(&timeout_error_after(Duration::from_secs(60))));
+        assert!(!is_query_execution_timeout("Postgres connection timed out (30s)"));
     }
 
     #[test]

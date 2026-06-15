@@ -24,7 +24,10 @@ const MACOS_TRAY_ICON: tauri::image::Image<'_> = tauri::include_image!("icons/tr
 const BLACK_APP_ICON: tauri::image::Image<'_> = tauri::include_image!("icons/icon-black.png");
 
 pub(crate) fn apply_debug_log_level(debug_logging_enabled: bool) {
-    log::set_max_level(if debug_logging_enabled { log::LevelFilter::Debug } else { log::LevelFilter::Off });
+    // Debug logging on: capture everything. Off: still keep warnings and errors
+    // (e.g. query timeout/connection diagnostics) so failures are recoverable
+    // from the log file without asking users to flip the toggle and reproduce.
+    log::set_max_level(if debug_logging_enabled { log::LevelFilter::Debug } else { log::LevelFilter::Warn });
 }
 
 fn should_hide_window_on_close(target_os: &str) -> bool {
@@ -359,6 +362,7 @@ pub fn run() {
             commands::app_settings::load_pinned_tree_node_ids,
             commands::app_settings::save_pinned_tree_node_ids,
             commands::app_settings::load_native_debug_logs,
+            commands::app_settings::clear_native_debug_logs,
             commands::cloud_sync::webdav_sync_test,
             commands::cloud_sync::webdav_password_status,
             commands::cloud_sync::save_webdav_saved_password,
