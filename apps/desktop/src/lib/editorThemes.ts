@@ -21,36 +21,38 @@ const SUPPORTS_OKLCH =
 // ==================== 自定义主题配置 ====================
 // 在这里修改你喜欢的颜色！
 
+// Data Buddy design-system defaults (docs/design-system). Fills in the chrome and
+// any syntax token a user theme leaves unset; values are the canonical DS dark
+// palette so the custom theme matches the rest of the app out of the box.
 const customThemeColors = {
-  lineNumber: "#6c7086", // 行号颜色
-  lineNumberActive: "#cdd6f4", // 当前行号颜色
-  selection: "#313244", // 选中文本背景
-  cursor: "#f5e0dc", // 光标颜色
+  lineNumber: "#4c4e5a", // 行号 — text-4
+  lineNumberActive: "#9c9da7", // 当前行号 — text-2
+  selection: "rgba(110, 121, 214, 0.22)", // 选中文本背景 — accent-soft
+  cursor: "#6e79d6", // 光标 — accent
 
-  // 语法高亮颜色
-  keyword: "#cba6f7", // 关键字 (SELECT, FROM, WHERE 等)
-  string: "#a6e3a1", // 字符串
-  number: "#fab387", // 数字
-  comment: "#6c7086", // 注释
-  type: "#89b4fa", // 类型 (INTEGER, TEXT 等)
-  variable: "#f38ba8", // 变量
-  function: "#89dceb", // 函数
-  operator: "#89b4fa", // 运算符
-  punctuation: "#9399b2", // 标点符号
-  property: "#f9e2af", // 属性/字段名
-  tag: "#cba6f7", // XML/HTML 标签
-  attribute: "#fab387", // 属性名
-  className: "#f9e2af", // 类名
+  // 语法高亮 — DS 调色板
+  keyword: "#a371e8", // 关键字 — purple
+  string: "#3fb950", // 字符串 — green (t-text)
+  number: "#e07a5f", // 数字 — orange (t-json)
+  comment: "#6b6d79", // 注释 — text-3
+  type: "#d9a521", // 类型 — amber (t-time)
+  variable: "#f7f8f8", // 变量/字段 — text-1
+  function: "#4f9be6", // 函数 — blue (t-int)
+  operator: "#9c9da7", // 运算符 — text-2
+  punctuation: "#6b6d79", // 标点 — text-3
+  property: "#f7f8f8", // 属性/字段名 — text-1
+  tag: "#a371e8", // 标签 — purple
+  attribute: "#e07a5f", // 属性名 — orange
+  className: "#d9a521", // 类名 — amber
 
-  // UI 元素
-  gutterBackground: "#181825", // 侧边栏背景
-  activeLine: "#313244", // 当前行高亮
-  matchingBracket: "#45475a", // 匹配括号背景
+  // UI 元素 — DS 表面
+  activeLine: "rgba(255, 255, 255, 0.035)", // 当前行高亮 — bg-hover
+  matchingBracket: "rgba(110, 121, 214, 0.22)", // 匹配括号 — accent-soft
 
   // 特殊
-  builtin: "#89dceb", // 内置函数
-  meta: "#cdd6f4", // 元信息
-  invalid: "#f38ba8", // 无效字符
+  builtin: "#e5534b", // 内置 — red
+  meta: "#9c9da7", // 元信息 — text-2
+  invalid: "#e5534b", // 无效 — red
 };
 
 /** 创建自定义 CodeMirror 主题 */
@@ -59,10 +61,13 @@ function createCustomTheme(
   colors?: CustomThemeColors,
   isDark: boolean = true,
 ): Extension {
-  // 根据系统主题设置默认背景色和前景色
+  // 根据系统主题设置默认背景色和前景色 — match the DS canvas/text-1 tokens
+  // (globals.css) so a custom theme that leaves background/foreground unset
+  // renders the same surface as the rest of the app and the settings preview
+  // (which falls back to var(--ds-bg-canvas)/var(--ds-text-1)).
   const defaultColors = isDark
-    ? { background: "#1e1e2e", foreground: "#cdd6f4" }
-    : { background: "#fafafa", foreground: "#242424" };
+    ? { background: "#0b0c0e", foreground: "#f7f8f8" }
+    : { background: "#f6f6f7", foreground: "#17181a" };
 
   const c = { ...defaultColors, ...customThemeColors, ...(colors || {}) };
 
@@ -99,9 +104,13 @@ function createCustomTheme(
         backgroundColor: c.activeLine,
       },
       ".cm-gutters": {
-        backgroundColor: c.gutterBackground,
+        // Follow the editor background so the gutter and content read as one
+        // flat surface — matching the settings preview, which renders a single
+        // background. (Previously pinned to a fixed dark tone, which left the
+        // gutter mismatched against the content on any non-dark background.)
+        backgroundColor: c.background,
         color: c.lineNumber,
-        borderRight: "1px solid #313244",
+        borderRight: "1px solid rgba(255, 255, 255, 0.06)", // DS hairline (--ds-border-soft)
       },
       ".cm-activeLineGutter": {
         backgroundColor: c.activeLine,

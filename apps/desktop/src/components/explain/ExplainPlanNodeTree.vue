@@ -1,72 +1,175 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { ChevronRight, ChevronDown } from "@lucide/vue";
-import type { ExplainPlanNode } from "@/lib/explainPlan";
+import { computed, inject } from "vue";
+import { ChevronRight } from "@lucide/vue";
+import type { ExplainNodeCategory, ExplainPlanNode } from "@/lib/explainPlan";
+import { explainNodeActualRows, explainNodeCategory, explainNodeCost, explainNodeRows } from "@/lib/explainPlan";
+import { EXPLAIN_COLLAPSE_KEY } from "./explainCollapse";
 
 const props = defineProps<{
   node: ExplainPlanNode;
   depth?: number;
+  /** Largest node cost in the whole plan — denominator for the heat bar. */
+  maxCost: number;
 }>();
 
-const collapsed = ref(false);
+const collapse = inject(EXPLAIN_COLLAPSE_KEY);
+const hasChildren = computed(() => props.node.children.length > 0);
+const isCollapsed = computed(() => !!collapse?.isCollapsed(props.node.id));
 
 function toggle() {
-  if (props.node.children.length > 0) {
-    collapsed.value = !collapsed.value;
-  }
+  if (hasChildren.value) collapse?.toggle(props.node.id);
 }
 
-function actualRowsFromDetails(): string | undefined {
-  for (const d of props.node.details) {
-    const m = d.match(/Actual Rows:\s*(\S+)/);
-    if (m) return m[1];
-  }
-  return undefined;
-}
+const category = computed<ExplainNodeCategory>(() => explainNodeCategory(props.node.nodeType));
+// Each operation family owns a fixed hue (mirrors the data-type colour idea).
+const CATEGORY_HUE: Record<ExplainNodeCategory, string> = {
+  scan: "var(--ds-amber)", // full/seq scans — usually the thing to watch
+  index: "var(--ds-teal)",
+  join: "var(--ds-purple)",
+  sort: "var(--ds-blue)",
+  aggregate: "var(--ds-t-json)",
+  other: "var(--ds-text-3)",
+};
+const hue = computed(() => CATEGORY_HUE[category.value]);
 
-const actualRows = actualRowsFromDetails();
-const hasActualStats = !!actualRows;
-const rowDiffers = hasActualStats && actualRows !== props.node.rows;
+const cost = computed(() => explainNodeCost(props.node));
+const estRows = computed(() => explainNodeRows(props.node));
+const actualRows = computed(() => explainNodeActualRows(props.node));
+const hasActual = computed(() => actualRows.value !== null);
+
+// Relative cost (0–1) drives both the bar width and its heat colour.
+const costRatio = computed(() => (props.maxCost > 0 && cost.value !== null ? cost.value / props.maxCost : 0));
+const heatHue = computed(() => {
+  if (costRatio.value >= 0.66) return "var(--ds-red)";
+  if (costRatio.value >= 0.33) return "var(--ds-amber)";
+  return "var(--ds-green)";
+});
+const isHotspot = computed(() => props.maxCost > 0 && cost.value !== null && cost.value === props.maxCost);
+
+// Estimate accuracy: how far actual rows drifted from the estimate.
+const rowDriftPct = computed(() => {
+  if (actualRows.value === null || estRows.value === null || estRows.value === 0) return null;
+  return Math.round((actualRows.value / estRows.value) * 100);
+});
+const rowDriftBad = computed(
+  () => rowDriftPct.value !== null && (rowDriftPct.value >= 1000 || rowDriftPct.value <= 10),
+);
+
+// Details minus the "Actual Rows" entry (shown as its own metric).
+const extraDetails = computed(() => props.node.details.filter((d) => !/^Actual Rows:/i.test(d)));
+
+const fmt = (n: number | null) =>
+  n === null ? "" : n >= 1000 ? n.toLocaleString("en-US", { maximumFractionDigits: 0 }) : String(n);
 </script>
 
 <template>
   <div>
-    <!-- Single line: collapse icon + title + badges all in one row -->
     <div
-      class="flex cursor-pointer items-center gap-1 rounded border bg-background px-2 py-1 text-xs hover:bg-muted/30"
-      :class="{ 'border-green-300 dark:border-green-700': hasActualStats }"
+      class="group relative flex items-center gap-2 rounded-[var(--ds-radius-sm)] py-[5px] pr-2 pl-[6px] text-[12.5px] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)]"
+      :class="hasChildren ? 'cursor-pointer' : 'cursor-default'"
       @click="toggle"
     >
-      <ChevronRight v-if="node.children.length > 0 && collapsed" class="h-3 w-3 shrink-0 text-muted-foreground" />
-      <ChevronDown v-else-if="node.children.length > 0" class="h-3 w-3 shrink-0 text-muted-foreground" />
-
-      <span class="shrink-0 rounded bg-muted px-1 py-0.5 font-medium">{{ node.nodeType }}</span>
-      <span v-if="node.relation" class="shrink-0 truncate max-w-[120px] text-blue-600 dark:text-blue-400">{{
-        node.relation
-      }}</span>
-      <span v-if="node.index" class="shrink-0 text-emerald-600 dark:text-emerald-400">[{{ node.index }}]</span>
-      <span v-if="node.cost" class="shrink-0 tabular-nums text-muted-foreground">c:{{ node.cost }}</span>
-      <span v-if="node.rows" class="shrink-0 tabular-nums text-amber-600 dark:text-amber-400">e:{{ node.rows }}</span>
+      <!-- hotspot marker: a thin accent rail on the costliest node -->
       <span
-        v-if="hasActualStats"
-        class="shrink-0 tabular-nums font-semibold"
-        :class="rowDiffers ? 'text-green-600 dark:text-green-400' : 'text-muted-foreground'"
-        >a:{{ actualRows
-        }}<span v-if="rowDiffers">({{ Math.round((Number(actualRows) / Number(node.rows)) * 100) }}%)</span></span
-      >
+        v-if="isHotspot"
+        class="absolute left-0 top-1/2 h-[60%] w-[2px] -translate-y-1/2 rounded-full"
+        :style="{ background: 'var(--ds-red)' }"
+      />
 
-      <!-- Details collapsed into tooltip on hover -->
+      <!-- collapse chevron (reserves width even when leaf, for alignment) -->
+      <span class="flex h-4 w-4 shrink-0 items-center justify-center">
+        <ChevronRight
+          v-if="hasChildren"
+          class="h-3.5 w-3.5 text-[var(--ds-text-3)] transition-transform duration-[var(--ds-speed)] ease-[var(--ds-ease)]"
+          :class="{ 'rotate-90': !isCollapsed }"
+        />
+        <span v-else class="h-[3px] w-[3px] rounded-full bg-[var(--ds-text-4)]" />
+      </span>
+
+      <!-- operation badge — fixed hue per category, 14%-tint fill -->
       <span
-        v-if="node.details.length"
-        class="ml-auto shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-muted-foreground/40"
-        :title="node.details.join('\n')"
-        >{{ node.details.join(" ") }}</span
+        class="shrink-0 whitespace-nowrap rounded-[4px] px-1.5 py-[2px] font-mono text-[10.5px] font-medium uppercase tracking-[0.02em]"
+        :style="{ color: hue, background: `color-mix(in srgb, ${hue} 14%, transparent)` }"
       >
+        {{ node.nodeType }}
+      </span>
+
+      <!-- relation (machine-shaped → mono) -->
+      <span
+        v-if="node.relation"
+        class="min-w-0 shrink truncate font-mono text-[12px] text-[var(--ds-text-1)]"
+        :title="node.relation"
+      >
+        {{ node.relation }}
+      </span>
+
+      <!-- index tag (constraint-tag style) -->
+      <span
+        v-if="node.index"
+        class="shrink-0 rounded-[4px] px-1 py-[1px] font-mono text-[9.5px] font-semibold uppercase tracking-[0.04em]"
+        :style="{ color: 'var(--ds-teal)', background: 'color-mix(in srgb, var(--ds-teal) 13%, transparent)' }"
+        :title="node.index"
+      >
+        {{ node.index }}
+      </span>
+
+      <!-- extra details, faint + truncated, full text on hover -->
+      <span
+        v-if="extraDetails.length"
+        class="min-w-0 flex-1 truncate text-[11.5px] text-[var(--ds-text-4)]"
+        :title="extraDetails.join('\n')"
+      >
+        {{ extraDetails.join(" · ") }}
+      </span>
+      <span v-else class="flex-1" />
+
+      <!-- metrics: rows (est → actual) and cost, mono tabular -->
+      <span
+        v-if="estRows !== null"
+        class="shrink-0 font-mono text-[11px] tabular-nums text-[var(--ds-text-3)]"
+        :title="hasActual ? `Estimated ${fmt(estRows)} rows` : 'Estimated rows'"
+      >
+        {{ fmt(estRows) }}<span class="text-[var(--ds-text-4)]"> rows</span>
+      </span>
+      <span
+        v-if="hasActual"
+        class="shrink-0 rounded-[4px] px-1 py-[1px] font-mono text-[11px] tabular-nums"
+        :style="{
+          color: rowDriftBad ? 'var(--ds-red)' : 'var(--ds-green)',
+          background: `color-mix(in srgb, ${rowDriftBad ? 'var(--ds-red)' : 'var(--ds-green)'} 13%, transparent)`,
+        }"
+        :title="`Actual ${fmt(actualRows)} rows${rowDriftPct !== null ? ` (${rowDriftPct}% of estimate)` : ''}`"
+      >
+        {{ fmt(actualRows) }}<span v-if="rowDriftPct !== null" class="opacity-70"> · {{ rowDriftPct }}%</span>
+      </span>
+
+      <!-- cost heat bar -->
+      <span v-if="cost !== null && maxCost > 0" class="flex shrink-0 items-center gap-1.5">
+        <span
+          class="font-mono text-[11px] tabular-nums"
+          :style="{ color: isHotspot ? 'var(--ds-red)' : 'var(--ds-text-2)' }"
+          :title="`Cost ${node.cost}`"
+        >
+          {{ fmt(cost) }}
+        </span>
+        <span class="h-[5px] w-[56px] overflow-hidden rounded-full bg-[var(--ds-bg-active)]">
+          <span
+            class="block h-full rounded-full"
+            :style="{ width: `${Math.max(costRatio * 100, 3)}%`, background: heatHue }"
+          />
+        </span>
+      </span>
     </div>
 
-    <!-- Children (collapsible) -->
-    <div v-if="node.children.length && !collapsed" class="ml-3 mt-px space-y-px border-l pl-2">
-      <ExplainPlanNodeTree v-for="child in node.children" :key="child.id" :node="child" :depth="(depth || 0) + 1" />
+    <!-- children -->
+    <div v-if="hasChildren && !isCollapsed" class="ml-[14px] border-l border-[var(--ds-border-soft)] pl-1">
+      <ExplainPlanNodeTree
+        v-for="child in node.children"
+        :key="child.id"
+        :node="child"
+        :max-cost="maxCost"
+        :depth="(depth || 0) + 1"
+      />
     </div>
   </div>
 </template>

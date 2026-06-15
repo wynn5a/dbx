@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from "vue";
+import { computed, ref, watch, nextTick, onMounted } from "vue";
 import type { CSSProperties } from "vue";
 import { useI18n } from "vue-i18n";
 import {
@@ -127,14 +127,34 @@ function getTabMenuItems(tab: QueryTab): ContextMenuItem[] {
 }
 
 const tabsContainerRef = ref<HTMLElement | null>(null);
-const { hasTabOverflow, canScrollLeft, canScrollRight, updateScrollButtons, scrollTabs, onTabsWheel } =
-  useTabScroll(tabsContainerRef);
 const tabScrollBehavior = ref<ScrollBehavior>("smooth");
+
+function scrollActiveTabIntoView(behavior: ScrollBehavior) {
+  const container = tabsContainerRef.value;
+  if (!container) return;
+  const activeEl = container.querySelector('[data-active-tab="true"]');
+  if (activeEl) {
+    activeEl.scrollIntoView({ behavior, block: "nearest", inline: "center" });
+  }
+  updateScrollButtons();
+}
+
+const { hasTabOverflow, canScrollLeft, canScrollRight, updateScrollButtons, scrollTabs, onTabsWheel } = useTabScroll(
+  tabsContainerRef,
+  // Keep the active tab visible when the bar is resized (window resize, sidebar toggle).
+  () => scrollActiveTabIntoView("auto"),
+);
+
+onMounted(() => {
+  // Restored tabs may place the active tab mid-list; reveal it instantly on load.
+  nextTick(() => scrollActiveTabIntoView("auto"));
+});
 
 watch(
   () => queryStore.tabs.length,
   () => {
-    nextTick(updateScrollButtons);
+    // Closing a non-active tab shifts layout; keep the active tab in view.
+    nextTick(() => scrollActiveTabIntoView("auto"));
   },
 );
 
@@ -142,13 +162,7 @@ watch(
   () => queryStore.activeTabId,
   () => {
     nextTick(() => {
-      const container = tabsContainerRef.value;
-      if (!container) return;
-      const activeEl = container.querySelector('[data-active-tab="true"]');
-      if (activeEl) {
-        activeEl.scrollIntoView({ behavior: tabScrollBehavior.value, block: "nearest", inline: "center" });
-      }
-      updateScrollButtons();
+      scrollActiveTabIntoView(tabScrollBehavior.value);
       tabScrollBehavior.value = "smooth";
     });
   },

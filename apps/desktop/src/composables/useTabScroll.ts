@@ -1,6 +1,6 @@
 import { onBeforeUnmount, ref, watch, type Ref } from "vue";
 
-export function useTabScroll(tabsContainerRef: Ref<HTMLElement | null>) {
+export function useTabScroll(tabsContainerRef: Ref<HTMLElement | null>, onResize?: () => void) {
   const hasTabOverflow = ref(false);
   const canScrollLeft = ref(false);
   const canScrollRight = ref(false);
@@ -66,7 +66,10 @@ export function useTabScroll(tabsContainerRef: Ref<HTMLElement | null>) {
       resizeObserver?.disconnect();
       resizeObserver = null;
       if (el && typeof ResizeObserver !== "undefined") {
-        resizeObserver = new ResizeObserver(scheduleScrollButtonUpdate);
+        resizeObserver = new ResizeObserver(() => {
+          scheduleScrollButtonUpdate();
+          onResize?.();
+        });
         resizeObserver.observe(el);
       }
       scheduleScrollButtonUpdate();

@@ -69,18 +69,18 @@ watch(
 );
 
 const colorItems = [
-  { key: "keyword" as const, label: t("settings.customThemeKeyword"), example: "SELECT, WHERE, IF", num: "①" },
-  { key: "field" as const, label: t("settings.customThemeField"), example: "id, name, _var", num: "②" },
-  { key: "function" as const, label: t("settings.customThemeFunction"), example: "count, upper", num: "③" },
-  { key: "string" as const, label: t("settings.customThemeString"), example: "'hello', 'world'", num: "④" },
-  { key: "number" as const, label: t("settings.customThemeNumber"), example: "100, 3.14", num: "⑤" },
-  { key: "comment" as const, label: t("settings.customThemeComment"), example: "--, /* */", num: "⑥" },
-  { key: "table" as const, label: t("settings.customThemeTable"), example: "users, orders", num: "⑦" },
-  { key: "operator" as const, label: t("settings.customThemeOperator"), example: "=, >, <>", num: "⑧" },
-  { key: "type" as const, label: t("settings.customThemeType"), example: "INTEGER, TEXT", num: "⑨" },
-  { key: "builtin" as const, label: t("settings.customThemeBuiltin"), example: "FOUND, SQLERRM", num: "⑩" },
-  { key: "background" as const, label: t("settings.customThemeBackground"), example: "Editor background", num: "⑪" },
-  { key: "foreground" as const, label: t("settings.customThemeForeground"), example: "Default text color", num: "⑫" },
+  { key: "keyword" as const, label: t("settings.customThemeKeyword"), example: "SELECT, WHERE, IF" },
+  { key: "field" as const, label: t("settings.customThemeField"), example: "id, name, _var" },
+  { key: "function" as const, label: t("settings.customThemeFunction"), example: "count, upper" },
+  { key: "string" as const, label: t("settings.customThemeString"), example: "'hello', 'world'" },
+  { key: "number" as const, label: t("settings.customThemeNumber"), example: "100, 3.14" },
+  { key: "comment" as const, label: t("settings.customThemeComment"), example: "--, /* */" },
+  { key: "table" as const, label: t("settings.customThemeTable"), example: "users, orders" },
+  { key: "operator" as const, label: t("settings.customThemeOperator"), example: "=, >, <>" },
+  { key: "type" as const, label: t("settings.customThemeType"), example: "INTEGER, TEXT" },
+  { key: "builtin" as const, label: t("settings.customThemeBuiltin"), example: "FOUND, SQLERRM" },
+  { key: "background" as const, label: t("settings.customThemeBackground"), example: "Editor background" },
+  { key: "foreground" as const, label: t("settings.customThemeForeground"), example: "Default text color" },
 ];
 
 // Preset color themes (including all built-in themes)
@@ -311,24 +311,24 @@ function applyBasicColor(key: keyof CustomThemeColors, color: string) {
 const previewCode = computed(() => {
   const c = localColors.value;
   return [
-    { text: "SELECT ", color: c.keyword, num: "①" },
-    { text: "id", color: c.field, num: "②" },
-    { text: ", ", color: c.operator, num: "⑧" },
-    { text: "count", color: c.function, num: "③" },
-    { text: "(*) ", color: c.operator, num: "⑧" },
-    { text: "FROM ", color: c.keyword, num: "①" },
-    { text: "users", color: c.table, num: "⑦" },
-    { text: " ", color: "", num: "" },
-    { text: "WHERE ", color: c.keyword, num: "①" },
-    { text: "status", color: c.field, num: "②" },
-    { text: " = ", color: c.operator, num: "⑧" },
-    { text: "'active'", color: c.string, num: "④" },
-    { text: " ", color: "", num: "" },
-    { text: "AND ", color: c.keyword, num: "①" },
-    { text: "id", color: c.field, num: "②" },
-    { text: " > ", color: c.operator, num: "⑧" },
-    { text: "100", color: c.number, num: "⑤" },
-    { text: ";", color: c.operator, num: "⑧" },
+    { text: "SELECT ", color: c.keyword },
+    { text: "id", color: c.field },
+    { text: ", ", color: c.operator },
+    { text: "count", color: c.function },
+    { text: "(*) ", color: c.operator },
+    { text: "FROM ", color: c.keyword },
+    { text: "users", color: c.table },
+    { text: " ", color: "" },
+    { text: "WHERE ", color: c.keyword },
+    { text: "status", color: c.field },
+    { text: " = ", color: c.operator },
+    { text: "'active'", color: c.string },
+    { text: " ", color: "" },
+    { text: "AND ", color: c.keyword },
+    { text: "id", color: c.field },
+    { text: " > ", color: c.operator },
+    { text: "100", color: c.number },
+    { text: ";", color: c.operator },
   ];
 });
 
@@ -465,20 +465,24 @@ function handleImport() {
       <div class="min-h-0 flex-1 overflow-hidden px-4 py-4 flex gap-4">
         <!-- Theme list sidebar -->
         <div class="w-48 shrink-0 flex flex-col gap-2">
-          <div class="text-sm font-medium px-1">{{ t("settings.customThemeMyThemes") }}</div>
-          <div class="flex-1 overflow-y-auto space-y-1 pr-1">
+          <div class="ds-section-label px-1">{{ t("settings.customThemeMyThemes") }}</div>
+          <div class="flex-1 overflow-y-auto space-y-0.5 pr-1">
             <div
               v-for="theme in localThemes"
               :key="theme.id"
-              class="group flex items-center gap-2 rounded-md px-2 py-1.5 cursor-pointer text-sm"
-              :class="activeEditId === theme.id ? 'bg-[var(--ds-accent)] text-white' : 'hover:bg-[var(--ds-bg-hover)]'"
+              class="group flex items-center gap-2 rounded-[var(--ds-radius-sm)] px-2 py-1.5 cursor-pointer text-[13px] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)]"
+              :class="
+                activeEditId === theme.id
+                  ? 'bg-[var(--ds-accent-soft)] text-[var(--ds-text-1)] font-medium'
+                  : 'text-[var(--ds-text-2)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]'
+              "
               @click="activeEditId = theme.id"
             >
               <div class="flex-1 min-w-0">
                 <div v-if="renamingId === theme.id" class="flex items-center gap-1" @click.stop>
                   <Input
                     v-model="renamingName"
-                    class="h-6 text-xs px-1 py-0"
+                    class="h-6 text-xs px-1.5 py-0"
                     @keydown.enter="confirmRename"
                     @keydown.esc="cancelRename"
                     @blur="confirmRename"
@@ -515,25 +519,38 @@ function handleImport() {
             </TabsList>
 
             <TabsContent value="visual" class="space-y-4 flex-1 min-h-0 overflow-y-auto pr-1">
-              <!-- Preview area -->
-              <div class="rounded-lg border bg-black/50 p-5 font-mono text-base">
-                <div class="mb-2 text-sm text-[var(--ds-text-3)]">{{ t("settings.customThemeLivePreview") }}</div>
-                <div class="leading-relaxed text-lg">
-                  <span v-for="(token, i) in previewCode" :key="i" :style="{ color: token.color }" class="inline">
-                    {{ token.text }}<sup v-if="token.num" class="text-xl opacity-60">{{ token.num }}</sup>
-                  </span>
+              <!-- Live preview — rendered with the theme's own background/foreground -->
+              <div
+                class="overflow-hidden rounded-[var(--ds-radius)] border border-[var(--ds-border)]"
+                :style="{ background: localColors.background || 'var(--ds-bg-canvas)' }"
+              >
+                <div
+                  class="flex items-center gap-2 border-b border-[var(--ds-border-soft)] px-4 py-2"
+                  :style="{ background: 'color-mix(in srgb, var(--ds-bg-base) 28%, transparent)' }"
+                >
+                  <span class="ds-section-label">{{ t("settings.customThemeLivePreview") }}</span>
                 </div>
-                <div class="mt-2 text-lg" :style="{ color: localColors.comment }">
-                  <sup class="text-xl">⑥</sup> -- {{ t("settings.customThemePreviewExample") }}
+                <div
+                  class="p-4 font-mono text-[13.5px] leading-relaxed"
+                  :style="{ color: localColors.foreground || 'var(--ds-text-1)' }"
+                >
+                  <div>
+                    <span v-for="(token, i) in previewCode" :key="i" :style="{ color: token.color || 'inherit' }">{{
+                      token.text
+                    }}</span>
+                  </div>
+                  <div class="mt-1.5" :style="{ color: localColors.comment }">
+                    -- {{ t("settings.customThemePreviewExample") }}
+                  </div>
                 </div>
               </div>
 
               <!-- Preset color schemes -->
-              <div
-                class="flex items-center gap-2 rounded-lg border border-[var(--ds-border)] p-3 bg-[var(--ds-bg-canvas)]"
-              >
+              <div class="ds-card flex items-center gap-2 p-2.5">
                 <Palette class="h-4 w-4 text-[var(--ds-text-3)] shrink-0" />
-                <span class="text-sm text-[var(--ds-text-3)] shrink-0">{{ t("settings.customThemePreset") }}:</span>
+                <span class="text-[12.5px] text-[var(--ds-text-3)] shrink-0"
+                  >{{ t("settings.customThemePreset") }}:</span
+                >
                 <Select v-model="selectedPreset" class="flex-1">
                   <SelectTrigger class="h-8 text-sm">
                     <SelectValue :placeholder="t('settings.customThemeSelectPreset')" />
@@ -544,67 +561,71 @@ function handleImport() {
                     </SelectItem>
                   </SelectContent>
                 </Select>
-                <Button variant="outline" size="sm" class="h-8 shrink-0" @click="applyPreset">
+                <Button variant="outline" size="sm" class="shrink-0" :disabled="!selectedPreset" @click="applyPreset">
                   <Copy class="mr-1 h-3 w-3" />
                   {{ t("settings.customThemeApply") }}
                 </Button>
               </div>
 
               <!-- Color configuration list -->
-              <div class="grid grid-cols-2 gap-3">
+              <div class="grid grid-cols-2 gap-2">
                 <div
                   v-for="item in colorItems"
                   :key="item.key"
-                  class="relative flex items-center gap-3 rounded-lg border p-3"
+                  class="ds-card relative flex items-center gap-2.5 p-2.5 transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)]"
                 >
-                  <span class="text-xl font-bold w-8 text-center shrink-0">{{ item.num }}</span>
                   <div class="flex-1 min-w-0">
-                    <div class="font-medium text-sm">{{ item.label }}</div>
-                    <div class="text-xs text-[var(--ds-text-3)] truncate">{{ item.example }}</div>
+                    <div class="text-[12.5px] font-medium text-[var(--ds-text-1)]">{{ item.label }}</div>
+                    <div class="truncate font-mono text-[10.5px] text-[var(--ds-text-3)]">{{ item.example }}</div>
                   </div>
-                  <div class="flex items-center gap-2 shrink-0">
-                    <!-- Color square + dropdown arrow -->
-                    <div class="relative">
-                      <button
-                        type="button"
-                        class="flex items-center gap-0.5 rounded border border-[var(--ds-border)] p-0.5 hover:bg-[var(--ds-bg-hover)] transition-colors"
-                        @click.stop="togglePalette(item.key)"
-                      >
-                        <div class="h-6 w-6 rounded-sm" :style="{ backgroundColor: localColors[item.key] }" />
-                        <ChevronDown class="h-3 w-3 text-[var(--ds-text-3)] pointer-events-none" />
-                      </button>
-                      <!-- Palette popup -->
-                      <div
-                        v-if="expandedPalette === item.key"
-                        class="absolute right-0 top-full z-50 mt-1 rounded-lg border bg-popover p-2 shadow-lg"
-                        @click.stop
-                      >
-                        <div class="space-y-1">
-                          <div v-for="(row, rowIndex) in basicColors" :key="rowIndex" class="flex gap-1">
-                            <button
-                              v-for="color in row"
-                              :key="color"
-                              type="button"
-                              class="h-5 w-5 rounded-sm border border-[var(--ds-border-soft)] hover:scale-110 transition-transform"
-                              :style="{ backgroundColor: color }"
-                              @click="applyBasicColor(item.key, color)"
-                            />
-                          </div>
-                        </div>
-                        <div class="mt-2 pt-2 border-t flex items-center gap-2">
-                          <input
-                            type="color"
-                            :value="localColors[item.key]"
-                            @input="handleColorChange(item.key, ($event.target as HTMLInputElement).value)"
-                            class="h-6 w-6 cursor-pointer rounded border-0 p-0"
-                          />
-                          <input
-                            type="text"
-                            :value="localColors[item.key]"
-                            @input="handleColorChange(item.key, ($event.target as HTMLInputElement).value)"
-                            class="w-20 rounded border px-2 py-0.5 text-xs font-mono"
+                  <!-- Color swatch + dropdown arrow -->
+                  <div class="relative shrink-0">
+                    <button
+                      type="button"
+                      class="flex items-center gap-1 rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] p-1 transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-bg-hover)]"
+                      @click.stop="togglePalette(item.key)"
+                    >
+                      <span
+                        class="h-5 w-5 rounded-[4px] border border-[var(--ds-border-soft)]"
+                        :style="{ backgroundColor: localColors[item.key] }"
+                      />
+                      <ChevronDown
+                        class="h-3 w-3 text-[var(--ds-text-3)] pointer-events-none transition-transform duration-[var(--ds-speed)] ease-[var(--ds-ease)]"
+                        :class="{ 'rotate-180': expandedPalette === item.key }"
+                      />
+                    </button>
+                    <!-- Palette popup -->
+                    <div
+                      v-if="expandedPalette === item.key"
+                      class="ds-popover absolute right-0 bottom-full z-50 mb-1.5 rounded-[var(--ds-radius)] p-2.5"
+                      @click.stop
+                    >
+                      <div class="space-y-1">
+                        <div v-for="(row, rowIndex) in basicColors" :key="rowIndex" class="flex gap-1">
+                          <button
+                            v-for="color in row"
+                            :key="color"
+                            type="button"
+                            class="h-5 w-5 rounded-[4px] border border-[var(--ds-border-soft)] transition-transform duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:scale-110"
+                            :style="{ backgroundColor: color }"
+                            @click="applyBasicColor(item.key, color)"
                           />
                         </div>
+                      </div>
+                      <div class="mt-2 flex items-center gap-2 border-t border-[var(--ds-border-soft)] pt-2.5">
+                        <input
+                          type="color"
+                          :value="localColors[item.key]"
+                          @input="handleColorChange(item.key, ($event.target as HTMLInputElement).value)"
+                          class="h-7 w-7 cursor-pointer rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-transparent p-0.5"
+                        />
+                        <input
+                          type="text"
+                          :value="localColors[item.key]"
+                          @input="handleColorChange(item.key, ($event.target as HTMLInputElement).value)"
+                          spellcheck="false"
+                          class="w-24 rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-2 py-1 font-mono text-[11.5px] text-[var(--ds-text-1)] outline-none focus:border-[var(--ds-accent-line)] focus:ring-2 focus:ring-[var(--ds-accent-line)]"
+                        />
                       </div>
                     </div>
                   </div>
@@ -612,11 +633,11 @@ function handleImport() {
               </div>
             </TabsContent>
 
-            <TabsContent value="json" class="space-y-4 flex-1 min-h-0 flex flex-col">
+            <TabsContent value="json" class="space-y-3 flex-1 min-h-0 flex flex-col">
               <textarea
                 v-model="jsonText"
                 @blur="handleJsonChange"
-                class="flex-1 w-full rounded-lg border bg-black/50 p-4 font-mono text-sm min-h-[360px]"
+                class="flex-1 w-full rounded-[var(--ds-radius)] border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] p-4 font-mono text-[12.5px] leading-relaxed text-[var(--ds-text-1)] outline-none transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] focus:border-[var(--ds-accent-line)] focus:ring-2 focus:ring-[var(--ds-accent-line)] min-h-[360px]"
                 spellcheck="false"
               />
               <div class="flex gap-2">

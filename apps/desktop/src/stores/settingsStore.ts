@@ -215,17 +215,24 @@ export interface CustomThemeColors {
   foreground?: string;
 }
 
+// Data Buddy design-system SQL palette (docs/design-system). Each token maps to a
+// fixed DS hue so editor highlighting matches the rest of the app: keyword=purple,
+// function=blue (t-int), string=green (t-text), number=orange (t-json), type=amber
+// (t-time), table=teal (t-uuid), builtin=red; identifiers use text-1, operators
+// text-2, comments text-3 — all on the bg-canvas content well.
 export const DEFAULT_CUSTOM_THEME_COLORS: CustomThemeColors = {
-  keyword: "#cba6f7",
-  field: "#f9e2af",
-  function: "#89dceb",
-  string: "#a6e3a1",
-  number: "#fab387",
-  comment: "#6c7086",
-  table: "#a6e3a1",
-  operator: "#89b4fa",
-  type: "#89b4fa",
-  builtin: "#f38ba8",
+  keyword: "#a371e8",
+  field: "#f7f8f8",
+  function: "#4f9be6",
+  string: "#3fb950",
+  number: "#e07a5f",
+  comment: "#6b6d79",
+  table: "#2dd4bf",
+  operator: "#9c9da7",
+  type: "#d9a521",
+  builtin: "#e5534b",
+  background: "#0b0c0e",
+  foreground: "#f7f8f8",
 };
 
 export interface CustomTheme {

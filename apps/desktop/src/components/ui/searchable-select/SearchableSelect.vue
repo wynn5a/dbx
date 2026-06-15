@@ -136,7 +136,10 @@ function handleKeydown(event: KeyboardEvent) {
                The popover list already shows its own loading row. -->
           <span class="truncate">{{ loading && !modelValue ? loadingText : selectedLabel }}</span>
         </slot>
-        <ChevronDown class="h-3 w-3 shrink-0 opacity-60" />
+        <ChevronDown
+          class="h-3 w-3 shrink-0 opacity-60 transition-transform duration-[var(--ds-speed)] ease-[var(--ds-ease)]"
+          :class="{ 'rotate-180': open }"
+        />
       </Button>
     </PopoverTrigger>
     <PopoverContent align="end" :class="cn('ds-popover w-52 gap-1 p-1.5', contentClass)">

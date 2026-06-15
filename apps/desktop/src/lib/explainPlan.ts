@@ -259,6 +259,64 @@ export function flattenExplainPlanNodes(nodes: ExplainPlanNode[]): ExplainPlanNo
   return rows;
 }
 
+// ── UI helpers: categorise + quantify nodes for the viewer ────────────
+// These power the operation-coloured badges and the relative cost heat
+// bars. Kept here (not in the component) so they're shared by the tree
+// and summary views and unit-testable.
+
+/** Operation family, used to colour a node's type badge. */
+export type ExplainNodeCategory = "scan" | "index" | "join" | "sort" | "aggregate" | "other";
+
+/** Classify a node's operation by its type string (engine-agnostic, best-effort). */
+export function explainNodeCategory(nodeType: string): ExplainNodeCategory {
+  const t = nodeType.toLowerCase();
+  // Order matters: "Index Scan" is index (not scan); "Hash Aggregate" is
+  // aggregate (not join); "Hash Join" is join.
+  if (t.includes("aggregate") || t.includes("hashagg") || t.includes("groupagg") || t.includes("group")) {
+    return "aggregate";
+  }
+  if (t.includes("join") || t.includes("nested loop")) return "join";
+  if (t.includes("sort") || t.includes("order by")) return "sort";
+  if (t.includes("index")) return "index";
+  if (t.includes("scan") || t.includes("seek") || t === "all") return "scan";
+  return "other";
+}
+
+/** Parse the trailing numeric value of a cost string ("0.00..12.34" → 12.34). */
+export function explainNodeCost(node: ExplainPlanNode): number | null {
+  return parseNumericTail(node.cost);
+}
+
+/** Parse the estimated row count of a node. */
+export function explainNodeRows(node: ExplainPlanNode): number | null {
+  return parseNumericTail(node.rows);
+}
+
+/** Pull "Actual Rows: N" out of a node's details (autotrace / EXPLAIN ANALYZE). */
+export function explainNodeActualRows(node: ExplainPlanNode): number | null {
+  for (const d of node.details) {
+    const m = d.match(/Actual Rows:\s*([\d.]+)/i);
+    if (m) {
+      const n = Number.parseFloat(m[1]);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return null;
+}
+
+/** Largest node cost in a plan — the denominator for relative cost heat bars. */
+export function explainMaxCost(nodes: ExplainPlanNode[]): number {
+  return flattenExplainPlanNodes(nodes).reduce((max, n) => Math.max(max, explainNodeCost(n) ?? 0), 0);
+}
+
+function parseNumericTail(value?: string): number | null {
+  if (!value) return null;
+  // Postgres encodes cost as "startup..total" — the total is what matters.
+  const tail = value.split("..").pop() ?? value;
+  const n = Number.parseFloat(tail.replace(/[^\d.eE+-]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
 function parseExplainCell(value: unknown): unknown {
   if (typeof value !== "string") return value;
   try {
