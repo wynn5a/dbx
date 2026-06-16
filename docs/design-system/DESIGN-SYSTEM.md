@@ -73,12 +73,24 @@ A dense, calm, keyboard-first **dark** interface in the Linear lineage, built fo
   --font: 'Inter', system-ui, sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', monospace;
 
-  /* depth & motion */
+  /* depth */
   --shadow-pop:  0 16px 48px -12px rgba(0,0,0,0.65), 0 4px 12px -2px rgba(0,0,0,0.45), 0 0 0 0.5px rgba(255,255,255,0.06);
   --shadow-card: 0 1px 2px rgba(0,0,0,0.25);
   --sheen:       inset 0 1px 0 rgba(255,255,255,0.07);  /* top highlight on raised elements */
-  --speed:       120ms;
-  --ease:        cubic-bezier(0.25, 0.46, 0.45, 0.94);
+
+  /* motion — durations (fast & layered) */
+  --dur-1: 80ms;    /* hover tint, press, tiny flips */
+  --dur-2: 120ms;   /* default control transition (== --speed) */
+  --dur-3: 180ms;   /* entrances, fades, caret/chevron */
+  --dur-4: 240ms;   /* overlays, dialogs, larger movement */
+  --dur-5: 360ms;   /* full-view transitions only */
+  --speed: 120ms;   /* legacy alias of --dur-2 */
+
+  /* motion — easing */
+  --ease:        cubic-bezier(0.25, 0.46, 0.45, 0.94); /* default — gentle ease-out */
+  --ease-out:    cubic-bezier(0.16, 1, 0.30, 1);       /* entrances, overlays */
+  --ease-in-out: cubic-bezier(0.45, 0, 0.40, 1);       /* continuous/looping motion */
+  --ease-spring: cubic-bezier(0.34, 1.40, 0.64, 1);    /* faint overshoot — toggles, checks */
 }
 
 html, body {
@@ -225,7 +237,40 @@ Behavior: show after 400ms hover delay, 6px from anchor, no arrow; fade in 120ms
 | loading  | skeleton bars `--bg-elevated` with shimmer; never spinners taller than 16px |
 | error    | inline `--red` text + 14%-tint banner; never modal for recoverable errors |
 
-Motion: 120ms / `--ease` on color/background/border only. Entrances: 180ms fade + 2px rise. No movement on hover (no translate/scale); no decorative animation.
+Motion: see the **Motion** section below. In short — 120ms / `--ease` on color/background/border; entrances 180ms fade + 2px rise; no movement on hover; no decorative animation.
+
+## Motion
+
+Fast, quiet, functional. Motion confirms an action, reveals structure, or shows where something came from — then gets out of the way. If an animation doesn't help the user understand state, it doesn't ship. Reference: `ds/motion.html` (live demos).
+
+**Principles:** fast over fluid (most transitions 80–180ms) · ease *out*, not in (decelerate into rest) · move with meaning (no idle/decorative motion).
+
+**Durations** — reach for the smallest that reads:
+
+| Token | Time | Use |
+|-------|------|-----|
+| `--dur-1` | 80ms  | hover tint, press, row-select, tiny flips |
+| `--dur-2` | 120ms | default control transition (= legacy `--speed`) |
+| `--dur-3` | 180ms | entrances, fades, caret/chevron rotation |
+| `--dur-4` | 240ms | overlays, dialogs, toasts, larger movement |
+| `--dur-5` | 360ms | full-view / page transitions only — never inside a working view |
+
+**Easing:** `--ease` everyday default · `--ease-out` entrances & overlays (decisive arrival) · `--ease-in-out` continuous motion (shimmer, progress) · `--ease-spring` faint overshoot, reserved for toggle knob & checkbox tick.
+
+**Recipes:**
+- **Hover/press** — `background-color, color, border-color` over `--dur-2 --ease`. Tint only; never translate or scale.
+- **Focus** — fade a `box-shadow: 0 0 0 2px var(--accent-line)` ring in over `--dur-2` as the border goes transparent. Crisp ring, never a growing glow.
+- **Content entrance** — `opacity` + `translateY(4px → 0)` over `--dur-3 --ease-out`.
+- **Overlay entrance** — `opacity` + `translateY(6px)` + `scale(0.985 → 1)` over `--dur-4 --ease-out`.
+- **Toast** — `opacity` + `translateX(14px → 0)` from its edge over `--dur-4 --ease-out`.
+- **Toggle** — knob `translateX(16px)` on `--ease-spring`; track recolors on `--ease`.
+- **Checkbox** — draw the tick via `stroke-dashoffset` over `--dur-3 --ease-out`.
+- **Caret** — `transform: rotate(90deg)` over `--dur-3`.
+- **Loops (only while pending/live):** spinner 700ms linear (≤20px, one at a time) · skeleton shimmer 1.4s `--ease-in-out` · indeterminate bar 1.3s · live status pulse 1.8s halo. Stop the loop the instant state resolves.
+
+**Performance:** animate `transform` and `opacity` only — both composite on the GPU and never reflow. Never animate `height`, `width`, `top`, or `left`.
+
+**Reduced motion:** wrap everything so it degrades to its end-state under `prefers-reduced-motion: reduce` — drop movement and loops, keep ~0.01ms fades so state changes stay legible.
 
 ## Hard rules (do / don't)
 

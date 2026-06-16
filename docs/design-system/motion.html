@@ -1,0 +1,543 @@
+<!-- @dsCard group="Spacing" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Data Buddy — Motion & Animation</title>
+<link rel="stylesheet" href="tokens.css" />
+<style>
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:26px 32px; }
+  .spec h3 { font-size:12.5px; font-weight:600; margin:0 0 4px; }
+  .spec p  { margin:0 0 12px; font-size:11.5px; color:var(--text-3); line-height:1.5; }
+  .spec.wide { grid-column:1 / -1; }
+  svg { display:block; flex-shrink:0; }
+  code.mono { font-family:var(--mono); color:var(--text-2); font-size:0.92em; }
+
+  /* ---------- philosophy banner ---------- */
+  .philo {
+    display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:4px;
+  }
+  .pcard {
+    border:1px solid var(--border); border-radius:var(--radius);
+    background:linear-gradient(180deg, rgba(255,255,255,0.016), transparent 42%), var(--bg-panel);
+    box-shadow:var(--shadow-card); padding:16px 17px 18px;
+  }
+  .pcard .n { font-family:var(--mono); font-size:11px; color:var(--accent); }
+  .pcard b { display:block; font-size:13px; font-weight:600; margin:8px 0 6px; }
+  .pcard p { margin:0; font-size:12px; color:var(--text-3); line-height:1.55; }
+
+  /* ---------- demo frame + replay ---------- */
+  .demo {
+    position:relative; border:1px solid var(--border); border-radius:var(--radius);
+    background:var(--bg-canvas); padding:22px; min-height:128px;
+    display:flex; align-items:center; justify-content:center; gap:22px; flex-wrap:wrap;
+    overflow:hidden;
+  }
+  .demo.tall { min-height:172px; }
+  .replay {
+    position:absolute; top:9px; right:9px; z-index:3;
+    display:inline-flex; align-items:center; gap:6px; padding:3px 8px 3px 7px;
+    border-radius:var(--radius-sm); border:1px solid var(--border);
+    background:var(--bg-elevated); color:var(--text-3); cursor:pointer;
+    font-family:var(--mono); font-size:10px; letter-spacing:0.04em; text-transform:uppercase;
+    transition:color var(--dur-2) var(--ease), border-color var(--dur-2) var(--ease);
+  }
+  .replay:hover { color:var(--text-1); border-color:var(--border-strong); }
+  .replay svg { transition:transform var(--dur-4) var(--ease-out); }
+  .replay:active svg { transform:rotate(-90deg); }
+  .dcap {
+    font-family:var(--mono); font-size:10px; color:var(--text-4); letter-spacing:0.02em;
+    margin-top:9px; line-height:1.5;
+  }
+  .dcap b { color:var(--text-2); font-weight:500; }
+
+  /* ---------- duration scale chart ---------- */
+  .durs { display:flex; flex-direction:column; gap:2px; }
+  .drow {
+    display:flex; align-items:center; gap:14px; padding:11px 14px;
+    border:1px solid var(--border-soft); border-radius:var(--radius-sm); background:var(--bg-panel);
+  }
+  .drow .tok { font-family:var(--mono); font-size:11.5px; color:var(--text-2); width:78px; }
+  .drow .ms  { font-family:var(--mono); font-size:12px; color:var(--accent); width:62px; }
+  .drow .use { font-size:12px; color:var(--text-3); width:166px; flex-shrink:0; }
+  .drow .track { flex:1; height:6px; border-radius:99px; background:var(--bg-active); overflow:hidden; position:relative; min-width:90px; }
+  .drow .track > i {
+    position:absolute; left:0; top:0; bottom:0; width:14px; border-radius:99px; background:var(--accent);
+  }
+  .durs.run .track > i { animation:sweep var(--d) var(--ease) infinite; }
+  @keyframes sweep {
+    0%   { left:0; }
+    55%  { left:calc(100% - 14px); }
+    100% { left:calc(100% - 14px); }
+  }
+
+  /* ---------- easing curve plots ---------- */
+  .curves { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  .curve {
+    border:1px solid var(--border); border-radius:var(--radius);
+    background:var(--bg-panel); padding:13px 13px 12px;
+  }
+  .curve .plot { width:100%; height:74px; }
+  .curve .pl { stroke:var(--accent); stroke-width:2; fill:none; }
+  .curve .axis { stroke:var(--border-strong); stroke-width:1; }
+  .curve .dot { fill:var(--accent); }
+  .curve b { display:block; font-size:12px; font-weight:600; margin:10px 0 2px; }
+  .curve .tk { font-family:var(--mono); font-size:9.5px; color:var(--text-4); line-height:1.5; word-break:break-all; }
+  .curve .uses { font-size:11px; color:var(--text-3); margin-top:6px; line-height:1.45; }
+
+  /* ---------- hover tint demo ---------- */
+  .nav-item { display:flex; align-items:center; gap:9px; padding:7px 11px; border-radius:var(--radius-sm);
+    font-size:13px; color:var(--text-2); cursor:pointer; min-width:150px;
+    transition:background-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease); }
+  .nav-item:hover { background:var(--bg-hover); color:var(--text-1); }
+  .nav-item.runhover { background:var(--bg-active); color:var(--text-1); }
+
+  .btn-chip { display:inline-flex; align-items:center; gap:6px; padding:5.5px 11px; white-space:nowrap;
+    border-radius:var(--radius-sm); border:1px solid var(--border); background:transparent;
+    color:var(--text-2); font-size:12.5px; font-family:var(--font); cursor:pointer;
+    transition:background-color var(--dur-2) var(--ease), border-color var(--dur-2) var(--ease), color var(--dur-2) var(--ease); }
+  .btn-chip:hover { background:var(--bg-hover); color:var(--text-1); border-color:var(--border-strong); }
+
+  /* ---------- focus ring demo ---------- */
+  .field {
+    width:200px; padding:8px 10px; border-radius:var(--radius-sm);
+    border:1px solid var(--border); background:var(--bg-input); color:var(--text-1);
+    font-size:12.5px; font-family:var(--font); outline:none;
+    transition:border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease);
+  }
+  .field::placeholder { color:var(--text-4); }
+  .field:focus, .field.runfocus { border-color:transparent; box-shadow:0 0 0 2px var(--accent-line); }
+
+  /* ---------- entrance: fade + rise ---------- */
+  .fade-in { animation:fadeRise var(--dur-3) var(--ease-out) both; }
+  @keyframes fadeRise { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+
+  .card-ex {
+    width:230px; border:1px solid var(--border); border-radius:var(--radius);
+    background:linear-gradient(180deg, rgba(255,255,255,0.016), transparent 42%), var(--bg-panel);
+    box-shadow:var(--shadow-card); padding:14px 15px;
+  }
+  .card-ex b { font-size:13px; font-weight:600; }
+  .card-ex p { margin:5px 0 0; font-size:11.5px; color:var(--text-3); line-height:1.5; }
+
+  /* ---------- overlay: pop-in ---------- */
+  .pop-in { animation:popIn var(--dur-4) var(--ease-out) both; }
+  @keyframes popIn { from { opacity:0; transform:translateY(6px) scale(0.985); } to { opacity:1; transform:none; } }
+  .palette {
+    width:300px; border:1px solid var(--border-strong); border-radius:12px; overflow:hidden;
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent 36%), var(--bg-elevated);
+    box-shadow:var(--shadow-pop);
+  }
+  .palette .pq { display:flex; align-items:center; gap:9px; padding:10px 12px; border-bottom:1px solid var(--border); color:var(--text-3); font-size:13px; }
+  .palette .pbody { padding:5px; }
+  .palette .pitem { display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:6px; font-size:12.5px; color:var(--text-2); }
+  .palette .pitem.active { background:var(--accent-soft); color:var(--text-1); }
+
+  /* ---------- toggle ---------- */
+  .db-toggle { position:relative; width:38px; height:22px; flex-shrink:0; border-radius:99px;
+    border:1px solid var(--border); background:var(--bg-active); padding:0; cursor:pointer;
+    transition:background-color var(--dur-2) var(--ease), border-color var(--dur-2) var(--ease); }
+  .db-toggle::after { content:''; position:absolute; top:2px; left:2px; width:16px; height:16px; border-radius:99px;
+    background:var(--text-2); box-shadow:0 1px 2px rgba(0,0,0,0.45);
+    transition:transform var(--dur-2) var(--ease-spring), background-color var(--dur-2) var(--ease); }
+  .db-toggle[aria-checked="true"] { background:var(--accent); border-color:color-mix(in srgb, var(--accent) 60%, rgba(255,255,255,0.2)); }
+  .db-toggle[aria-checked="true"]::after { transform:translateX(16px); background:#fff; }
+
+  /* ---------- checkbox tick draw ---------- */
+  .cbx { width:20px; height:20px; border-radius:5px; border:1px solid var(--border-strong); background:var(--bg-input);
+    display:grid; place-items:center; cursor:pointer;
+    transition:background-color var(--dur-2) var(--ease), border-color var(--dur-2) var(--ease); }
+  .cbx.on { background:var(--accent); border-color:color-mix(in srgb, var(--accent) 60%, rgba(255,255,255,0.2)); }
+  .cbx svg path { stroke-dasharray:24; stroke-dashoffset:24; }
+  .cbx.on svg path { animation:tick var(--dur-3) var(--ease-out) forwards; }
+  @keyframes tick { to { stroke-dashoffset:0; } }
+
+  /* ---------- caret rotate ---------- */
+  .trow { display:flex; align-items:center; gap:8px; padding:6px 9px; border-radius:var(--radius-sm);
+    color:var(--text-2); font-size:12.5px; cursor:pointer; min-width:150px;
+    transition:background-color var(--dur-2) var(--ease); }
+  .trow:hover { background:var(--bg-hover); color:var(--text-1); }
+  .caret { color:var(--text-4); transition:transform var(--dur-3) var(--ease); }
+  .trow.open .caret { transform:rotate(90deg); }
+
+  /* ---------- spinner ---------- */
+  .spin { width:20px; height:20px; border:2px solid var(--border-strong); border-top-color:var(--accent);
+    border-radius:99px; animation:spin 0.7s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* ---------- skeleton shimmer ---------- */
+  .skel { width:100%; max-width:280px; display:flex; flex-direction:column; gap:9px; }
+  .skel i { display:block; height:11px; border-radius:5px;
+    background:linear-gradient(90deg, var(--bg-elevated) 25%, rgba(255,255,255,0.06) 37%, var(--bg-elevated) 63%);
+    background-size:400% 100%; animation:shimmer 1.4s var(--ease-in-out) infinite; }
+  @keyframes shimmer { 0% { background-position:100% 0; } 100% { background-position:-100% 0; } }
+
+  /* ---------- indeterminate progress ---------- */
+  .prog { width:100%; max-width:280px; height:6px; border-radius:99px; background:var(--bg-active); overflow:hidden; }
+  .prog > i { display:block; height:100%; width:40%; border-radius:99px; background:var(--accent);
+    animation:indet 1.3s var(--ease-in-out) infinite; }
+  @keyframes indet { 0% { margin-left:-40%; } 100% { margin-left:100%; } }
+
+  /* ---------- status pulse ---------- */
+  .pulse { width:8px; height:8px; border-radius:99px; background:var(--green); position:relative; }
+  .pulse::after { content:''; position:absolute; inset:0; border-radius:99px; background:var(--green);
+    animation:pulse 1.8s var(--ease-out) infinite; }
+  @keyframes pulse { 0% { opacity:0.55; transform:scale(1); } 70%,100% { opacity:0; transform:scale(3.2); } }
+
+  /* ---------- toast slide-in ---------- */
+  .toast-in { animation:toastIn var(--dur-4) var(--ease-out) both; }
+  @keyframes toastIn { from { opacity:0; transform:translateX(14px); } to { opacity:1; transform:none; } }
+  .toast { display:flex; align-items:center; gap:10px; width:268px; padding:11px 13px; border-radius:10px;
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%), var(--bg-elevated);
+    border:1px solid var(--border-strong); box-shadow:var(--shadow-pop); font-size:12.5px; color:var(--text-1); }
+  .toast .tic { display:grid; place-items:center; width:24px; height:24px; border-radius:7px; flex-shrink:0;
+    background:color-mix(in srgb, var(--green) 16%, transparent); color:var(--green); }
+
+  /* ---------- row selection sweep ---------- */
+  .tbl { width:100%; max-width:300px; border-collapse:separate; border-spacing:0; }
+  .tbl td { border-bottom:1px solid var(--border-soft); padding:0 12px; height:32px; font-size:12.5px; color:var(--text-2);
+    transition:background-color var(--dur-1) var(--ease); }
+  .tbl .num { font-family:var(--mono); text-align:right; }
+  .tbl tr.sel td { background:var(--accent-soft); color:var(--text-1); }
+
+  /* ---------- do / don't ---------- */
+  .rules { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .rcol { border:1px solid var(--border); border-radius:var(--radius); overflow:hidden;
+    background:linear-gradient(180deg, rgba(255,255,255,0.016), transparent 42%), var(--bg-panel); }
+  .rcol > header { display:flex; align-items:center; gap:8px; padding:11px 15px; border-bottom:1px solid var(--border-soft);
+    font-size:12px; font-weight:600; }
+  .rcol.do > header { color:var(--green); }
+  .rcol.dont > header { color:var(--red); }
+  .rcol ul { margin:0; padding:12px 16px 14px 16px; list-style:none; display:flex; flex-direction:column; gap:9px; }
+  .rcol li { font-size:12px; color:var(--text-3); line-height:1.5; padding-left:18px; position:relative; }
+  .rcol li::before { position:absolute; left:0; top:0; font-family:var(--mono); font-size:12px; }
+  .rcol.do li::before { content:'+'; color:var(--green); }
+  .rcol.dont li::before { content:'\2212'; color:var(--red); }
+  .rcol li b { color:var(--text-2); font-weight:500; }
+</style>
+</head>
+<body class="ds">
+  <div class="ds-head"><span class="ds-kicker">Foundations</span></div>
+  <h1 class="ds-title">Motion &amp; Animation</h1>
+  <p class="ds-sub">Motion in Data Buddy is fast, quiet and functional — it confirms an action, reveals structure, or shows where something came from, then gets out of the way. Nothing loops or bounces for decoration. If an animation doesn't help the user understand state, it doesn't ship.</p>
+
+  <div class="ds-section-label">Principles</div>
+  <div class="philo">
+    <div class="pcard"><span class="n">01</span><b>Fast over fluid</b><p>Most transitions land in 80–180ms. The interface should feel instant; motion is a hint, not a performance. When in doubt, make it shorter.</p></div>
+    <div class="pcard"><span class="n">02</span><b>Ease out, not in</b><p>Things arrive quickly and settle gently. Default to an ease-out curve so motion decelerates into rest — never linear, never ease-in for entrances.</p></div>
+    <div class="pcard"><span class="n">03</span><b>Move with meaning</b><p>Animate to explain: a panel rises from where it opened, a caret turns to show it expanded. No movement on idle, no parallax, no attention-seeking.</p></div>
+  </div>
+
+  <div class="ds-section-label">Duration scale</div>
+  <p class="ds-sub" style="margin-top:-6px;">Five steps, each tied to a job. Reach for the smallest one that reads. The bars run in real time — <span class="mono" style="color:var(--text-2)">--dur-2</span> (120ms) is the default control transition and the legacy <span class="mono" style="color:var(--text-2)">--speed</span>.</p>
+  <div class="demo" style="display:block;padding:16px;">
+    <button class="replay" data-target="durChart"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>Replay</button>
+    <div class="durs run" id="durChart">
+      <div class="drow" style="--d:80ms;"><span class="tok">--dur-1</span><span class="ms">80ms</span><span class="use">Hover tint, press, flips</span><span class="track"><i></i></span></div>
+      <div class="drow" style="--d:120ms;"><span class="tok">--dur-2</span><span class="ms">120ms</span><span class="use">Default control transition</span><span class="track"><i></i></span></div>
+      <div class="drow" style="--d:180ms;"><span class="tok">--dur-3</span><span class="ms">180ms</span><span class="use">Entrances, fades, caret</span><span class="track"><i></i></span></div>
+      <div class="drow" style="--d:240ms;"><span class="tok">--dur-4</span><span class="ms">240ms</span><span class="use">Overlays, dialogs</span><span class="track"><i></i></span></div>
+      <div class="drow" style="--d:360ms;"><span class="tok">--dur-5</span><span class="ms">360ms</span><span class="use">Full-view transitions only</span><span class="track"><i></i></span></div>
+    </div>
+  </div>
+
+  <div class="ds-section-label">Easing</div>
+  <p class="ds-sub" style="margin-top:-6px;">Four curves cover everything. <span class="mono" style="color:var(--text-2)">--ease</span> is the everyday default; <span class="mono" style="color:var(--text-2)">--ease-out</span> gives entrances and overlays a decisive arrival; <span class="mono" style="color:var(--text-2)">--ease-in-out</span> drives anything that moves continuously; <span class="mono" style="color:var(--text-2)">--ease-spring</span> adds a barely-there overshoot — reserved for toggles and checks.</p>
+  <div class="curves" id="curves"></div>
+
+  <div class="ds-section-label">Interaction motion</div>
+  <div class="grid2">
+
+    <div class="spec">
+      <h3>Hover &amp; press</h3>
+      <p>The most common motion in the app. Background tint and text step up together over <code class="mono">--dur-2</code>. Position never changes — no translate, no scale on hover.</p>
+      <div class="demo tall">
+        <button class="replay" data-hover="hoverDemo"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>Play</button>
+        <div style="display:flex;flex-direction:column;gap:9px;align-items:center;">
+          <div class="nav-item" id="hoverDemo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Hover me</div>
+          <button class="btn-chip">Or this chip</button>
+        </div>
+      </div>
+      <div class="dcap"><b>120ms</b> · --ease · background-color, color, border-color</div>
+    </div>
+
+    <div class="spec">
+      <h3>Focus ring</h3>
+      <p>Focus fades a 2px <code class="mono">--accent-line</code> ring in over <code class="mono">--dur-2</code> as the border goes transparent. A crisp ring, never a soft glow that grows.</p>
+      <div class="demo tall">
+        <button class="replay" data-focus="focusDemo"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>Play</button>
+        <input class="field" id="focusDemo" placeholder="Click to focus" />
+      </div>
+      <div class="dcap"><b>120ms</b> · --ease · box-shadow, border-color</div>
+    </div>
+
+    <div class="spec">
+      <h3>Toggle</h3>
+      <p>The knob slides 16px on <code class="mono">--ease-spring</code> for a hair of overshoot — the one place a spring is allowed — while the track recolors to the accent. The clearest "it happened" in the system.</p>
+      <div class="demo tall">
+        <button class="replay" data-toggle="toggleDemo"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>Play</button>
+        <button class="db-toggle" id="toggleDemo" aria-checked="true"></button>
+      </div>
+      <div class="dcap"><b>120ms</b> · --ease-spring (knob) + --ease (track)</div>
+    </div>
+
+    <div class="spec">
+      <h3>Checkbox tick</h3>
+      <p>The check is drawn, not popped — the path strokes on over <code class="mono">--dur-3</code> as the box fills. A small touch that makes confirmation feel deliberate.</p>
+      <div class="demo tall">
+        <button class="replay" data-check="checkDemo"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>Play</button>
+        <span class="cbx on" id="checkDemo"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>
+      </div>
+      <div class="dcap"><b>180ms</b> · --ease-out · stroke-dashoffset draw</div>
+    </div>
+
+    <div class="spec">
+      <h3>Disclosure caret</h3>
+      <p>Expanding a tree row rotates the caret 90° over <code class="mono">--dur-3</code>. The rotation maps the gesture to the structural change — closed points right, open points down.</p>
+      <div class="demo tall">
+        <button class="replay" data-disclose="discloseDemo"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>Play</button>
+        <div class="trow open" id="discloseDemo"><span class="caret"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--t-text)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM3 7l2-3h14l2 3"/></svg>public</div>
+      </div>
+      <div class="dcap"><b>180ms</b> · --ease · transform: rotate(90deg)</div>
+    </div>
+
+    <div class="spec">
+      <h3>Row selection</h3>
+      <p>Selecting a row fills it with <code class="mono">--accent-soft</code> almost instantly — <code class="mono">--dur-1</code>. Selection should feel like a direct response to the pointer, not a transition.</p>
+      <div class="demo tall" style="padding:14px;">
+        <button class="replay" data-rowsel="rowDemo"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>Play</button>
+        <table class="tbl" id="rowDemo">
+          <tr><td>ada@databuddy.io</td><td class="num">$240</td></tr>
+          <tr class="sel"><td>lin@databuddy.io</td><td class="num">$1,800</td></tr>
+          <tr><td>sam@databuddy.io</td><td class="num">$90</td></tr>
+        </table>
+      </div>
+      <div class="dcap"><b>80ms</b> · --ease · background-color</div>
+    </div>
+
+  </div>
+
+  <div class="ds-section-label">Entrances &amp; overlays</div>
+  <div class="grid2">
+
+    <div class="spec">
+      <h3>Content entrance — fade + rise</h3>
+      <p>In-page content (cards, panels, results) fades in while lifting 4px over <code class="mono">--dur-3</code> on <code class="mono">--ease-out</code>. The default for anything appearing in the flow.</p>
+      <div class="demo tall">
+        <button class="replay" data-enter="enterDemo"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>Replay</button>
+        <div class="card-ex fade-in" id="enterDemo"><b>Connection added</b><p>postgres://prod · 24ms · synced 3 tables</p></div>
+      </div>
+      <div class="dcap"><b>180ms</b> · --ease-out · opacity + translateY(4px → 0)</div>
+    </div>
+
+    <div class="spec">
+      <h3>Overlay entrance — pop-in</h3>
+      <p>Floating surfaces (⌘K palette, menus, dialogs) fade in, rise 6px, and scale from 0.985 over <code class="mono">--dur-4</code>. The faint scale gives weight without a bounce.</p>
+      <div class="demo tall">
+        <button class="replay" data-pop="popDemo"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>Replay</button>
+        <div class="palette pop-in" id="popDemo">
+          <div class="pq"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Search or run…</div>
+          <div class="pbody">
+            <div class="pitem active"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/></svg>Export to CSV</div>
+            <div class="pitem"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>Refresh connection</div>
+          </div>
+        </div>
+      </div>
+      <div class="dcap"><b>240ms</b> · --ease-out · opacity + translateY(6px) + scale(0.985)</div>
+    </div>
+
+    <div class="spec">
+      <h3>Toast — slide in from edge</h3>
+      <p>Notifications enter from the screen edge they live on, fading as they travel ~14px over <code class="mono">--dur-4</code>. Exit reverses; auto-dismiss after the message is read.</p>
+      <div class="demo tall">
+        <button class="replay" data-toast="toastDemo"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>Replay</button>
+        <div class="toast toast-in" id="toastDemo"><span class="tic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>Exported 4,820 rows to CSV</div>
+      </div>
+      <div class="dcap"><b>240ms</b> · --ease-out · opacity + translateX(14px → 0)</div>
+    </div>
+
+    <div class="spec">
+      <h3>Animate cheaply</h3>
+      <p>The DS uses opacity + transform for entrances, never height animation — animating <code class="mono">height</code> or <code class="mono">width</code> is janky and forces layout. Reveal with a fade, or a clip, instead.</p>
+      <div class="demo tall" style="flex-direction:column;gap:10px;">
+        <div class="card-ex" style="width:auto;max-width:300px;"><b style="color:var(--text-2);font-size:12px;">Rule of thumb</b><p style="margin-top:6px;">Animate <span class="mono" style="color:var(--text-2)">transform</span> and <span class="mono" style="color:var(--text-2)">opacity</span>. Both are GPU-composited and never trigger reflow — so motion stays at 60fps even on a dense grid.</p></div>
+      </div>
+      <div class="dcap"><b>Performance</b> · transform + opacity only</div>
+    </div>
+
+  </div>
+
+  <div class="ds-section-label">Looping &amp; status motion</div>
+  <p class="ds-sub" style="margin-top:-6px;">The only motion allowed to run continuously — and only while something is genuinely pending or live. The moment the state resolves, the loop stops.</p>
+  <div class="grid2">
+
+    <div class="spec">
+      <h3>Spinner</h3>
+      <p>A single arc on the accent, ≤20px, 0.7s linear. For query runs and short waits where there's nothing to show yet. Never more than one on screen.</p>
+      <div class="demo"><div class="spin"></div></div>
+      <div class="dcap"><b>700ms</b> · linear · infinite (only while pending)</div>
+    </div>
+
+    <div class="spec">
+      <h3>Skeleton shimmer</h3>
+      <p>For grids and panels streaming in — a sheen sweeps left-to-right across placeholder bars. Preferred over a spinner when the shape of the result is known.</p>
+      <div class="demo"><div class="skel"><i style="width:90%"></i><i style="width:70%"></i><i style="width:82%"></i></div></div>
+      <div class="dcap"><b>1400ms</b> · --ease-in-out · background-position</div>
+    </div>
+
+    <div class="spec">
+      <h3>Indeterminate progress</h3>
+      <p>A short accent bar travels the track when total work is unknown — imports, long scans. Switches to a determinate fill the instant a percentage is available.</p>
+      <div class="demo"><div class="prog"><i></i></div></div>
+      <div class="dcap"><b>1300ms</b> · --ease-in-out · margin-left</div>
+    </div>
+
+    <div class="spec">
+      <h3>Live status pulse</h3>
+      <p>A halo ripples out from the connection dot only while the link is live. It's the system's one piece of ambient motion — quiet enough to ignore, present enough to reassure.</p>
+      <div class="demo"><span style="display:inline-flex;align-items:center;gap:9px;font-size:12.5px;color:var(--text-2);"><span class="pulse"></span>Connected · 24ms</span></div>
+      <div class="dcap"><b>1800ms</b> · --ease-out · scale + fade halo</div>
+    </div>
+
+  </div>
+
+  <div class="ds-section-label">Rules</div>
+  <div class="rules">
+    <div class="rcol do">
+      <header><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Do</header>
+      <ul>
+        <li>Animate <b>transform</b> and <b>opacity</b> — they composite on the GPU and never reflow.</li>
+        <li>Default to <b>ease-out</b> so motion decelerates into rest.</li>
+        <li>Keep micro-interactions <b>80–180ms</b>; reserve 240ms+ for overlays and full views.</li>
+        <li>Let one motion <b>explain</b> one change — open from where it was triggered.</li>
+        <li>Stop every loop the instant its <b>state resolves</b>.</li>
+        <li>Honor <b>prefers-reduced-motion</b> — drop movement, keep the final state and instant fades.</li>
+      </ul>
+    </div>
+    <div class="rcol dont">
+      <header><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>Don't</header>
+      <ul>
+        <li>Don't move or scale on <b>hover</b> — tint the background, hold the position.</li>
+        <li>Don't animate <b>height</b>, <b>width</b>, <b>top</b> or <b>left</b> — they force layout and stutter.</li>
+        <li>Don't add <b>bounce</b> or big springs; the one allowed overshoot is the toggle knob.</li>
+        <li>Don't run <b>decorative</b> loops — no idle parallax, no breathing gradients, no marquee.</li>
+        <li>Don't <b>stagger</b> long lists or delay content the user is waiting on.</li>
+        <li>Don't <b>cross 360ms</b> for anything inside a working view.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="ds-section-label">Accessibility</div>
+  <div class="demo wide" style="display:block;padding:16px 18px;background:var(--bg-panel);">
+    <p style="margin:0 0 11px;font-size:12.5px;color:var(--text-2);">Every animation is wrapped so it degrades to its end-state when the user asks for less motion. Movement and loops are removed; near-instant fades remain so state changes are still legible.</p>
+    <pre style="margin:0;font-family:var(--mono);font-size:11.5px;line-height:1.6;color:var(--text-3);background:var(--bg-canvas);border:1px solid var(--border);border-radius:var(--radius-sm);padding:13px 14px;overflow:auto;">@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}</pre>
+  </div>
+
+  <script>
+    // ---- easing curve plots ----
+    const CURVES = [
+      { name:'--ease',        bez:[0.25,0.46,0.45,0.94], cb:'cubic-bezier(.25,.46,.45,.94)', use:'Everyday default — controls, hover, color.' },
+      { name:'--ease-out',    bez:[0.16,1,0.30,1],        cb:'cubic-bezier(.16,1,.3,1)',       use:'Entrances & overlays — decisive arrival.' },
+      { name:'--ease-in-out', bez:[0.45,0,0.40,1],        cb:'cubic-bezier(.45,0,.4,1)',       use:'Continuous motion — shimmer, progress.' },
+      { name:'--ease-spring', bez:[0.34,1.40,0.64,1],     cb:'cubic-bezier(.34,1.4,.64,1)',    use:'Faint overshoot — toggles, checks.' },
+    ];
+    function bezPoint(t, p) {
+      const [x1,y1,x2,y2] = p;
+      const u = 1 - t;
+      const x = 3*u*u*t*x1 + 3*u*t*t*x2 + t*t*t;
+      const y = 3*u*u*t*y1 + 3*u*t*t*y2 + t*t*t;
+      return [x, y];
+    }
+    const W=140, H=74, PAD=8;
+    function plotPath(p) {
+      let d = '';
+      for (let i=0; i<=40; i++) {
+        const [x,y] = bezPoint(i/40, p);
+        const px = PAD + x*(W-2*PAD);
+        const py = (H-PAD) - y*(H-2*PAD);
+        d += (i===0?'M':'L') + px.toFixed(1) + ' ' + py.toFixed(1) + ' ';
+      }
+      return d.trim();
+    }
+    const cwrap = document.getElementById('curves');
+    CURVES.forEach(c => {
+      const el = document.createElement('div');
+      el.className = 'curve';
+      el.innerHTML =
+        '<svg class="plot" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+
+          '<line class="axis" x1="'+PAD+'" y1="'+(H-PAD)+'" x2="'+(W-PAD)+'" y2="'+(H-PAD)+'"/>'+
+          '<line class="axis" x1="'+PAD+'" y1="'+PAD+'" x2="'+PAD+'" y2="'+(H-PAD)+'"/>'+
+          '<path class="pl" d="'+plotPath(c.bez)+'"/>'+
+        '</svg>'+
+        '<b>'+c.name+'</b>'+
+        '<div class="tk">'+c.cb+'</div>'+
+        '<div class="uses">'+c.use+'</div>';
+      cwrap.appendChild(el);
+    });
+
+    // ---- replay helpers ----
+    function restart(el) {
+      // force reflow to retrigger CSS animation
+      el.style.animation = 'none';
+      void el.offsetWidth;
+      el.style.animation = '';
+    }
+    function reAddClass(el, cls) {
+      el.classList.remove(cls);
+      void el.offsetWidth;
+      el.classList.add(cls);
+    }
+
+    document.querySelectorAll('.replay').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const d = btn.dataset;
+        if (d.target) restart(document.getElementById(d.target));
+        if (d.enter)  reAddClass(document.getElementById(d.enter), 'fade-in');
+        if (d.pop)    reAddClass(document.getElementById(d.pop), 'pop-in');
+        if (d.toast)  reAddClass(document.getElementById(d.toast), 'toast-in');
+        if (d.hover) {
+          const el = document.getElementById(d.hover);
+          el.classList.add('runhover');
+          setTimeout(() => el.classList.remove('runhover'), 900);
+        }
+        if (d.focus) {
+          const el = document.getElementById(d.focus);
+          el.classList.add('runfocus');
+          setTimeout(() => el.classList.remove('runfocus'), 1000);
+        }
+        if (d.toggle) {
+          const el = document.getElementById(d.toggle);
+          el.setAttribute('aria-checked', el.getAttribute('aria-checked') === 'true' ? 'false' : 'true');
+        }
+        if (d.check) {
+          const el = document.getElementById(d.check);
+          el.classList.remove('on'); void el.offsetWidth; el.classList.add('on');
+        }
+        if (d.disclose) {
+          const el = document.getElementById(d.disclose);
+          el.classList.toggle('open');
+        }
+        if (d.rowsel) {
+          const rows = document.getElementById(d.rowsel).querySelectorAll('tr');
+          const cur = [...rows].findIndex(r => r.classList.contains('sel'));
+          rows.forEach(r => r.classList.remove('sel'));
+          rows[(cur + 1) % rows.length].classList.add('sel');
+        }
+      });
+    });
+
+    // make the toggle / disclosure also respond to direct clicks
+    document.getElementById('toggleDemo').addEventListener('click', function () {
+      this.setAttribute('aria-checked', this.getAttribute('aria-checked') === 'true' ? 'false' : 'true');
+    });
+    document.getElementById('discloseDemo').addEventListener('click', function () { this.classList.toggle('open'); });
+  </script>
+</body>
+</html>

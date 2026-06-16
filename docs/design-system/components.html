@@ -83,23 +83,26 @@
 
   /* ---- tooltip ---- */
   .tooltip {
-    display:inline-flex; align-items:center; gap:8px; width:max-content;
-    padding:4.5px 9px; border-radius:6px;
-    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 40%), var(--bg-elevated);
-    border:1px solid var(--border-strong);
-    box-shadow: var(--sheen), 0 4px 12px -2px rgba(0,0,0,0.5);
-    font-size:11.5px; font-weight:500; color:var(--text-1); line-height:1.4;
+    display:inline-flex; align-items:center; gap:11px; width:max-content;
+    padding:9px 13px; border-radius:10px;
+    background: var(--bg-elevated);
+    border:1px solid var(--border-soft);
+    box-shadow: 0 8px 24px -8px rgba(0,0,0,0.55);
+    font-size:13.5px; font-weight:500; color:var(--text-1); line-height:1.35;
   }
+  .tooltip .tkeys { display:inline-flex; align-items:center; gap:5px; }
   .tooltip .tkbd {
-    font-family:var(--mono); font-size:10px; color:var(--text-3);
-    padding:1px 4px; border-radius:3px; background:var(--bg-active); line-height:1.3;
+    display:inline-flex; align-items:center; justify-content:center;
+    min-width:21px; height:21px; padding:0 5px; box-sizing:border-box;
+    font-family:var(--mono); font-size:12px; color:var(--text-3); line-height:1;
+    border-radius:5px; background:var(--bg-active);
   }
   .tooltip .tsub { color:var(--text-3); font-weight:400; }
   .tip-anchor { display:flex; flex-direction:column; align-items:center; gap:7px; }
 
   /* ---- input ---- */
   .field {
-    width:100%; border:none; outline:2px solid var(--accent);
+    width:100%; border:none; outline:1px solid var(--accent);
     background:var(--bg-elevated); color:var(--text-1); font-size:12.5px;
     padding:7px 9px; border-radius:4px; font-family:var(--font);
   }
@@ -169,6 +172,35 @@
   .db-range:hover::-webkit-slider-thumb { transform:scale(1.08); }
   .valchip { font-family:var(--mono); font-size:11.5px; color:var(--text-1); padding:2.5px 9px; border-radius:6px; background:var(--bg-input); border:1px solid var(--border); }
 
+  /* ---- number stepper (label + input + +/- button group) ---- */
+  .nf { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
+  .nf-label { display:flex; align-items:baseline; gap:7px; font-size:11.5px; font-weight:500; color:var(--text-2); }
+  .nf-label .nf-unit { color:var(--text-4); font-family:var(--mono); font-size:10.5px; letter-spacing:0.02em; }
+  .stepper {
+    display:inline-flex; align-items:stretch;
+    border:1px solid var(--border); border-radius:var(--radius-sm);
+    background:var(--bg-input); overflow:hidden;
+    transition: border-color var(--speed) var(--ease), box-shadow var(--speed) var(--ease);
+  }
+  .stepper:focus-within { border-color:transparent; box-shadow:0 0 0 1px var(--accent-line); }
+  .stepper input {
+    width:64px; border:none; outline:none; background:transparent;
+    color:var(--text-1); font-family:var(--mono); font-size:12.5px; font-variant-numeric:tabular-nums;
+    text-align:center; padding:7px 4px; -moz-appearance:textfield;
+  }
+  .stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+  .stepper .step {
+    display:grid; place-items:center; width:30px; align-self:stretch;
+    border:none; background:transparent; color:var(--text-3); cursor:pointer;
+    transition: background-color var(--speed) var(--ease), color var(--speed) var(--ease);
+  }
+  .stepper .step:hover { background:var(--bg-hover); color:var(--text-1); }
+  .stepper .step:active { background:var(--bg-active); }
+  .stepper .step:disabled { color:var(--text-4); cursor:default; background:transparent; }
+  .stepper .step.dec { border-right:1px solid var(--border); }
+  .stepper .step.inc { border-left:1px solid var(--border); }
+  .stepper.disabled { opacity:.45; pointer-events:none; }
+
   /* ---- segmented control ---- */
   .seg { display:inline-flex; padding:3px; gap:2px; border-radius:8px; background:var(--bg-input); border:1px solid var(--border); }
   .seg button { border:none; background:transparent; color:var(--text-3); font-size:12px; font-family:var(--font); padding:5px 13px; border-radius:6px; cursor:pointer; transition: color var(--speed) var(--ease), background-color var(--speed) var(--ease); }
@@ -180,7 +212,7 @@
     padding:8px 10px 8px 12px; border-radius:var(--radius-sm); border:1px solid var(--border);
     background:var(--bg-input); color:var(--text-1); font-size:12.5px; font-family:var(--font); cursor:pointer;
   }
-  .sel-trigger.open { box-shadow:0 0 0 2px var(--accent-line); }
+  .sel-trigger.open { box-shadow:0 0 0 1px var(--accent-line); }
   .sel-pop {
     width:100%; padding:5px; border-radius:10px;
     background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 38%), var(--bg-elevated);
@@ -299,6 +331,95 @@
   .bcell { display:flex; flex-direction:column; gap:9px; align-items:flex-start; min-width:78px; }
   .bcap { font-family:var(--mono); font-size:10px; line-height:1.5; color:var(--text-4); }
   .bcap b { display:block; color:var(--text-2); font-weight:500; font-size:11px; letter-spacing:0; margin-bottom:1px; white-space:nowrap; }
+
+  /* ---- form text field (resting, bordered) ---- */
+  .ff { display:flex; flex-direction:column; gap:7px; width:100%; max-width:280px; }
+  .ff > label { font-size:11.5px; font-weight:500; color:var(--text-2); }
+  .ff-input { position:relative; display:flex; align-items:center; }
+  .ff-input > svg { position:absolute; left:10px; color:var(--text-3); pointer-events:none; }
+  .input {
+    width:100%; padding:8px 10px; border-radius:var(--radius-sm);
+    border:1px solid var(--border); background:var(--bg-input); color:var(--text-1);
+    font-size:12.5px; font-family:var(--font); outline:none;
+    transition: border-color var(--speed) var(--ease), box-shadow var(--speed) var(--ease);
+  }
+  .input::placeholder { color:var(--text-4); }
+  .input.has-ic { padding-left:32px; }
+  .input:focus { border-color:transparent; box-shadow:0 0 0 1px var(--accent-line); }
+  .input.err { border-color:color-mix(in srgb, var(--red) 45%, transparent); }
+  .input.err:focus { box-shadow:0 0 0 1px color-mix(in srgb, var(--red) 45%, transparent); }
+  .fhelp { font-size:11px; color:var(--text-3); line-height:1.45; }
+  .ferr { display:flex; align-items:center; gap:5px; font-size:11px; color:var(--red); }
+
+  /* ---- breadcrumb ---- */
+  .crumbs { display:flex; align-items:center; gap:2px; font-size:12.5px; flex-wrap:wrap; }
+  .crumbs .cr { display:inline-flex; align-items:center; gap:6px; padding:3px 7px; border-radius:5px; color:var(--text-3); cursor:pointer; transition:background-color var(--speed) var(--ease), color var(--speed) var(--ease); }
+  .crumbs .cr:hover { background:var(--bg-hover); color:var(--text-1); }
+  .crumbs .cr.current { color:var(--text-1); font-weight:500; cursor:default; }
+  .crumbs .cr.current:hover { background:transparent; }
+  .crumbs .sep { color:var(--text-4); display:grid; place-items:center; }
+
+  /* ---- avatar ---- */
+  .avatar { width:28px; height:28px; border-radius:99px; display:grid; place-items:center;
+    font-size:11px; font-weight:600; flex-shrink:0; position:relative; line-height:1; overflow:hidden; }
+  .avatar.sm { width:22px; height:22px; font-size:9.5px; }
+  .avatar.lg { width:38px; height:38px; font-size:14px; }
+  .avatar img { width:100%; height:100%; object-fit:cover; }
+  .avatar .pres { position:absolute; right:-1px; bottom:-1px; width:9px; height:9px; border-radius:99px;
+    background:var(--green); border:2px solid var(--bg-canvas); }
+  .avstack { display:flex; }
+  .avstack .avatar { border:2px solid var(--bg-canvas); margin-left:-8px; }
+  .avstack .avatar:first-child { margin-left:0; }
+  .avmore { background:var(--bg-elevated)!important; color:var(--text-3)!important; }
+
+  /* ---- count badge ---- */
+  .count { display:inline-grid; place-items:center; min-width:18px; height:18px; padding:0 5px;
+    border-radius:99px; font-family:var(--mono); font-size:10.5px; font-weight:600; font-variant-numeric:tabular-nums;
+    background:var(--bg-active); color:var(--text-2); line-height:1; }
+  .count.accent { background:var(--accent-soft); color:var(--accent); }
+  .count.notif { min-width:7px; width:7px; height:7px; padding:0; background:var(--red); }
+
+  /* ---- removable filter / tag chip ---- */
+  .tagchip { display:inline-flex; align-items:center; gap:6px; padding:3px 5px 3px 9px; border-radius:var(--radius-pill);
+    font-size:11.5px; background:var(--bg-elevated); border:1px solid var(--border); color:var(--text-2); white-space:nowrap; }
+  .tagchip .tk { font-family:var(--mono); font-size:10.5px; color:var(--text-4); }
+  .tagchip .tv { color:var(--text-1); }
+  .tagchip .rm { display:grid; place-items:center; width:16px; height:16px; border-radius:99px; border:none;
+    background:transparent; color:var(--text-4); cursor:pointer; transition:background-color var(--speed) var(--ease), color var(--speed) var(--ease); }
+  .tagchip .rm:hover { background:var(--bg-active); color:var(--text-1); }
+  .tagchip.accent { background:var(--accent-soft); border-color:color-mix(in srgb, var(--accent) 30%, transparent); }
+  .tagchip.accent .tv { color:var(--accent); }
+
+  /* ---- pagination ---- */
+  .pager { display:flex; align-items:center; justify-content:space-between; gap:14px; width:100%; font-size:11.5px; color:var(--text-3); }
+  .pager .rng { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .pager .rng b { color:var(--text-2); font-weight:500; font-family:var(--mono); }
+  .pages { display:flex; align-items:center; gap:2px; }
+  .pgbtn { display:grid; place-items:center; min-width:28px; height:28px; padding:0 8px; border-radius:6px;
+    border:1px solid transparent; background:transparent; color:var(--text-2); font-family:var(--mono);
+    font-size:12px; font-variant-numeric:tabular-nums; cursor:pointer; transition:background-color var(--speed) var(--ease), color var(--speed) var(--ease); }
+  .pgbtn:hover:not(:disabled):not(.active) { background:var(--bg-hover); color:var(--text-1); }
+  .pgbtn.active { background:var(--bg-active); color:var(--text-1); border-color:var(--border); }
+  .pgbtn:disabled { color:var(--text-4); cursor:default; }
+  .pgell { color:var(--text-4); padding:0 2px; }
+
+  /* ---- schema tree ---- */
+  .tree { width:100%; font-size:12.5px; user-select:none; }
+  .trow { display:flex; align-items:center; gap:7px; padding:5px 8px; border-radius:var(--radius-sm);
+    color:var(--text-2); cursor:pointer; transition:background-color var(--speed) var(--ease), color var(--speed) var(--ease); }
+  .trow:hover { background:var(--bg-hover); color:var(--text-1); }
+  .trow.active { background:var(--accent-soft); color:var(--text-1); }
+  .tcaret { width:14px; height:14px; display:grid; place-items:center; color:var(--text-4); flex-shrink:0;
+    transition:transform var(--speed) var(--ease); }
+  .trow.open > .tcaret { transform:rotate(90deg); }
+  .tcaret.leaf { visibility:hidden; }
+  .trow svg.tic { flex-shrink:0; }
+  .tname { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tname.mono { font-family:var(--mono); }
+  .tchildren { display:none; }
+  .tchildren.open { display:block; }
+  .tindent { padding-left:22px; }
+  .tindent2 { padding-left:40px; }
 </style>
 </head>
 <body class="ds">
@@ -356,7 +477,7 @@
           <div class="brow">
             <div class="bcell"><button class="btn-chip">Default</button><span class="bcap">rest</span></div>
             <div class="bcell"><button class="btn-chip" style="background:var(--bg-hover);color:var(--text-1);border-color:var(--border-strong);">Hover</button><span class="bcap">:hover</span></div>
-            <div class="bcell"><button class="btn-chip" style="outline:2px solid var(--accent);outline-offset:1px;color:var(--text-1);">Focus</button><span class="bcap">:focus-visible</span></div>
+            <div class="bcell"><button class="btn-chip" style="outline:1px solid var(--accent);outline-offset:1px;color:var(--text-1);">Focus</button><span class="bcap">:focus-visible</span></div>
             <div class="bcell"><button class="btn-chip active">Active</button><span class="bcap">:active / on</span></div>
             <div class="bcell"><button class="btn-primary disabled">Disabled</button><span class="bcap">:disabled</span></div>
           </div>
@@ -441,13 +562,14 @@
 
     <div class="spec">
       <h3>Tooltip</h3>
-      <p>Elevated surface, strong border, top sheen and a small pop shadow — a miniature overlay. 11.5px primary text; shortcut sits in a <code class="mono">--bg-active</code> mono chip. Appears after a 400ms hover delay, 6px from the anchor, no arrow.</p>
+      <p>Clean elevated surface, hairline border, soft drop shadow — no sheen or arrow. 13.5px primary text; each shortcut key is its own mono keycap with a quiet <code class="mono">--bg-active</code> fill. Appears after a 400ms hover delay, 6px from the anchor.</p>
       <div class="demo" style="gap:22px;align-items:flex-start;">
         <span class="tip-anchor">
           <button class="icon-btn hover"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg></button>
-          <span class="tooltip">Refresh table<span class="tkbd">⌘R</span></span>
+          <span class="tooltip">Refresh table<span class="tkeys"><span class="tkbd">⌘</span><span class="tkbd">R</span></span></span>
         </span>
-        <span class="tooltip">Run query<span class="tkbd">⌘↵</span></span>
+        <span class="tooltip">Attach images, files, or videos<span class="tkeys"><span class="tkbd">⌘</span><span class="tkbd">⇧</span><span class="tkbd">U</span></span></span>
+        <span class="tooltip">Run query<span class="tkeys"><span class="tkbd">⌘</span><span class="tkbd">↵</span></span></span>
         <span class="tooltip">Copied to clipboard</span>
         <span class="tooltip">updated_at<span class="tsub">timestamptz · not null</span></span>
       </div>
@@ -455,7 +577,7 @@
 
     <div class="spec">
       <h3>Inline cell editor</h3>
-      <p>Double-click a cell to edit. Field drops the border for a 2px accent outline and the elevated fill; numeric/uuid fields switch to mono.</p>
+      <p>Double-click a cell to edit. Field drops the border for a 1px accent outline and the elevated fill; numeric/uuid fields switch to mono.</p>
       <div class="demo col">
         <input class="field" value="ada@databuddy.io" />
         <input class="field mono" value="48213" style="margin-top:10px;" />
@@ -515,6 +637,29 @@
     </div>
 
     <div class="spec">
+      <h3>Number stepper</h3>
+      <p>A labelled numeric field bracketed by a <code class="mono">−</code> / <code class="mono">+</code> button group. The value is mono + tabular; the field and buttons share one bordered control on <code class="mono">--bg-input</code> with hairline seams. Focus rings the whole control; the relevant button disables at the min/max bound.</p>
+      <div class="demo" style="gap:30px;align-items:flex-start;">
+        <div class="nf">
+          <span class="nf-label">Row limit</span>
+          <div class="stepper">
+            <button class="step dec" aria-label="Decrease"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+            <input type="number" value="100" min="0" max="1000" step="50" />
+            <button class="step inc" aria-label="Increase"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+          </div>
+        </div>
+        <div class="nf">
+          <span class="nf-label">Timeout <span class="nf-unit">sec</span></span>
+          <div class="stepper">
+            <button class="step dec" aria-label="Decrease"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h14"/></svg></button>
+            <input type="number" value="0" min="0" max="60" step="5" />
+            <button class="step inc" aria-label="Increase"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
       <h3>Segmented control</h3>
       <p>An inline switcher for 2–4 exclusive options. Inset track, the active segment lifts onto <code class="mono">--bg-elevated</code> with a top sheen. Prefer over a dropdown when every option fits.</p>
       <div class="demo">
@@ -528,7 +673,7 @@
 
     <div class="spec">
       <h3>Select</h3>
-      <p>Reads like an input, opens a DS popover. Trigger shows a 2px accent-line ring while open; the chosen option fills accent-soft with a trailing check. Chevron flips on open.</p>
+      <p>Reads like an input, opens a DS popover. Trigger shows a 1px accent-line ring while open; the chosen option fills accent-soft with a trailing check. Chevron flips on open.</p>
       <div class="demo col" style="gap:12px;align-items:stretch;">
         <button class="sel-trigger open"><span style="flex:1;" class="mono">IBM Plex Mono</span><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="transform:rotate(180deg);"><path d="m6 9 6 6 6-6"/></svg></button>
         <div class="sel-pop">
@@ -658,6 +803,146 @@
       </div>
     </div>
 
+    <div class="spec">
+      <h3>Text field</h3>
+      <p>The resting form input — distinct from the inline cell editor, which is always in edit mode. Hairline border on <code class="mono">--bg-input</code>, label above, optional helper or error caption below. Focus rings with the accent; the error variant rings red.</p>
+      <div class="demo col" style="gap:16px;align-items:stretch;">
+        <div class="ff" style="max-width:none;">
+          <label>Connection name</label>
+          <div class="ff-input"><input class="input" value="Production · us-east-1" /></div>
+          <span class="fhelp">Shown in the connection switcher and command palette.</span>
+        </div>
+        <div class="ff" style="max-width:none;">
+          <label>Host</label>
+          <div class="ff-input"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="6" rx="2"/><rect x="2" y="14" width="20" height="6" rx="2"/><path d="M6 7h.01M6 17h.01"/></svg><input class="input has-ic err" value="db..internal:5432" /></div>
+          <span class="ferr"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/></svg>Invalid host — double dot.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Breadcrumb</h3>
+      <p>The location path through connection → schema → table. Ancestors are tertiary and hover to primary; the trailing segment is the current, non-interactive page. Chevron separators in quaternary.</p>
+      <div class="demo col" style="align-items:stretch;">
+        <nav class="crumbs">
+          <span class="cr"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>Production</span>
+          <span class="sep"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+          <span class="cr">public</span>
+          <span class="sep"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+          <span class="cr current"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg>customers</span>
+        </nav>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Avatar</h3>
+      <p>Initials on a hue-tinted disc, drawn from the semantic palette — never a new color. Three sizes, an optional green presence dot, and an overlapping stack with a <code class="mono">+N</code> overflow for collaborators.</p>
+      <div class="demo" style="gap:26px;">
+        <span class="avatar sm" style="background:color-mix(in srgb, var(--blue) 22%, var(--bg-elevated));color:var(--blue);">AL</span>
+        <span class="avatar" style="background:color-mix(in srgb, var(--accent) 24%, var(--bg-elevated));color:var(--accent);">AD<span class="pres"></span></span>
+        <span class="avatar lg" style="background:color-mix(in srgb, var(--purple) 22%, var(--bg-elevated));color:var(--purple);">SM</span>
+        <span class="avstack">
+          <span class="avatar" style="background:color-mix(in srgb, var(--green) 22%, var(--bg-elevated));color:var(--green);">LI</span>
+          <span class="avatar" style="background:color-mix(in srgb, var(--amber) 22%, var(--bg-elevated));color:var(--amber);">KO</span>
+          <span class="avatar" style="background:color-mix(in srgb, var(--teal) 22%, var(--bg-elevated));color:var(--teal);">RG</span>
+          <span class="avatar avmore">+4</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Count badge</h3>
+      <p>A small tabular-mono counter for nav rows, tabs and filters. Neutral by default; accent-soft when it belongs to the active context; a 7px red dot for an unread signal with no number.</p>
+      <div class="demo col" style="gap:1px;">
+        <div class="nav-item active"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span style="flex:1;">Tables</span><span class="count accent">24</span></div>
+        <div class="nav-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg><span style="flex:1;">Activity</span><span class="count">8</span></div>
+        <div class="nav-item"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg><span style="flex:1;">Alerts</span><span class="count notif"></span></div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <h3>Filter / tag chip</h3>
+      <p>A removable token for active filters and array/tag-type cell values. Mono key, primary value, a trailing × that fills on hover. The accent variant marks a filter currently applied to the grid.</p>
+      <div class="demo">
+        <span class="tagchip accent"><span class="tk">plan</span><span class="tv">= enterprise</span><button class="rm" aria-label="Remove"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
+        <span class="tagchip"><span class="tk">mrr</span><span class="tv">&gt; 500</span><button class="rm" aria-label="Remove"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
+        <span class="tagchip"><span class="tv">beta</span><button class="rm" aria-label="Remove"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></span>
+      </div>
+    </div>
+
+    <div class="spec wide">
+      <h3>Pagination</h3>
+      <p>The data-grid footer pager. A tabular-mono row range on the left; page tokens on the right with prev/next chevrons that disable at the ends, the current page filled neutral, and an ellipsis for elided ranges.</p>
+      <div class="demo" style="background:var(--bg-base);">
+        <div class="pager">
+          <span class="rng">Showing <b>1–100</b> of <b>4,820</b> rows</span>
+          <div class="pages">
+            <button class="pgbtn" disabled aria-label="Previous"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>
+            <button class="pgbtn active">1</button>
+            <button class="pgbtn">2</button>
+            <button class="pgbtn">3</button>
+            <span class="pgell">…</span>
+            <button class="pgbtn">49</button>
+            <button class="pgbtn" aria-label="Next"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec wide">
+      <h3>Schema tree</h3>
+      <p>The sidebar navigator for a connection: schemas hold tables, tables expand to columns. Disclosure carets rotate on open, the selected node fills <code class="mono">--accent-soft</code>, column rows carry mono names, a type badge, and key/constraint tags. Click any caret row to toggle.</p>
+      <div class="demo" style="padding:10px;">
+        <div class="tree">
+          <div class="trow open"><span class="tcaret"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span><svg class="tic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span class="tname">public</span><span class="count">12</span></div>
+          <div class="tchildren open">
+            <div class="trow open tindent"><span class="tcaret"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span><svg class="tic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg><span class="tname">customers</span></div>
+            <div class="tchildren open">
+              <div class="trow tindent2"><span class="tcaret leaf"></span><span class="mono">id</span><span class="tb" style="color:var(--t-int)">int8</span><span class="ctag" style="color:var(--amber);background:color-mix(in srgb, var(--amber) 13%, transparent);">PK</span></div>
+              <div class="trow tindent2"><span class="tcaret leaf"></span><span class="mono">email</span><span class="tb" style="color:var(--t-text)">varchar</span><span class="ctag" style="color:var(--teal);background:color-mix(in srgb, var(--teal) 13%, transparent);">UNIQUE</span></div>
+              <div class="trow active tindent2"><span class="tcaret leaf"></span><span class="mono">created_at</span><span class="tb" style="color:var(--t-time)">timestamptz</span></div>
+            </div>
+            <div class="trow tindent"><span class="tcaret"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span><svg class="tic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg><span class="tname">invoices</span></div>
+            <div class="trow tindent"><span class="tcaret"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span><svg class="tic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-3)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/></svg><span class="tname">subscriptions</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
+
+  <script>
+    document.querySelectorAll('.stepper').forEach(function (s) {
+      var input = s.querySelector('input');
+      var dec = s.querySelector('.step.dec');
+      var inc = s.querySelector('.step.inc');
+      var min = input.min !== '' ? +input.min : -Infinity;
+      var max = input.max !== '' ? +input.max : Infinity;
+      var step = +input.step || 1;
+      var clamp = function (v) { return Math.max(min, Math.min(max, v)); };
+      function sync() {
+        var v = clamp(+input.value || 0);
+        input.value = v;
+        dec.disabled = v <= min;
+        inc.disabled = v >= max;
+      }
+      dec.addEventListener('click', function () { input.value = clamp((+input.value || 0) - step); sync(); });
+      inc.addEventListener('click', function () { input.value = clamp((+input.value || 0) + step); sync(); });
+      input.addEventListener('change', sync);
+      sync();
+    });
+
+    // schema tree: clicking a parent row toggles its child group
+    document.querySelectorAll('.tree .trow').forEach(function (row) {
+      var caret = row.querySelector('.tcaret');
+      if (!caret || caret.classList.contains('leaf')) return;
+      row.addEventListener('click', function () {
+        var kids = row.nextElementSibling;
+        if (!kids || !kids.classList.contains('tchildren')) return;
+        row.classList.toggle('open');
+        kids.classList.toggle('open');
+      });
+    });
+  </script>
 </body>
 </html>

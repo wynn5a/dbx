@@ -22,6 +22,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useToast } from "@/composables/useToast";
 import DatabaseIcon from "@/components/icons/DatabaseIcon.vue";
+import LabeledNumberField from "@/components/connection/LabeledNumberField.vue";
 import * as api from "@/lib/api";
 import { isTauriRuntime } from "@/lib/tauriRuntime";
 import { applyParsedConnectionUrl, normalizeMongoConnectionString, parseConnectionUrl } from "@/lib/connectionUrl";
@@ -1942,10 +1943,7 @@ function openExternalUrl(url: string) {
 <template>
   <Dialog v-model:open="open">
     <DialogContent
-      :class="[
-        'ds-dialog gap-0 p-0 flex flex-col overflow-hidden',
-        dialogStep === 'select' ? 'sm:max-w-[760px]' : 'sm:max-w-[560px]',
-      ]"
+      :class="['ds-dialog gap-0 p-0 flex flex-col overflow-hidden sm:max-w-[760px]']"
       :show-close-button="false"
       @interact-outside.prevent
     >
@@ -1974,7 +1972,9 @@ function openExternalUrl(url: string) {
           <div class="space-y-4">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
               <div class="flex items-center gap-2">
-                <div class="flex shrink-0 rounded-lg border bg-muted/40 p-0.5">
+                <div
+                  class="flex shrink-0 rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] p-0.5"
+                >
                   <Button
                     type="button"
                     size="icon-sm"
@@ -1997,7 +1997,7 @@ function openExternalUrl(url: string) {
                   </Button>
                 </div>
                 <div class="relative w-full sm:w-64">
-                  <Search class="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Search class="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--ds-text-3)]" />
                   <Input
                     v-model="dbSearchQuery"
                     class="h-9 pl-8"
@@ -2018,18 +2018,18 @@ function openExternalUrl(url: string) {
                     v-for="opt in category.options"
                     :key="opt.value"
                     type="button"
-                    class="group flex min-h-24 flex-col items-center justify-center gap-2 rounded-xl border bg-background/70 p-3 text-center transition hover:-translate-y-0.5 hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    class="group flex min-h-24 flex-col items-center justify-center gap-2 rounded-[var(--ds-radius)] border bg-[var(--ds-bg-panel)] p-3 text-center transition hover:-translate-y-0.5 hover:border-[var(--ds-accent-line)] hover:bg-[var(--ds-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]"
                     :class="
                       selectedType === opt.value
-                        ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/30'
-                        : 'border-border'
+                        ? 'border-[var(--ds-accent)] bg-[var(--ds-accent-soft)] shadow-sm'
+                        : 'border-[var(--ds-border)]'
                     "
                     :aria-pressed="selectedType === opt.value"
                     @click="onDbTypeChange(opt.value)"
                     @dblclick="goToConnectionStep(opt.value)"
                   >
                     <span
-                      class="flex h-10 w-10 items-center justify-center rounded-xl bg-muted/60 transition group-hover:bg-background"
+                      class="flex h-10 w-10 items-center justify-center rounded-[var(--ds-radius)] bg-[var(--ds-bg-canvas)] transition group-hover:bg-[var(--ds-bg-panel)]"
                     >
                       <DatabaseIcon :db-type="iconTypeMap[opt.value]" class="h-6 w-6" />
                     </span>
@@ -2042,11 +2042,11 @@ function openExternalUrl(url: string) {
                     v-for="opt in category.options"
                     :key="opt.value"
                     type="button"
-                    class="flex items-center gap-3 rounded-lg border bg-background px-3 py-2 text-left transition hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    class="flex items-center gap-3 rounded-[var(--ds-radius-sm)] border bg-[var(--ds-bg-panel)] px-3 py-2 text-left transition hover:border-[var(--ds-accent-line)] hover:bg-[var(--ds-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]"
                     :class="
                       selectedType === opt.value
-                        ? 'border-primary bg-primary/10 ring-1 ring-primary/30'
-                        : 'border-border'
+                        ? 'border-[var(--ds-accent)] bg-[var(--ds-accent-soft)]'
+                        : 'border-[var(--ds-border)]'
                     "
                     :aria-pressed="selectedType === opt.value"
                     @click="onDbTypeChange(opt.value)"
@@ -2054,14 +2054,14 @@ function openExternalUrl(url: string) {
                   >
                     <DatabaseIcon :db-type="iconTypeMap[opt.value]" class="h-5 w-5 shrink-0" />
                     <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ opt.label }}</span>
-                    <span class="text-xs text-muted-foreground">{{ category.title }}</span>
+                    <span class="text-xs text-[var(--ds-text-3)]">{{ category.title }}</span>
                   </button>
                 </div>
               </section>
 
               <div
                 v-if="!hasDbPickerResults"
-                class="rounded-xl border border-dashed py-12 text-center text-sm text-muted-foreground"
+                class="rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border)] py-12 text-center text-sm text-[var(--ds-text-3)]"
               >
                 {{ t("connection.noDatabaseMatches") }}
               </div>
@@ -2136,12 +2136,12 @@ function openExternalUrl(url: string) {
                     <Label class="text-right">{{ t("connection.type") }}</Label>
                     <button
                       type="button"
-                      class="col-span-3 flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-2 hover:bg-muted/40 cursor-pointer transition"
+                      class="col-span-3 flex items-center gap-2 rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] px-3 py-2 hover:bg-[var(--ds-bg-hover)] cursor-pointer transition"
                       @click="backToDatabasePicker()"
                     >
                       <DatabaseIcon :db-type="selectedDbIcon" class="h-4 w-4 shrink-0" />
                       <span class="min-w-0 flex-1 truncate text-sm text-left">{{ selectedProfile().label }}</span>
-                      <Pencil class="h-3 w-3 text-muted-foreground" />
+                      <Pencil class="h-3 w-3 text-[var(--ds-text-3)]" />
                     </button>
                   </div>
 
@@ -2202,10 +2202,12 @@ function openExternalUrl(url: string) {
                         v-for="color in colorOptions"
                         :key="color.value || 'none'"
                         type="button"
-                        class="h-6 w-6 rounded-full border ring-offset-background transition hover:scale-105"
+                        class="h-6 w-6 rounded-full border ring-offset-[var(--ds-bg-popover)] transition hover:scale-105"
                         :class="[
                           color.class,
-                          form.color === color.value ? 'ring-2 ring-ring ring-offset-2' : 'border-border',
+                          form.color === color.value
+                            ? 'ring-2 ring-[var(--ds-accent)] ring-offset-2'
+                            : 'border-[var(--ds-border)]',
                         ]"
                         :title="t(color.labelKey)"
                         @click="handlePresetClick(color.value)"
@@ -2217,15 +2219,17 @@ function openExternalUrl(url: string) {
                             class="h-6 w-6 rounded-full border flex items-center justify-center hover:scale-105 transition"
                             :class="[
                               !isPresetColor(form.color) && form.color
-                                ? 'border-border ring-2 ring-ring ring-offset-2'
-                                : 'border-dashed border-border',
+                                ? 'border-[var(--ds-border)] ring-2 ring-[var(--ds-accent)] ring-offset-2'
+                                : 'border-dashed border-[var(--ds-border)]',
                             ]"
                             :style="!isPresetColor(form.color) && form.color ? { backgroundColor: form.color } : {}"
                             :title="t('connection.colorCustom')"
                           >
                             <Pipette
                               class="h-3.5 w-3.5"
-                              :class="!isPresetColor(form.color) && form.color ? 'text-white' : 'text-muted-foreground'"
+                              :class="
+                                !isPresetColor(form.color) && form.color ? 'text-white' : 'text-[var(--ds-text-3)]'
+                              "
                             />
                           </button>
                         </PopoverTrigger>
@@ -2316,7 +2320,7 @@ function openExternalUrl(url: string) {
                         <div class="flex items-start gap-1">
                           <textarea
                             v-model="jdbcDriverPathsInput"
-                            class="flex min-h-12 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            class="flex min-h-12 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-3 py-2 text-sm shadow-sm placeholder:text-[var(--ds-text-3)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ds-accent-line)]"
                             :placeholder="t('connection.jdbcDriverPathsPlaceholder')"
                           />
                           <Tooltip v-if="isDesktop">
@@ -2339,7 +2343,7 @@ function openExternalUrl(url: string) {
                     <div class="grid grid-cols-4 items-start gap-4">
                       <span />
                       <div class="col-span-3 space-y-2">
-                        <p class="text-xs text-muted-foreground">
+                        <p class="text-xs text-[var(--ds-text-3)]">
                           {{ t("connection.jdbcPluginHint") }}
                         </p>
                         <div class="flex flex-wrap gap-2">
@@ -2381,7 +2385,7 @@ function openExternalUrl(url: string) {
                             <TooltipContent>{{ t("connection.createDuckDbFile") }}</TooltipContent>
                           </Tooltip>
                         </div>
-                        <p v-if="supportsMemoryDatabasePath" class="text-xs text-muted-foreground">
+                        <p v-if="supportsMemoryDatabasePath" class="text-xs text-[var(--ds-text-3)]">
                           {{ t("connection.memoryDatabasePathHint") }}
                         </p>
                       </div>
@@ -2392,7 +2396,7 @@ function openExternalUrl(url: string) {
                         <div class="flex items-start gap-1">
                           <textarea
                             v-model="sqliteExtensionPaths"
-                            class="flex min-h-[76px] flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            class="flex min-h-[76px] flex-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-3 py-2 text-sm shadow-sm placeholder:text-[var(--ds-text-3)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ds-accent-line)]"
                             :placeholder="t('connection.sqliteExtensionsPlaceholder')"
                             spellcheck="false"
                           />
@@ -2410,7 +2414,7 @@ function openExternalUrl(url: string) {
                             <TooltipContent>{{ t("connection.sqliteExtensionBrowse") }}</TooltipContent>
                           </Tooltip>
                         </div>
-                        <p class="text-xs text-muted-foreground">
+                        <p class="text-xs text-[var(--ds-text-3)]">
                           {{ t("connection.sqliteExtensionsHint") }}
                         </p>
                       </div>
@@ -2471,7 +2475,7 @@ function openExternalUrl(url: string) {
                         <Label class="text-right mt-2">{{ t("connection.redisSentinelNodes") }}</Label>
                         <textarea
                           v-model="form.redis_sentinel_nodes"
-                          class="col-span-3 flex min-h-[76px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          class="col-span-3 flex min-h-[76px] w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-3 py-2 text-sm shadow-sm placeholder:text-[var(--ds-text-3)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ds-accent-line)]"
                           placeholder="sentinel-1:26379&#10;sentinel-2:26379"
                           spellcheck="false"
                         />
@@ -2492,7 +2496,9 @@ function openExternalUrl(url: string) {
                         <Label class="text-right text-xs">{{ t("connection.redisSentinelTls") }}</Label>
                         <label class="col-span-3 inline-flex items-center gap-2">
                           <input type="checkbox" v-model="form.redis_sentinel_tls" class="mr-0" />
-                          <span class="text-xs text-muted-foreground">{{ t("connection.redisSentinelTlsHint") }}</span>
+                          <span class="text-xs text-[var(--ds-text-3)]">{{
+                            t("connection.redisSentinelTlsHint")
+                          }}</span>
                         </label>
                       </div>
                     </template>
@@ -2501,7 +2507,7 @@ function openExternalUrl(url: string) {
                         <Label class="text-right mt-2">{{ t("connection.redisClusterNodes") }}</Label>
                         <textarea
                           v-model="form.redis_cluster_nodes"
-                          class="col-span-3 flex min-h-[76px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          class="col-span-3 flex min-h-[76px] w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-3 py-2 text-sm shadow-sm placeholder:text-[var(--ds-text-3)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ds-accent-line)]"
                           placeholder="redis-1:6379&#10;redis-2:6379"
                           spellcheck="false"
                         />
@@ -2534,11 +2540,11 @@ function openExternalUrl(url: string) {
                       <div class="col-span-3 space-y-1">
                         <textarea
                           v-model="etcdEndpointsLines"
-                          class="flex min-h-[76px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          class="flex min-h-[76px] w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-3 py-2 text-sm shadow-sm placeholder:text-[var(--ds-text-3)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ds-accent-line)]"
                           placeholder="http://127.0.0.1:2379&#10;https://etcd-2:2379"
                           spellcheck="false"
                         />
-                        <p class="text-xs text-muted-foreground">
+                        <p class="text-xs text-[var(--ds-text-3)]">
                           {{ t("connection.etcdEndpointsHint") }}
                         </p>
                       </div>
@@ -2571,7 +2577,7 @@ function openExternalUrl(url: string) {
                         <Label class="text-right mt-2">URL</Label>
                         <textarea
                           v-model="form.connection_string"
-                          class="col-span-3 flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          class="col-span-3 flex min-h-[80px] w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-3 py-2 text-sm shadow-sm placeholder:text-[var(--ds-text-3)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--ds-accent-line)]"
                           placeholder="mongodb+srv://user:pass@cluster.mongodb.net/mydb"
                         />
                       </div>
@@ -2636,7 +2642,7 @@ function openExternalUrl(url: string) {
                       </div>
                       <div class="grid grid-cols-4 items-start gap-4">
                         <span />
-                        <p class="col-span-3 text-xs text-muted-foreground">
+                        <p class="col-span-3 text-xs text-[var(--ds-text-3)]">
                           {{ t("connection.mongoLegacyHint") }}
                         </p>
                       </div>
@@ -2669,15 +2675,15 @@ function openExternalUrl(url: string) {
                     <div v-if="form.db_type === 'oracle'" class="grid grid-cols-4 items-center gap-4">
                       <Label class="text-right text-xs">{{ t("connection.mode") }}</Label>
                       <div
-                        class="col-span-3 grid h-8 grid-cols-2 overflow-hidden rounded-md border border-input bg-muted/30 p-0.5"
+                        class="col-span-3 grid h-8 grid-cols-2 overflow-hidden rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] p-0.5"
                       >
                         <button
                           type="button"
                           class="h-7 rounded-sm px-3 text-sm transition-colors"
                           :class="
                             form.oracle_connection_type !== 'sid'
-                              ? 'bg-background text-foreground shadow-sm'
-                              : 'text-muted-foreground hover:text-foreground'
+                              ? 'bg-[var(--ds-bg-panel)] text-[var(--ds-text-1)] shadow-sm'
+                              : 'text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]'
                           "
                           :aria-pressed="form.oracle_connection_type !== 'sid'"
                           @click="form.oracle_connection_type = 'service_name'"
@@ -2689,8 +2695,8 @@ function openExternalUrl(url: string) {
                           class="h-7 rounded-sm px-3 text-sm transition-colors"
                           :class="
                             form.oracle_connection_type === 'sid'
-                              ? 'bg-background text-foreground shadow-sm'
-                              : 'text-muted-foreground hover:text-foreground'
+                              ? 'bg-[var(--ds-bg-panel)] text-[var(--ds-text-1)] shadow-sm'
+                              : 'text-[var(--ds-text-3)] hover:text-[var(--ds-text-1)]'
                           "
                           :aria-pressed="form.oracle_connection_type === 'sid'"
                           @click="form.oracle_connection_type = 'sid'"
@@ -2702,10 +2708,10 @@ function openExternalUrl(url: string) {
 
                     <div v-if="shouldShowAgentDriverInstallHint" class="grid grid-cols-4 items-center gap-4">
                       <span />
-                      <p class="col-span-3 text-xs text-muted-foreground">
+                      <p class="col-span-3 text-xs text-[var(--ds-text-3)]">
                         {{ t("connection.driverInstallHintPrefix")
                         }}<a
-                          class="underline cursor-pointer text-primary hover:text-primary/80"
+                          class="underline cursor-pointer text-[var(--ds-accent)] hover:opacity-80"
                           @click="emit('openDriverStore')"
                           >{{ t("toolbar.driverManager") }}</a
                         >{{ t("connection.driverInstallHintSuffix") }}
@@ -2735,7 +2741,7 @@ function openExternalUrl(url: string) {
                       <Label class="text-right text-xs">SYSDBA</Label>
                       <label class="col-span-3 flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" v-model="form.sysdba" class="mr-0" :disabled="isOracleSysUser(form)" />
-                        <span class="text-xs text-muted-foreground">as SYSDBA</span>
+                        <span class="text-xs text-[var(--ds-text-3)]">as SYSDBA</span>
                       </label>
                     </div>
 
@@ -2772,7 +2778,7 @@ function openExternalUrl(url: string) {
                     <Label class="text-right text-xs">SSL/TLS</Label>
                     <label class="col-span-3 flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" v-model="form.ssl" class="mr-0" />
-                      <span class="text-xs text-muted-foreground">{{ t("connection.sslEnable") }}</span>
+                      <span class="text-xs text-[var(--ds-text-3)]">{{ t("connection.sslEnable") }}</span>
                     </label>
                   </div>
 
@@ -2780,7 +2786,7 @@ function openExternalUrl(url: string) {
                     <Label class="text-right text-xs">{{ t("connection.redisTlsInsecure") }}</Label>
                     <label class="col-span-3 flex items-start gap-2 cursor-pointer">
                       <input type="checkbox" v-model="redisTlsInsecure" class="mr-0 mt-0.5" :disabled="!form.ssl" />
-                      <span class="text-xs leading-5 text-muted-foreground">
+                      <span class="text-xs leading-5 text-[var(--ds-text-3)]">
                         {{ t("connection.redisTlsInsecureHint") }}
                       </span>
                     </label>
@@ -2866,7 +2872,7 @@ function openExternalUrl(url: string) {
                             <TooltipContent>{{ t("connection.etcdClientKeyBrowse") }}</TooltipContent>
                           </Tooltip>
                         </div>
-                        <p class="text-[11px] leading-4 text-muted-foreground">
+                        <p class="text-[11px] leading-4 text-[var(--ds-text-3)]">
                           {{ t("connection.etcdClientCertHint") }}
                         </p>
                       </div>
@@ -2922,7 +2928,7 @@ function openExternalUrl(url: string) {
                             <TooltipContent>{{ t("connection.caCertPathBrowse") }}</TooltipContent>
                           </Tooltip>
                         </div>
-                        <p class="text-[11px] leading-4 text-muted-foreground">
+                        <p class="text-[11px] leading-4 text-[var(--ds-text-3)]">
                           {{ t("connection.mysqlCaCertHint") }}
                         </p>
                       </div>
@@ -2980,7 +2986,7 @@ function openExternalUrl(url: string) {
                             <TooltipContent>{{ t("connection.mysqlClientKeyBrowse") }}</TooltipContent>
                           </Tooltip>
                         </div>
-                        <p class="text-[11px] leading-4 text-muted-foreground">
+                        <p class="text-[11px] leading-4 text-[var(--ds-text-3)]">
                           {{ t("connection.mysqlClientCertHint") }}
                         </p>
                       </div>
@@ -3034,7 +3040,7 @@ function openExternalUrl(url: string) {
                             <TooltipContent>{{ t("connection.postgresRootCertBrowse") }}</TooltipContent>
                           </Tooltip>
                         </div>
-                        <p class="text-[11px] leading-4 text-muted-foreground">
+                        <p class="text-[11px] leading-4 text-[var(--ds-text-3)]">
                           {{ t("connection.postgresRootCertHint") }}
                         </p>
                       </div>
@@ -3092,7 +3098,7 @@ function openExternalUrl(url: string) {
                             <TooltipContent>{{ t("connection.postgresClientKeyBrowse") }}</TooltipContent>
                           </Tooltip>
                         </div>
-                        <p class="text-[11px] leading-4 text-muted-foreground">
+                        <p class="text-[11px] leading-4 text-[var(--ds-text-3)]">
                           {{ t("connection.postgresClientCertHint") }}
                         </p>
                       </div>
@@ -3129,71 +3135,68 @@ function openExternalUrl(url: string) {
 
               <TabsContent value="advanced" class="m-0">
                 <div class="grid gap-4 py-4 pr-2 max-h-[65vh] overflow-y-auto">
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right text-xs">{{ t("connection.connectTimeout") }}</Label>
-                    <Input
-                      v-model.number="form.connect_timeout_secs"
-                      type="number"
-                      min="1"
-                      max="300"
-                      step="1"
-                      class="col-span-3"
-                    />
-                  </div>
-                  <div class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right text-xs">{{ t("connection.queryTimeout") }}</Label>
-                    <Input
-                      v-model.number="form.query_timeout_secs"
-                      type="number"
-                      min="0"
-                      max="300"
-                      step="1"
-                      class="col-span-3"
-                    />
-                  </div>
-                  <div v-show="form.db_type === 'mongodb'" class="grid grid-cols-4 items-center gap-4">
-                    <Label class="text-right text-xs">{{ t("connection.idleTimeout") }}</Label>
-                    <Input
-                      v-model.number="form.idle_timeout_secs"
-                      type="number"
-                      min="0"
-                      max="600"
-                      step="1"
-                      class="col-span-3"
-                    />
-                  </div>
+                  <LabeledNumberField
+                    v-model="form.connect_timeout_secs"
+                    :label="t('connection.connectTimeout')"
+                    :unit="t('connection.unitSeconds')"
+                    min="1"
+                    max="300"
+                    step="1"
+                  />
+                  <LabeledNumberField
+                    v-model="form.query_timeout_secs"
+                    :label="t('connection.queryTimeout')"
+                    :unit="t('connection.unitSeconds')"
+                    min="0"
+                    max="300"
+                    step="1"
+                  />
+                  <LabeledNumberField
+                    v-show="form.db_type === 'mongodb'"
+                    v-model="form.idle_timeout_secs"
+                    :label="t('connection.idleTimeout')"
+                    :unit="t('connection.unitSeconds')"
+                    min="0"
+                    max="600"
+                    step="1"
+                  />
                 </div>
               </TabsContent>
 
               <TabsContent v-if="canUseTransportLayers" value="transport" class="m-0">
-                <div class="grid gap-4 py-4 pr-2 max-h-[65vh] overflow-y-auto">
-                  <div class="grid grid-cols-4 items-start gap-4">
-                    <Label class="pt-2 text-right text-xs">{{ t("connection.sshHops") }}</Label>
-                    <div class="col-span-3 grid gap-3">
-                      <div class="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
-                        <template v-for="(segment, index) in transportPathSegments" :key="`${segment}-${index}`">
-                          <span class="rounded border bg-muted/40 px-2 py-1">{{ segment }}</span>
-                          <ChevronRight v-if="index < transportPathSegments.length - 1" class="h-3 w-3" />
-                        </template>
-                      </div>
-                      <div class="grid gap-2">
+                <div class="py-4">
+                  <div class="mb-3 flex flex-wrap items-center gap-1 text-[11px] text-[var(--ds-text-3)]">
+                    <template v-for="(segment, index) in transportPathSegments" :key="`${segment}-${index}`">
+                      <span
+                        class="rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] px-2 py-1"
+                        >{{ segment }}</span
+                      >
+                      <ChevronRight v-if="index < transportPathSegments.length - 1" class="h-3 w-3" />
+                    </template>
+                  </div>
+
+                  <div class="flex gap-4">
+                    <div class="ds-card flex w-56 shrink-0 flex-col gap-2 p-2">
+                      <span class="ds-section-label px-1">{{ t("connection.sshHops") }}</span>
+                      <div class="flex max-h-[44vh] flex-col gap-1.5 overflow-y-auto">
                         <button
                           v-for="(hop, index) in transportLayers"
                           :key="hop.id"
                           type="button"
                           draggable="true"
-                          class="flex min-h-10 items-center gap-2 rounded-md border px-2 text-left text-xs transition-colors"
+                          class="flex min-h-9 items-center gap-2 rounded-[var(--ds-radius-sm)] border px-2 py-1 text-left text-xs transition-colors"
                           :class="
-                            hop.id === selectedTransportLayer?.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
+                            hop.id === selectedTransportLayer?.id
+                              ? 'border-[var(--ds-accent)] bg-[var(--ds-accent-soft)]'
+                              : 'border-[var(--ds-border)] hover:bg-[var(--ds-bg-hover)]'
                           "
                           @click="selectedTransportLayerId = hop.id"
                           @dragstart="draggedTransportLayerId = hop.id"
                           @dragover.prevent
                           @drop="dropTransportLayer(hop.id)"
                         >
-                          <GripVertical class="h-4 w-4 shrink-0 text-muted-foreground" />
-                          <span class="w-5 shrink-0 text-muted-foreground">{{ index + 1 }}</span>
-                          <input v-model="hop.enabled" type="checkbox" class="mr-0" @click.stop />
+                          <GripVertical class="h-4 w-4 shrink-0 text-[var(--ds-text-4)]" />
+                          <input v-model="hop.enabled" type="checkbox" class="mr-0 shrink-0" @click.stop />
                           <span class="min-w-0 flex-1 truncate">
                             {{
                               hop.name ||
@@ -3203,13 +3206,41 @@ function openExternalUrl(url: string) {
                                 : t("connection.sshHopDefaultName", { index: index + 1 }))
                             }}
                           </span>
+                          <span
+                            class="shrink-0 rounded-[var(--ds-radius-pill)] bg-[var(--ds-bg-active)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--ds-text-3)]"
+                          >
+                            {{ hop.type === "proxy" ? "Proxy" : "SSH" }}
+                          </span>
+                        </button>
+                        <p
+                          v-if="!transportLayers.length"
+                          class="px-1 py-3 text-center text-[11px] leading-5 text-[var(--ds-text-3)]"
+                        >
+                          {{ t("connection.sshHopEmpty") }}
+                        </p>
+                      </div>
+                      <div class="flex flex-col gap-1.5 border-t border-[var(--ds-border-soft)] pt-2">
+                        <Button type="button" variant="outline" size="sm" class="justify-start" @click="addSshTunnel">
+                          <Plus class="mr-1.5 h-3.5 w-3.5" />
+                          {{ t("connection.sshHopAdd") }}
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" class="justify-start" @click="addProxyTunnel">
+                          <Plus class="mr-1.5 h-3.5 w-3.5" />
+                          {{ t("connection.proxy") }}
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div class="min-w-0 flex-1">
+                      <template v-if="selectedTransportLayer">
+                        <div class="mb-3 flex items-center justify-end gap-1">
                           <Tooltip>
                             <TooltipTrigger as-child>
                               <Button
                                 variant="ghost"
-                                size="icon"
-                                :disabled="index === 0"
-                                @click.stop="moveTransportLayer(hop.id, -1)"
+                                size="icon-sm"
+                                :disabled="transportLayers.findIndex((l) => l.id === selectedTransportLayer?.id) === 0"
+                                @click="moveTransportLayer(selectedTransportLayer.id, -1)"
                               >
                                 <ArrowUp class="h-3.5 w-3.5" />
                               </Button>
@@ -3220,224 +3251,230 @@ function openExternalUrl(url: string) {
                             <TooltipTrigger as-child>
                               <Button
                                 variant="ghost"
-                                size="icon"
-                                :disabled="index === transportLayers.length - 1"
-                                @click.stop="moveTransportLayer(hop.id, 1)"
+                                size="icon-sm"
+                                :disabled="
+                                  transportLayers.findIndex((l) => l.id === selectedTransportLayer?.id) ===
+                                  transportLayers.length - 1
+                                "
+                                @click="moveTransportLayer(selectedTransportLayer.id, 1)"
                               >
                                 <ArrowDown class="h-3.5 w-3.5" />
                               </Button>
                             </TooltipTrigger>
                             <TooltipContent>{{ t("connection.sshHopMoveDown") }}</TooltipContent>
                           </Tooltip>
-                        </button>
-                      </div>
-                      <div class="flex items-center gap-2">
-                        <Button type="button" variant="outline" size="sm" @click="addSshTunnel">
-                          <Plus class="mr-1.5 h-3.5 w-3.5" />
-                          {{ t("connection.sshHopAdd") }}
-                        </Button>
-                        <Button type="button" variant="outline" size="sm" @click="addProxyTunnel">
-                          <Plus class="mr-1.5 h-3.5 w-3.5" />
-                          {{ t("connection.proxy") }}
-                        </Button>
-                        <Button
-                          v-if="selectedTransportLayer"
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          @click="duplicateTransportLayer(selectedTransportLayer)"
+                          <div class="mx-1 h-4 w-px bg-[var(--ds-border)]" />
+                          <Tooltip>
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                @click="duplicateTransportLayer(selectedTransportLayer)"
+                              >
+                                <Copy class="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.sshHopDuplicate") }}</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger as-child>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                @click="removeTransportLayer(selectedTransportLayer.id)"
+                              >
+                                <Trash2 class="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{{ t("connection.sshHopDelete") }}</TooltipContent>
+                          </Tooltip>
+                        </div>
+
+                        <div class="grid gap-3">
+                          <div class="grid grid-cols-4 items-center gap-4">
+                            <Label class="text-right text-xs">{{ t("connection.sshHopName") }}</Label>
+                            <Input
+                              v-model="selectedTransportLayer.name"
+                              class="col-span-3"
+                              :placeholder="t('connection.sshHopNamePlaceholder')"
+                            />
+                          </div>
+                          <div class="grid grid-cols-4 items-center gap-4">
+                            <Label class="text-right text-xs">Type</Label>
+                            <Select
+                              :model-value="selectedTransportLayer.type"
+                              @update:model-value="(value: any) => changeSelectedTransportLayerType(value)"
+                            >
+                              <SelectTrigger class="col-span-3 h-9">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="ssh">SSH</SelectItem>
+                                <SelectItem value="proxy">Proxy</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <template v-if="selectedSshLayer">
+                            <div class="grid grid-cols-4 items-center gap-4">
+                              <Label class="text-right text-xs">{{ t("connection.sshHost") }}</Label>
+                              <Input
+                                v-model="selectedSshLayer.host"
+                                class="col-span-2"
+                                placeholder="ssh.example.com"
+                                :disabled="selectedSshLayer.enabled === false"
+                              />
+                              <Input
+                                v-model.number="selectedSshLayer.port"
+                                type="number"
+                                min="1"
+                                max="65535"
+                                class="col-span-1"
+                                :disabled="selectedSshLayer.enabled === false"
+                              />
+                            </div>
+                            <div class="grid grid-cols-4 items-center gap-4">
+                              <Label class="text-right text-xs">{{ t("connection.sshUser") }}</Label>
+                              <Input
+                                v-model="selectedSshLayer.user"
+                                class="col-span-3"
+                                placeholder="root"
+                                :disabled="selectedSshLayer.enabled === false"
+                              />
+                            </div>
+                            <div class="grid grid-cols-4 items-center gap-4">
+                              <Label class="text-right text-xs">{{ t("connection.sshPassword") }}</Label>
+                              <Input
+                                v-model="selectedSshLayer.password"
+                                type="password"
+                                class="col-span-3"
+                                :placeholder="t('connection.sshPasswordPlaceholder')"
+                                :disabled="selectedSshLayer.enabled === false"
+                              />
+                            </div>
+                            <div class="grid grid-cols-4 items-center gap-4">
+                              <Label class="text-right text-xs">{{ t("connection.sshKeyPath") }}</Label>
+                              <div class="col-span-3 flex items-center gap-1">
+                                <Input
+                                  v-model="selectedSshLayer.key_path"
+                                  class="flex-1"
+                                  placeholder="~/.ssh/id_rsa"
+                                  :disabled="selectedSshLayer.enabled === false"
+                                />
+                                <Tooltip v-if="isDesktop">
+                                  <TooltipTrigger as-child>
+                                    <Button
+                                      variant="outline"
+                                      size="icon-lg"
+                                      class="shrink-0"
+                                      :disabled="selectedSshLayer.enabled === false"
+                                      @click="browseSshKeyPath(selectedSshLayer)"
+                                    >
+                                      <FolderOpen class="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>{{ t("connection.sshKeyPathBrowse") }}</TooltipContent>
+                                </Tooltip>
+                              </div>
+                            </div>
+                            <div class="grid grid-cols-4 items-center gap-4">
+                              <Label class="text-right text-xs">{{ t("connection.sshKeyPassphrase") }}</Label>
+                              <Input
+                                v-model="selectedSshLayer.key_passphrase"
+                                type="password"
+                                class="col-span-3"
+                                :placeholder="t('connection.sshKeyPassphrasePlaceholder')"
+                                :disabled="selectedSshLayer.enabled === false"
+                              />
+                            </div>
+                            <LabeledNumberField
+                              v-model="selectedSshLayer.connect_timeout_secs"
+                              :label="t('connection.sshConnectTimeout')"
+                              :unit="t('connection.unitSeconds')"
+                              min="1"
+                              max="300"
+                              step="1"
+                              :disabled="selectedSshLayer.enabled === false"
+                            />
+                            <div class="grid grid-cols-4 items-center gap-4">
+                              <span />
+                              <label class="col-span-3 flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  v-model="selectedSshLayer.expose_lan"
+                                  class="mr-0"
+                                  :disabled="selectedSshLayer.enabled === false"
+                                />
+                                <span class="text-xs text-[var(--ds-text-3)]">{{ t("connection.sshExposeLan") }}</span>
+                              </label>
+                            </div>
+                          </template>
+                          <template v-else-if="selectedProxyLayer">
+                            <div class="grid grid-cols-4 items-center gap-4">
+                              <Label class="text-right text-xs">{{ t("connection.proxyType") }}</Label>
+                              <Select
+                                :model-value="selectedProxyLayer.proxy_type || 'socks5'"
+                                :disabled="selectedProxyLayer.enabled === false"
+                                @update:model-value="updateSelectedProxyType"
+                              >
+                                <SelectTrigger class="col-span-3 h-9">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="socks5">SOCKS5</SelectItem>
+                                  <SelectItem value="http">HTTP CONNECT</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div class="grid grid-cols-4 items-center gap-4">
+                              <Label class="text-right text-xs">{{ t("connection.proxyHost") }}</Label>
+                              <Input
+                                v-model="selectedProxyLayer.host"
+                                class="col-span-2"
+                                placeholder="127.0.0.1"
+                                :disabled="selectedProxyLayer.enabled === false"
+                              />
+                              <Input
+                                v-model.number="selectedProxyLayer.port"
+                                type="number"
+                                class="col-span-1"
+                                :disabled="selectedProxyLayer.enabled === false"
+                              />
+                            </div>
+                            <div class="grid grid-cols-4 items-center gap-4">
+                              <Label class="text-right text-xs">{{ t("connection.proxyUsername") }}</Label>
+                              <Input
+                                v-model="selectedProxyLayer.username"
+                                class="col-span-3"
+                                :placeholder="t('connection.proxyUsernamePlaceholder')"
+                                :disabled="selectedProxyLayer.enabled === false"
+                              />
+                            </div>
+                            <div class="grid grid-cols-4 items-center gap-4">
+                              <Label class="text-right text-xs">{{ t("connection.proxyPassword") }}</Label>
+                              <Input
+                                v-model="selectedProxyLayer.password"
+                                type="password"
+                                class="col-span-3"
+                                :placeholder="t('connection.proxyPasswordPlaceholder')"
+                                :disabled="selectedProxyLayer.enabled === false"
+                              />
+                            </div>
+                          </template>
+                        </div>
+                      </template>
+                      <div
+                        v-else
+                        class="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-[var(--ds-radius)] border border-dashed border-[var(--ds-border)] px-6 text-center"
+                      >
+                        <div
+                          class="flex size-9 items-center justify-center rounded-full bg-[var(--ds-bg-canvas)] text-[var(--ds-text-3)]"
                         >
-                          <Copy class="mr-1.5 h-3.5 w-3.5" />
-                          {{ t("connection.sshHopDuplicate") }}
-                        </Button>
-                        <Button
-                          v-if="selectedTransportLayer"
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          @click="removeTransportLayer(selectedTransportLayer.id)"
-                        >
-                          <Trash2 class="mr-1.5 h-3.5 w-3.5" />
-                          {{ t("connection.sshHopDelete") }}
-                        </Button>
+                          <KeyRound class="h-4 w-4" />
+                        </div>
+                        <p class="text-xs leading-5 text-[var(--ds-text-3)]">{{ t("connection.sshHopEmpty") }}</p>
                       </div>
                     </div>
                   </div>
-
-                  <template v-if="selectedTransportLayer">
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">{{ t("connection.sshHopName") }}</Label>
-                      <Input
-                        v-model="selectedTransportLayer.name"
-                        class="col-span-3"
-                        :placeholder="t('connection.sshHopNamePlaceholder')"
-                      />
-                    </div>
-                    <div class="grid grid-cols-4 items-center gap-4">
-                      <Label class="text-right text-xs">Type</Label>
-                      <Select
-                        :model-value="selectedTransportLayer.type"
-                        @update:model-value="(value: any) => changeSelectedTransportLayerType(value)"
-                      >
-                        <SelectTrigger class="col-span-3 h-9">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="ssh">SSH</SelectItem>
-                          <SelectItem value="proxy">Proxy</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <template v-if="selectedSshLayer">
-                      <div class="grid grid-cols-4 items-center gap-4">
-                        <Label class="text-right text-xs">{{ t("connection.sshHost") }}</Label>
-                        <Input
-                          v-model="selectedSshLayer.host"
-                          class="col-span-2"
-                          placeholder="ssh.example.com"
-                          :disabled="selectedSshLayer.enabled === false"
-                        />
-                        <Input
-                          v-model.number="selectedSshLayer.port"
-                          type="number"
-                          min="1"
-                          max="65535"
-                          class="col-span-1"
-                          :disabled="selectedSshLayer.enabled === false"
-                        />
-                      </div>
-                      <div class="grid grid-cols-4 items-center gap-4">
-                        <Label class="text-right text-xs">{{ t("connection.sshUser") }}</Label>
-                        <Input
-                          v-model="selectedSshLayer.user"
-                          class="col-span-3"
-                          placeholder="root"
-                          :disabled="selectedSshLayer.enabled === false"
-                        />
-                      </div>
-                      <div class="grid grid-cols-4 items-center gap-4">
-                        <Label class="text-right text-xs">{{ t("connection.sshPassword") }}</Label>
-                        <Input
-                          v-model="selectedSshLayer.password"
-                          type="password"
-                          class="col-span-3"
-                          :placeholder="t('connection.sshPasswordPlaceholder')"
-                          :disabled="selectedSshLayer.enabled === false"
-                        />
-                      </div>
-                      <div class="grid grid-cols-4 items-center gap-4">
-                        <Label class="text-right text-xs">{{ t("connection.sshKeyPath") }}</Label>
-                        <div class="col-span-3 flex items-center gap-1">
-                          <Input
-                            v-model="selectedSshLayer.key_path"
-                            class="flex-1"
-                            placeholder="~/.ssh/id_rsa"
-                            :disabled="selectedSshLayer.enabled === false"
-                          />
-                          <Tooltip v-if="isDesktop">
-                            <TooltipTrigger as-child>
-                              <Button
-                                variant="outline"
-                                size="icon-lg"
-                                class="shrink-0"
-                                :disabled="selectedSshLayer.enabled === false"
-                                @click="browseSshKeyPath(selectedSshLayer)"
-                              >
-                                <FolderOpen class="h-4 w-4" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>{{ t("connection.sshKeyPathBrowse") }}</TooltipContent>
-                          </Tooltip>
-                        </div>
-                      </div>
-                      <div class="grid grid-cols-4 items-center gap-4">
-                        <Label class="text-right text-xs">{{ t("connection.sshKeyPassphrase") }}</Label>
-                        <Input
-                          v-model="selectedSshLayer.key_passphrase"
-                          type="password"
-                          class="col-span-3"
-                          :placeholder="t('connection.sshKeyPassphrasePlaceholder')"
-                          :disabled="selectedSshLayer.enabled === false"
-                        />
-                      </div>
-                      <div class="grid grid-cols-4 items-center gap-4">
-                        <span />
-                        <label class="col-span-3 flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            v-model="selectedSshLayer.expose_lan"
-                            class="mr-0"
-                            :disabled="selectedSshLayer.enabled === false"
-                          />
-                          <span class="text-xs text-muted-foreground">{{ t("connection.sshExposeLan") }}</span>
-                        </label>
-                      </div>
-                      <div class="grid grid-cols-4 items-center gap-4">
-                        <Label class="text-right text-xs">{{ t("connection.sshConnectTimeout") }}</Label>
-                        <Input
-                          v-model.number="selectedSshLayer.connect_timeout_secs"
-                          type="number"
-                          min="1"
-                          max="300"
-                          step="1"
-                          class="col-span-3"
-                          :disabled="selectedSshLayer.enabled === false"
-                        />
-                      </div>
-                    </template>
-                    <template v-else-if="selectedProxyLayer">
-                      <div class="grid grid-cols-4 items-center gap-4">
-                        <Label class="text-right text-xs">{{ t("connection.proxyType") }}</Label>
-                        <Select
-                          :model-value="selectedProxyLayer.proxy_type || 'socks5'"
-                          :disabled="selectedProxyLayer.enabled === false"
-                          @update:model-value="updateSelectedProxyType"
-                        >
-                          <SelectTrigger class="col-span-3 h-9">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="socks5">SOCKS5</SelectItem>
-                            <SelectItem value="http">HTTP CONNECT</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div class="grid grid-cols-4 items-center gap-4">
-                        <Label class="text-right text-xs">{{ t("connection.proxyHost") }}</Label>
-                        <Input
-                          v-model="selectedProxyLayer.host"
-                          class="col-span-2"
-                          placeholder="127.0.0.1"
-                          :disabled="selectedProxyLayer.enabled === false"
-                        />
-                        <Input
-                          v-model.number="selectedProxyLayer.port"
-                          type="number"
-                          class="col-span-1"
-                          :disabled="selectedProxyLayer.enabled === false"
-                        />
-                      </div>
-                      <div class="grid grid-cols-4 items-center gap-4">
-                        <Label class="text-right text-xs">{{ t("connection.proxyUsername") }}</Label>
-                        <Input
-                          v-model="selectedProxyLayer.username"
-                          class="col-span-3"
-                          :placeholder="t('connection.proxyUsernamePlaceholder')"
-                          :disabled="selectedProxyLayer.enabled === false"
-                        />
-                      </div>
-                      <div class="grid grid-cols-4 items-center gap-4">
-                        <Label class="text-right text-xs">{{ t("connection.proxyPassword") }}</Label>
-                        <Input
-                          v-model="selectedProxyLayer.password"
-                          type="password"
-                          class="col-span-3"
-                          :placeholder="t('connection.proxyPasswordPlaceholder')"
-                          :disabled="selectedProxyLayer.enabled === false"
-                        />
-                      </div>
-                    </template>
-                  </template>
                 </div>
               </TabsContent>
             </Tabs>
@@ -3461,7 +3498,7 @@ function openExternalUrl(url: string) {
             <template v-if="testResult">
               <span
                 class="block min-w-0 flex-1 basis-0 truncate text-xs"
-                :class="testResult.ok ? 'text-green-600' : 'text-red-600'"
+                :class="testResult.ok ? 'text-[var(--ds-green)]' : 'text-[var(--ds-red)]'"
                 :title="testResultMessage"
                 role="status"
                 aria-live="polite"
