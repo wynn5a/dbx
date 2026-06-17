@@ -52,6 +52,30 @@ export function formatRedisMemberDetail(value: unknown): RedisMemberDetail {
   }
 }
 
+/**
+ * Design-system color (a `--ds-*` CSS variable, usable in inline `color`/`background`)
+ * identifying a Redis key's value type. Shared by the key browser badge and the value
+ * viewer header so the type hue is consistent everywhere.
+ */
+export function redisTypeColor(type: string): string {
+  switch (type) {
+    case "string":
+      return "var(--ds-green)";
+    case "list":
+      return "var(--ds-blue)";
+    case "set":
+      return "var(--ds-purple)";
+    case "zset":
+      return "var(--ds-amber)";
+    case "hash":
+      return "var(--ds-t-json)";
+    case "stream":
+      return "var(--ds-teal)";
+    default:
+      return "var(--ds-text-3)";
+  }
+}
+
 export function formatRedisStringValue(value: unknown): string {
   if (typeof value !== "string") return String(value ?? "");
   return formatRedisJsonString(value) ?? value;

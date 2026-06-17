@@ -46,7 +46,12 @@ import {
 import { buildSqlServerDatabaseTreeNodes, SQLSERVER_DEFAULT_SCHEMA } from "@/lib/sqlServerTree";
 import { findDatabaseTreeNode } from "@/lib/treeRefreshTarget";
 import { shouldMarkDisconnected } from "@/lib/connectionHealth";
-import { connectionAttemptTimeoutMessage, connectionAttemptTimeoutMs } from "@/lib/connectionAttemptTimeout";
+import {
+  connectionAttemptTimeoutMessage,
+  connectionAttemptTimeoutMs,
+  metadataLoadTimeoutMessage,
+  metadataLoadTimeoutMs,
+} from "@/lib/connectionAttemptTimeout";
 import {
   filterDatabaseNamesForConnection,
   filterVisibleDatabaseNames,
@@ -239,19 +244,32 @@ export const useConnectionStore = defineStore("connection", () => {
     recordConnectionError(connectionId, error);
   }
 
-  async function withConnectionAttemptTimeout<T>(promise: Promise<T>, config: ConnectionConfig): Promise<T> {
-    const timeoutMs = connectionAttemptTimeoutMs(config);
+  async function raceWithTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
         promise,
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(connectionAttemptTimeoutMessage(timeoutMs))), timeoutMs);
+          timer = setTimeout(() => reject(new Error(message)), timeoutMs);
         }),
       ]);
     } finally {
       if (timer) clearTimeout(timer);
     }
+  }
+
+  function withConnectionAttemptTimeout<T>(promise: Promise<T>, config: ConnectionConfig): Promise<T> {
+    const timeoutMs = connectionAttemptTimeoutMs(config);
+    return raceWithTimeout(promise, timeoutMs, connectionAttemptTimeoutMessage(timeoutMs));
+  }
+
+  // Bound the metadata/catalog queries that run after a connection is verified
+  // (listDatabases, listSchemas, listTables, …). These are not covered by the
+  // connect timeout, so a pooler that accepts the socket but never answers the
+  // first query would otherwise spin the sidebar forever.
+  function withMetadataLoadTimeout<T>(connectionId: string, promise: Promise<T>): Promise<T> {
+    const timeoutMs = metadataLoadTimeoutMs(getConfig(connectionId));
+    return raceWithTimeout(promise, timeoutMs, metadataLoadTimeoutMessage(timeoutMs));
   }
 
   function normalizeConnection(config: ConnectionConfig): ConnectionConfig {
@@ -916,10 +934,10 @@ export const useConnectionStore = defineStore("connection", () => {
             return;
           }
         }
-        const [databases, schemas] = await Promise.all([
-          api.listDatabases(connectionId),
-          api.listSchemas(connectionId, "main"),
-        ]);
+        const [databases, schemas] = await withMetadataLoadTimeout(
+          connectionId,
+          Promise.all([api.listDatabases(connectionId), api.listSchemas(connectionId, "main")]),
+        );
         const children = withSavedSqlRoot(
           connectionId,
           buildDuckDbConnectionTreeNodes(connectionId, databases, schemas),
@@ -937,7 +955,7 @@ export const useConnectionStore = defineStore("connection", () => {
             return;
           }
         }
-        const schemas = await api.listSchemas(connectionId, effectiveDb);
+        const schemas = await withMetadataLoadTimeout(connectionId, api.listSchemas(connectionId, effectiveDb));
         const visibleSchemas = filterDatabaseNamesForConnection(schemas, config);
         const schemaNodes: TreeNode[] = sortSidebarNames(visibleSchemas).map((s) => ({
           id: `${connectionId}:${s}:${s}`,
@@ -960,7 +978,7 @@ export const useConnectionStore = defineStore("connection", () => {
             return;
           }
         }
-        const databases = await api.listDatabases(connectionId);
+        const databases = await withMetadataLoadTimeout(connectionId, api.listDatabases(connectionId));
         const visibleNames = filterDatabaseNamesForConnection(
           databases.map((database) => database.name),
           config,
@@ -994,7 +1012,7 @@ export const useConnectionStore = defineStore("connection", () => {
     node.isLoading = true;
     try {
       await ensureConnected(connectionId);
-      const dbs = await api.redisListDatabases(connectionId);
+      const dbs = await withMetadataLoadTimeout(connectionId, api.redisListDatabases(connectionId));
       const config = getConfig(connectionId);
       const visibleNames = filterVisibleDatabaseNames(
         dbs.map((db) => String(db.db)),
@@ -1086,7 +1104,7 @@ export const useConnectionStore = defineStore("connection", () => {
     node.isLoading = true;
     try {
       await ensureConnected(connectionId);
-      const dbs = await api.mongoListDatabases(connectionId);
+      const dbs = await withMetadataLoadTimeout(connectionId, api.mongoListDatabases(connectionId));
       const config = getConfig(connectionId);
       const visibleDbs = filterDatabaseNamesForConnection(dbs, config);
       setChildren(
@@ -1121,7 +1139,7 @@ export const useConnectionStore = defineStore("connection", () => {
 
     node.isLoading = true;
     try {
-      const collections = await api.mongoListCollections(connectionId, database);
+      const collections = await withMetadataLoadTimeout(connectionId, api.mongoListCollections(connectionId, database));
       setChildren(
         node,
         sortSidebarNames(collections).map((col) => ({
@@ -1159,7 +1177,9 @@ export const useConnectionStore = defineStore("connection", () => {
         }
       }
 
-      const schemas = sortSidebarNames(await api.listSchemas(connectionId, database));
+      const schemas = sortSidebarNames(
+        await withMetadataLoadTimeout(connectionId, api.listSchemas(connectionId, database)),
+      );
       const children = schemas.map((s) => ({
         id: `${connectionId}:${database}:${s}`,
         label: s,
@@ -1204,9 +1224,9 @@ export const useConnectionStore = defineStore("connection", () => {
       }
 
       const config = getConfig(connectionId);
-      const schemas = await api.listSchemas(connectionId, database);
+      const schemas = await withMetadataLoadTimeout(connectionId, api.listSchemas(connectionId, database));
       const defaultSchemaObjects = simpleObjectDisplay
-        ? await api.listObjects(connectionId, database, SQLSERVER_DEFAULT_SCHEMA)
+        ? await withMetadataLoadTimeout(connectionId, api.listObjects(connectionId, database, SQLSERVER_DEFAULT_SCHEMA))
         : [];
       const children = buildSqlServerDatabaseTreeNodes(connectionId, database, schemas, defaultSchemaObjects, {
         lazyObjectTypes: simpleObjectDisplay ? undefined : supportedSidebarObjectTypes(config),
@@ -1252,10 +1272,13 @@ export const useConnectionStore = defineStore("connection", () => {
       let children: TreeNode[];
       if (simpleObjectDisplay) {
         try {
-          const [objects, tables] = await Promise.all([
-            api.listObjects(connectionId, database, querySchema),
-            api.listTables(connectionId, database, querySchema),
-          ]);
+          const [objects, tables] = await withMetadataLoadTimeout(
+            connectionId,
+            Promise.all([
+              api.listObjects(connectionId, database, querySchema),
+              api.listTables(connectionId, database, querySchema),
+            ]),
+          );
           children = buildSimpleObjectTreeNodes({
             nodeId,
             connectionId,
@@ -1264,7 +1287,10 @@ export const useConnectionStore = defineStore("connection", () => {
             objects: mergeTableInfosIntoObjects(objects, tables, effectiveSchema),
           });
         } catch {
-          const tables = await api.listTables(connectionId, database, querySchema);
+          const tables = await withMetadataLoadTimeout(
+            connectionId,
+            api.listTables(connectionId, database, querySchema),
+          );
           children = buildTableTreeNodes({ nodeId, connectionId, database, schema: effectiveSchema, tables });
         }
       } else {
@@ -1313,10 +1339,16 @@ export const useConnectionStore = defineStore("connection", () => {
       const objects = wantsOnlyTablesOrViews
         ? mergeTableInfosIntoObjects(
             [],
-            await api.listTables(node.connectionId, node.database, querySchema),
+            await withMetadataLoadTimeout(
+              node.connectionId,
+              api.listTables(node.connectionId, node.database, querySchema),
+            ),
             effectiveSchema,
           )
-        : await api.listObjects(node.connectionId, node.database, querySchema, objectTypes);
+        : await withMetadataLoadTimeout(
+            node.connectionId,
+            api.listObjects(node.connectionId, node.database, querySchema, objectTypes),
+          );
       const grouped = buildGroupedObjectTreeNodes({
         nodeId: parentNodeId,
         connectionId: node.connectionId,
@@ -1423,7 +1455,10 @@ export const useConnectionStore = defineStore("connection", () => {
     node.isLoading = true;
     try {
       const querySchema = metadataQuerySchema(connectionId, database, schema);
-      const columns = await api.getColumns(connectionId, database, querySchema, table);
+      const columns = await withMetadataLoadTimeout(
+        connectionId,
+        api.getColumns(connectionId, database, querySchema, table),
+      );
       setChildren(
         node,
         columns.map((col) => ({
@@ -1458,7 +1493,10 @@ export const useConnectionStore = defineStore("connection", () => {
     node.isLoading = true;
     try {
       const querySchema = metadataQuerySchema(connectionId, database, schema);
-      const indexes = await api.listIndexes(connectionId, database, querySchema, table);
+      const indexes = await withMetadataLoadTimeout(
+        connectionId,
+        api.listIndexes(connectionId, database, querySchema, table),
+      );
       setChildren(
         node,
         indexes.map((idx) => ({
@@ -1499,7 +1537,10 @@ export const useConnectionStore = defineStore("connection", () => {
     node.isLoading = true;
     try {
       const querySchema = metadataQuerySchema(connectionId, database, schema);
-      const fkeys = await api.listForeignKeys(connectionId, database, querySchema, table);
+      const fkeys = await withMetadataLoadTimeout(
+        connectionId,
+        api.listForeignKeys(connectionId, database, querySchema, table),
+      );
       setChildren(
         node,
         fkeys.map((fk) => ({
@@ -1534,7 +1575,10 @@ export const useConnectionStore = defineStore("connection", () => {
     node.isLoading = true;
     try {
       const querySchema = metadataQuerySchema(connectionId, database, schema);
-      const triggers = await api.listTriggers(connectionId, database, querySchema, table);
+      const triggers = await withMetadataLoadTimeout(
+        connectionId,
+        api.listTriggers(connectionId, database, querySchema, table),
+      );
       setChildren(
         node,
         triggers.map((tr) => ({
@@ -2313,12 +2357,16 @@ export const useConnectionStore = defineStore("connection", () => {
           return { ...node, children: mergeState(node.children || []) };
         }
         if (existing && node.type === "connection") {
-          return {
-            ...existing,
-            label: node.label,
-            pinned: node.pinned,
-            children: withSavedSqlRoot(node.connectionId!, existing.children || [], existing),
-          };
+          // Mutate the existing node in place rather than spreading into a new
+          // object. In-flight loaders (loadDatabases, etc.) capture this node
+          // reference once and clear `node.isLoading` in a `finally`; if a
+          // rebuild replaced it with a fresh object that copied `isLoading: true`,
+          // the loader would clear the now-detached original and the rendered
+          // node would spin forever, making every subsequent click a no-op.
+          existing.label = node.label;
+          existing.pinned = node.pinned;
+          existing.children = withSavedSqlRoot(node.connectionId!, existing.children || [], existing);
+          return existing;
         }
         if (node.type === "connection" && node.connectionId) {
           return { ...node, children: withSavedSqlRoot(node.connectionId, node.children || []) };

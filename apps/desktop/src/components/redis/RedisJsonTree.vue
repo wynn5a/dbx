@@ -74,11 +74,11 @@ function nodeSummary(value: unknown): string {
 }
 
 function scalarClass(value: unknown): string {
-  if (typeof value === "string") return "json-tree-string";
-  if (typeof value === "number") return "json-tree-number";
-  if (typeof value === "boolean") return "json-tree-boolean";
-  if (value === null) return "json-tree-null";
-  return "json-tree-string";
+  if (typeof value === "string") return "redis-json-string";
+  if (typeof value === "number") return "redis-json-number";
+  if (typeof value === "boolean") return "redis-json-boolean";
+  if (value === null) return "redis-json-null";
+  return "redis-json-string";
 }
 
 function scalarText(value: unknown): string {
@@ -167,8 +167,11 @@ const JsonTreeNode = defineComponent({
 </template>
 
 <style scoped>
+/* Colors are sourced from theme-aware design-system tokens (one set works in both
+   light and dark). When a Shiki `highlightJson` is provided, its inline span colors
+   take precedence over these wrapper classes. */
 .redis-json-tree {
-  color: hsl(var(--foreground));
+  color: var(--ds-text-1);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -190,7 +193,7 @@ const JsonTreeNode = defineComponent({
   height: 18px;
   width: 18px;
   flex: 0 0 auto;
-  color: hsl(var(--muted-foreground));
+  color: var(--ds-text-3);
 }
 
 .redis-json-spacer {
@@ -199,54 +202,34 @@ const JsonTreeNode = defineComponent({
 }
 
 .redis-json-key {
-  color: #1d4ed8;
+  color: var(--ds-t-int);
 }
 
 .redis-json-index,
 .redis-json-colon,
 .redis-json-summary {
-  color: hsl(var(--muted-foreground));
+  color: var(--ds-text-3);
 }
 
 .redis-json-string {
-  color: #15803d;
+  color: var(--ds-green);
 }
 
 .redis-json-number {
-  color: #b45309;
+  color: var(--ds-amber);
 }
 
 .redis-json-boolean {
-  color: #7c3aed;
+  color: var(--ds-purple);
 }
 
 .redis-json-null {
-  color: #64748b;
+  color: var(--ds-text-4);
   font-style: italic;
 }
 
 .redis-json-bracket {
-  color: hsl(var(--foreground));
+  color: var(--ds-text-2);
   font-weight: 650;
-}
-
-:global(.dark) .redis-json-key {
-  color: #93c5fd;
-}
-
-:global(.dark) .redis-json-string {
-  color: #86efac;
-}
-
-:global(.dark) .redis-json-number {
-  color: #fbbf24;
-}
-
-:global(.dark) .redis-json-boolean {
-  color: #c4b5fd;
-}
-
-:global(.dark) .redis-json-null {
-  color: #94a3b8;
 }
 </style>

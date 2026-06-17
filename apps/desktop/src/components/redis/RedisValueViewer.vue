@@ -15,11 +15,12 @@ import {
   Loader2,
   Pencil,
   WrapText,
+  KeyRound,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import DangerConfirmDialog from "@/components/editor/DangerConfirmDialog.vue";
 import RedisJsonTree from "./RedisJsonTree.vue";
@@ -35,12 +36,19 @@ import {
   clampRedisMemberDetailSheetWidth,
   formatRedisMemberDetail,
   getRedisMemberSelectionKey,
+  redisTypeColor,
 } from "@/lib/redisValuePresentation";
 
 const { t } = useI18n();
 const { toast } = useToast();
 const { isDark } = useTheme();
 const editorFontFamilyStyle = useEditorFontFamilyStyle();
+
+// Design-system class recipes shared across the type-specific layouts.
+const dsChip =
+  "dbx-editor-font-family inline-flex items-center gap-1.5 rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-elevated)] px-1.5 py-0.5 text-[11px] text-[var(--ds-text-2)]";
+const dsChipClickable =
+  "cursor-pointer transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-text-1)]";
 
 const props = defineProps<{
   connectionId: string;
@@ -758,52 +766,74 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="h-full flex flex-col overflow-hidden" :style="editorFontFamilyStyle">
-    <div v-if="loading" class="flex-1 flex items-center justify-center text-muted-foreground">
+    <div v-if="loading" class="flex-1 flex items-center justify-center text-[var(--ds-text-3)]">
       {{ t("common.loading") }}
     </div>
 
     <template v-else-if="data">
       <!-- Header -->
-      <div class="shrink-0 border-b bg-background">
-        <div class="flex h-9 items-center gap-2 px-4">
-          <span class="dbx-editor-font-family min-w-0 flex-1 truncate text-sm font-semibold">{{
-            data.key_display
-          }}</span>
-          <Button variant="ghost" size="icon" class="shrink-0" @click="load"><RefreshCw class="h-3.5 w-3.5" /></Button>
-          <Button variant="ghost" size="icon" class="shrink-0" @click="copyValue"><Copy class="h-3.5 w-3.5" /></Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            class="shrink-0"
-            :title="t('redis.copyInsertStatement')"
-            @click="copyInsertStatement"
-            ><Terminal class="h-3.5 w-3.5"
-          /></Button>
-          <Button variant="ghost" size="icon" class="shrink-0 text-destructive" @click="requestDeleteKey"
-            ><Trash2 class="h-3.5 w-3.5"
-          /></Button>
+      <div class="shrink-0 border-b border-[var(--ds-border)] bg-[var(--ds-bg-panel)]">
+        <div class="flex h-10 items-center gap-2 px-3">
+          <span
+            class="flex size-6 shrink-0 items-center justify-center rounded-[var(--ds-radius-sm)] bg-[var(--ds-accent-soft)] text-[var(--ds-accent)]"
+          >
+            <KeyRound class="size-3.5" />
+          </span>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <span
+                class="dbx-editor-font-family min-w-0 flex-1 cursor-pointer truncate text-[13px] font-semibold text-[var(--ds-text-1)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:text-[var(--ds-accent)]"
+                @click="copyText(data.key_display)"
+                >{{ data.key_display }}</span
+              >
+            </TooltipTrigger>
+            <TooltipContent class="max-w-[480px] break-all">{{ data.key_display }}</TooltipContent>
+          </Tooltip>
+          <div class="flex shrink-0 items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon-sm" @click="load"><RefreshCw class="h-3.5 w-3.5" /></Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t("redis.refresh") }}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon-sm" @click="copyValue"><Copy class="h-3.5 w-3.5" /></Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t("redis.copyValue") }}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon-sm" @click="copyInsertStatement"
+                  ><Terminal class="h-3.5 w-3.5"
+                /></Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t("redis.copyInsertStatement") }}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon-sm" class="text-[var(--ds-red)]" @click="requestDeleteKey"
+                  ><Trash2 class="h-3.5 w-3.5"
+                /></Button>
+              </TooltipTrigger>
+              <TooltipContent>{{ t("redis.deleteKey") }}</TooltipContent>
+            </Tooltip>
+          </div>
         </div>
 
-        <div class="flex min-h-7 flex-wrap items-center gap-2 px-4 pb-1">
-          <Badge variant="secondary" class="dbx-editor-font-family text-xs uppercase">{{ data.key_type }}</Badge>
-          <Badge v-if="metadataSizeLabel" variant="outline" class="text-xs text-muted-foreground">
-            {{ t("redis.columnSize") }}: {{ metadataSizeLabel }}
-          </Badge>
+        <div class="flex min-h-8 flex-wrap items-center gap-1.5 px-3 pb-2">
+          <span :class="dsChip" class="uppercase">
+            <span class="size-1.5 rounded-full" :style="{ backgroundColor: redisTypeColor(data.key_type) }" />
+            {{ data.key_type }}
+          </span>
+          <span v-if="metadataSizeLabel" :class="dsChip"> {{ t("redis.columnSize") }}: {{ metadataSizeLabel }} </span>
           <template v-if="!editingTtl">
-            <Badge
-              v-if="data.ttl > 0"
-              variant="outline"
-              class="text-xs cursor-pointer text-muted-foreground hover:bg-accent"
-              @click="startEditTtl"
-              >TTL: {{ data.ttl }}s</Badge
+            <span v-if="data.ttl > 0" :class="[dsChip, dsChipClickable]" @click="startEditTtl"
+              >TTL: {{ data.ttl }}s</span
             >
-            <Badge
-              v-else-if="data.ttl === -1"
-              variant="outline"
-              class="text-xs cursor-pointer text-muted-foreground hover:bg-accent"
-              @click="startEditTtl"
-              >{{ t("redis.noExpiry") }}</Badge
-            >
+            <span v-else-if="data.ttl === -1" :class="[dsChip, dsChipClickable]" @click="startEditTtl">{{
+              t("redis.noExpiry")
+            }}</span>
           </template>
           <div v-else class="flex items-center gap-1">
             <Input
@@ -821,13 +851,21 @@ onBeforeUnmount(() => {
 
       <!-- String -->
       <div v-if="data.key_type === 'string'" class="flex-1 flex flex-col overflow-hidden">
-        <div v-if="stringJsonDetail" class="flex h-9 items-center gap-2 border-b px-4 text-xs shrink-0">
-          <div class="flex overflow-hidden rounded-md border bg-muted/20 p-0.5">
+        <div
+          v-if="stringJsonDetail"
+          class="flex h-9 items-center gap-2 border-b border-[var(--ds-border)] px-4 text-xs shrink-0"
+        >
+          <div
+            class="flex overflow-hidden rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-elevated)] p-0.5"
+          >
             <Button
               variant="ghost"
               size="sm"
               class="h-6 rounded-[5px] px-2 text-xs"
-              :class="{ 'bg-background shadow-sm': stringValueView === 'json' }"
+              :class="{
+                'bg-[var(--ds-bg-panel)] text-[var(--ds-text-1)] shadow-[var(--ds-shadow-card)]':
+                  stringValueView === 'json',
+              }"
               @click="stringValueView = 'json'"
             >
               <Braces class="h-3.5 w-3.5" />
@@ -837,7 +875,10 @@ onBeforeUnmount(() => {
               variant="ghost"
               size="sm"
               class="h-6 rounded-[5px] px-2 text-xs"
-              :class="{ 'bg-background shadow-sm': stringValueView === 'raw' }"
+              :class="{
+                'bg-[var(--ds-bg-panel)] text-[var(--ds-text-1)] shadow-[var(--ds-shadow-card)]':
+                  stringValueView === 'raw',
+              }"
               @click="stringValueView = 'raw'"
             >
               <FileText class="h-3.5 w-3.5" />
@@ -845,7 +886,7 @@ onBeforeUnmount(() => {
             </Button>
           </div>
           <span class="flex-1" />
-          <label class="flex items-center gap-1.5 text-muted-foreground">
+          <label class="flex items-center gap-1.5 text-[var(--ds-text-3)]">
             <WrapText class="h-3.5 w-3.5" />
             {{ t("redis.wordWrap") }}
             <Switch
@@ -857,7 +898,7 @@ onBeforeUnmount(() => {
         </div>
         <div
           v-if="stringJsonDetail && stringValueView === 'json'"
-          class="dbx-editor-font-family min-h-0 flex-1 overflow-auto bg-background p-4 text-sm leading-6"
+          class="dbx-editor-font-family min-h-0 flex-1 overflow-auto bg-[var(--ds-bg-panel)] p-4 text-sm leading-6"
         >
           <RedisJsonTree
             :value="stringJsonDetail.value"
@@ -868,15 +909,18 @@ onBeforeUnmount(() => {
         <textarea
           v-else
           v-model="editValue"
-          class="dbx-editor-font-family flex-1 p-4 text-sm bg-background resize-none outline-none"
+          class="dbx-editor-font-family flex-1 p-4 text-sm bg-[var(--ds-bg-panel)] resize-none outline-none"
           :class="{ 'whitespace-pre': stringJsonDetail && !redisJsonWordWrap }"
           :readonly="isBinaryStringValue"
           @input="handleStringInput"
         />
-        <div v-if="isBinaryStringValue" class="px-4 py-2 border-t text-xs text-muted-foreground shrink-0">
+        <div
+          v-if="isBinaryStringValue"
+          class="px-4 py-2 border-t border-[var(--ds-border)] text-xs text-[var(--ds-text-3)] shrink-0"
+        >
           {{ t("redis.binaryStringReadonlyHint") }}
         </div>
-        <div v-if="isEditing" class="px-4 py-2 border-t flex justify-end gap-2 shrink-0">
+        <div v-if="isEditing" class="px-4 py-2 border-t border-[var(--ds-border)] flex justify-end gap-2 shrink-0">
           <Button
             variant="ghost"
             size="sm"
@@ -892,8 +936,8 @@ onBeforeUnmount(() => {
 
       <!-- List -->
       <div v-else-if="data.key_type === 'list'" class="flex-1 flex flex-col overflow-hidden">
-        <div class="flex items-center gap-2 px-4 py-1.5 border-b shrink-0">
-          <span class="text-xs text-muted-foreground">{{
+        <div class="flex items-center gap-2 px-4 py-1.5 border-b border-[var(--ds-border)] shrink-0">
+          <span class="text-xs text-[var(--ds-text-3)]">{{
             collectionCountLabel("items", collectionItems.length, data.total)
           }}</span>
           <span class="flex-1" />
@@ -902,9 +946,15 @@ onBeforeUnmount(() => {
             ><Plus class="w-3 h-3 mr-1" />Push</Button
           >
         </div>
-        <div class="grid grid-cols-[60px_1fr_84px] border-b bg-muted/50 shrink-0">
-          <div class="px-3 py-1 text-xs font-medium text-muted-foreground border-r">#</div>
-          <div class="px-3 py-1 text-xs font-medium text-muted-foreground">Value</div>
+        <div
+          class="grid grid-cols-[60px_1fr_84px] border-b border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] shrink-0"
+        >
+          <div
+            class="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--ds-text-3)] border-r border-[var(--ds-border-soft)]"
+          >
+            #
+          </div>
+          <div class="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--ds-text-3)]">Value</div>
           <div />
         </div>
         <RecycleScroller
@@ -918,12 +968,14 @@ onBeforeUnmount(() => {
           <template #default="{ item: row }">
             <div
               data-redis-value-row
-              class="dbx-editor-font-family grid grid-cols-[60px_1fr_84px] border-b text-sm hover:bg-accent/50 group cursor-pointer"
-              :class="{ 'bg-accent/60': isSelectedMember(`#${row.index}`, row.value) }"
+              class="dbx-editor-font-family grid grid-cols-[60px_1fr_84px] border-b border-[var(--ds-border-soft)] text-sm text-[var(--ds-text-1)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)] group cursor-pointer"
+              :class="{ 'bg-[var(--ds-accent-soft)]': isSelectedMember(`#${row.index}`, row.value) }"
               :style="{ height: `${REDIS_COLLECTION_ROW_HEIGHT}px` }"
               @click="viewMember(`#${row.index}`, row.value, { kind: 'list', index: row.index })"
             >
-              <div class="px-3 py-1.5 text-xs text-muted-foreground border-r">{{ row.index }}</div>
+              <div class="px-3 py-1.5 text-xs text-[var(--ds-text-3)] border-r border-[var(--ds-border-soft)]">
+                {{ row.index }}
+              </div>
               <div class="px-3 py-1.5 truncate">{{ row.value }}</div>
               <div class="flex items-center justify-center gap-1">
                 <Button
@@ -945,7 +997,7 @@ onBeforeUnmount(() => {
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  class="opacity-0 group-hover:opacity-100 text-destructive"
+                  class="opacity-0 group-hover:opacity-100 text-[var(--ds-red)]"
                   @click.stop="requestListRemove(row.index)"
                   ><Trash2 class="w-3 h-3"
                 /></Button>
@@ -965,8 +1017,8 @@ onBeforeUnmount(() => {
 
       <!-- Set -->
       <div v-else-if="data.key_type === 'set'" class="flex-1 flex flex-col overflow-hidden">
-        <div class="flex items-center gap-2 px-4 py-1.5 border-b shrink-0">
-          <span class="text-xs text-muted-foreground">{{
+        <div class="flex items-center gap-2 px-4 py-1.5 border-b border-[var(--ds-border)] shrink-0">
+          <span class="text-xs text-[var(--ds-text-3)]">{{
             collectionCountLabel("items", collectionItems.length, data.total)
           }}</span>
           <span class="flex-1" />
@@ -975,8 +1027,8 @@ onBeforeUnmount(() => {
             ><Plus class="w-3 h-3 mr-1" />Add</Button
           >
         </div>
-        <div class="grid grid-cols-[1fr_84px] border-b bg-muted/50 shrink-0">
-          <div class="px-3 py-1 text-xs font-medium text-muted-foreground">Member</div>
+        <div class="grid grid-cols-[1fr_84px] border-b border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] shrink-0">
+          <div class="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--ds-text-3)]">Member</div>
           <div />
         </div>
         <RecycleScroller
@@ -990,8 +1042,8 @@ onBeforeUnmount(() => {
           <template #default="{ item: row }">
             <div
               data-redis-value-row
-              class="dbx-editor-font-family grid grid-cols-[1fr_84px] border-b text-sm hover:bg-accent/50 group cursor-pointer"
-              :class="{ 'bg-accent/60': isSelectedMember(t('redis.member'), row.value) }"
+              class="dbx-editor-font-family grid grid-cols-[1fr_84px] border-b border-[var(--ds-border-soft)] text-sm text-[var(--ds-text-1)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)] group cursor-pointer"
+              :class="{ 'bg-[var(--ds-accent-soft)]': isSelectedMember(t('redis.member'), row.value) }"
               :style="{ height: `${REDIS_COLLECTION_ROW_HEIGHT}px` }"
               @click="viewMember(t('redis.member'), row.value, { kind: 'set', member: String(row.value) })"
             >
@@ -1016,7 +1068,7 @@ onBeforeUnmount(() => {
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  class="opacity-0 group-hover:opacity-100 text-destructive"
+                  class="opacity-0 group-hover:opacity-100 text-[var(--ds-red)]"
                   @click.stop="requestSetRemove(String(row.value))"
                   ><Trash2 class="w-3 h-3"
                 /></Button>
@@ -1036,8 +1088,8 @@ onBeforeUnmount(() => {
 
       <!-- Hash -->
       <div v-else-if="data.key_type === 'hash'" ref="hashTableRef" class="flex-1 flex flex-col overflow-hidden">
-        <div class="flex items-center gap-2 px-4 py-1.5 border-b shrink-0">
-          <span class="text-xs text-muted-foreground">{{
+        <div class="flex items-center gap-2 px-4 py-1.5 border-b border-[var(--ds-border)] shrink-0">
+          <span class="text-xs text-[var(--ds-text-3)]">{{
             collectionCountLabel("fields", collectionItems.length, data.total)
           }}</span>
           <span class="flex-1" />
@@ -1047,15 +1099,17 @@ onBeforeUnmount(() => {
             ><Plus class="w-3 h-3 mr-1" />Set</Button
           >
         </div>
-        <div class="grid border-b bg-muted/50 shrink-0" :style="hashGridStyle">
-          <div class="relative px-3 py-1 text-xs font-medium text-muted-foreground border-r select-none">
+        <div class="grid border-b border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] shrink-0" :style="hashGridStyle">
+          <div
+            class="relative px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--ds-text-3)] border-r border-[var(--ds-border-soft)] select-none"
+          >
             Field
             <div
               class="absolute -right-1 top-0 h-full w-2 cursor-col-resize touch-none"
               @pointerdown.prevent="startResizeHashColumns"
             />
           </div>
-          <div class="px-3 py-1 text-xs font-medium text-muted-foreground">Value</div>
+          <div class="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--ds-text-3)]">Value</div>
           <div />
         </div>
         <RecycleScroller
@@ -1069,15 +1123,17 @@ onBeforeUnmount(() => {
           <template #default="{ item: row }">
             <div
               data-redis-value-row
-              class="dbx-editor-font-family grid border-b text-sm hover:bg-accent/50 group cursor-pointer"
+              class="dbx-editor-font-family grid border-b border-[var(--ds-border-soft)] text-sm text-[var(--ds-text-1)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)] group cursor-pointer"
               :style="{ ...hashGridStyle, height: `${REDIS_COLLECTION_ROW_HEIGHT}px` }"
-              :class="{ 'bg-accent/60': isSelectedMember(String(row.value.field), row.value.value) }"
+              :class="{ 'bg-[var(--ds-accent-soft)]': isSelectedMember(String(row.value.field), row.value.value) }"
               @click="
                 viewMember(String(row.value.field), row.value.value, { kind: 'hash', field: String(row.value.field) })
               "
             >
-              <div class="px-3 py-1.5 text-blue-500 truncate border-r">{{ row.value.field }}</div>
-              <div class="px-3 py-1.5 truncate text-muted-foreground">{{ row.value.value }}</div>
+              <div class="px-3 py-1.5 text-[var(--ds-t-int)] truncate border-r border-[var(--ds-border-soft)]">
+                {{ row.value.field }}
+              </div>
+              <div class="px-3 py-1.5 truncate text-[var(--ds-text-3)]">{{ row.value.value }}</div>
               <div class="flex items-center justify-center gap-1">
                 <Button
                   variant="ghost"
@@ -1103,7 +1159,7 @@ onBeforeUnmount(() => {
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  class="opacity-0 group-hover:opacity-100 text-destructive"
+                  class="opacity-0 group-hover:opacity-100 text-[var(--ds-red)]"
                   @click.stop="requestHashDel(String(row.value.field))"
                   ><Trash2 class="w-3 h-3"
                 /></Button>
@@ -1123,8 +1179,8 @@ onBeforeUnmount(() => {
 
       <!-- Sorted Set -->
       <div v-else-if="data.key_type === 'zset'" ref="zsetTableRef" class="flex-1 flex flex-col overflow-hidden">
-        <div class="flex items-center gap-2 px-4 py-1.5 border-b shrink-0">
-          <span class="text-xs text-muted-foreground">{{
+        <div class="flex items-center gap-2 px-4 py-1.5 border-b border-[var(--ds-border)] shrink-0">
+          <span class="text-xs text-[var(--ds-text-3)]">{{
             collectionCountLabel("members", collectionItems.length, data.total)
           }}</span>
           <span class="flex-1" />
@@ -1134,15 +1190,19 @@ onBeforeUnmount(() => {
             ><Plus class="w-3 h-3 mr-1" />Add</Button
           >
         </div>
-        <div class="grid border-b bg-muted/50 shrink-0" :style="zsetGridStyle">
-          <div class="relative px-3 py-1 text-xs font-medium text-muted-foreground border-r select-none">
+        <div class="grid border-b border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] shrink-0" :style="zsetGridStyle">
+          <div
+            class="relative px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--ds-text-3)] border-r border-[var(--ds-border-soft)] select-none"
+          >
             Score
             <div
               class="absolute -right-1 top-0 h-full w-2 cursor-col-resize touch-none"
               @pointerdown.prevent="startResizeZsetColumns"
             />
           </div>
-          <div class="px-3 py-1 text-xs font-medium text-muted-foreground min-w-0">Member</div>
+          <div class="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-[var(--ds-text-3)] min-w-0">
+            Member
+          </div>
           <div />
         </div>
         <RecycleScroller
@@ -1156,8 +1216,8 @@ onBeforeUnmount(() => {
           <template #default="{ item: row }">
             <div
               data-redis-value-row
-              class="dbx-editor-font-family grid border-b text-sm hover:bg-accent/50 group cursor-pointer"
-              :class="{ 'bg-accent/60': isSelectedMember(String(row.value.score), row.value.member) }"
+              class="dbx-editor-font-family grid border-b border-[var(--ds-border-soft)] text-sm text-[var(--ds-text-1)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)] group cursor-pointer"
+              :class="{ 'bg-[var(--ds-accent-soft)]': isSelectedMember(String(row.value.score), row.value.member) }"
               :style="{ ...zsetGridStyle, height: `${REDIS_COLLECTION_ROW_HEIGHT}px` }"
               @click="
                 viewMember(String(row.value.score), row.value.member, {
@@ -1168,7 +1228,7 @@ onBeforeUnmount(() => {
               "
             >
               <div
-                class="px-3 py-1.5 text-muted-foreground text-xs border-r min-w-0 truncate"
+                class="px-3 py-1.5 text-[var(--ds-text-3)] text-xs border-r border-[var(--ds-border-soft)] min-w-0 truncate"
                 :title="String(row.value.score)"
               >
                 {{ row.value.score }}
@@ -1202,7 +1262,7 @@ onBeforeUnmount(() => {
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  class="opacity-0 group-hover:opacity-100 text-destructive"
+                  class="opacity-0 group-hover:opacity-100 text-[var(--ds-red)]"
                   @click.stop="requestZsetRemove(String(row.value.member))"
                   ><Trash2 class="w-3 h-3"
                 /></Button>
@@ -1222,7 +1282,7 @@ onBeforeUnmount(() => {
 
       <!-- Stream (readonly) -->
       <div v-else-if="data.key_type === 'stream'" class="flex-1 flex flex-col overflow-hidden">
-        <div class="px-4 py-1 text-xs text-muted-foreground border-b shrink-0">
+        <div class="px-4 py-1 text-xs text-[var(--ds-text-3)] border-b shrink-0">
           {{ t("redis.entries", { count: streamRows.length }) }}
         </div>
         <DynamicScroller
@@ -1239,17 +1299,20 @@ onBeforeUnmount(() => {
               :size-dependencies="[streamFieldCount(row)]"
               :data-index="row.index"
             >
-              <div data-redis-stream-entry class="dbx-editor-font-family px-4 py-2 border-b text-sm hover:bg-accent/50">
-                <div class="mb-1 text-xs text-muted-foreground">{{ row.entry.id }}</div>
+              <div
+                data-redis-stream-entry
+                class="dbx-editor-font-family px-4 py-2 border-b border-[var(--ds-border-soft)] text-sm text-[var(--ds-text-1)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)]"
+              >
+                <div class="mb-1 text-xs text-[var(--ds-text-3)]">{{ row.entry.id }}</div>
                 <div
                   v-for="[field, val] in streamFields(row.entry)"
                   :key="field"
                   class="grid grid-cols-[minmax(6rem,0.35fr)_1fr_56px] gap-3 py-0.5 group cursor-pointer"
-                  :class="{ 'bg-accent/60': isSelectedMember(String(field), val) }"
+                  :class="{ 'bg-[var(--ds-accent-soft)]': isSelectedMember(String(field), val) }"
                   @click="viewMember(String(field), val, { kind: 'stream', field: String(field) })"
                 >
-                  <span class="truncate text-blue-500">{{ field }}</span>
-                  <span class="truncate text-muted-foreground">{{ val }}</span>
+                  <span class="truncate text-[var(--ds-t-int)]">{{ field }}</span>
+                  <span class="truncate text-[var(--ds-text-3)]">{{ val }}</span>
                   <span class="flex justify-end gap-1">
                     <Button
                       variant="ghost"
@@ -1300,29 +1363,34 @@ onBeforeUnmount(() => {
         @interact-outside.prevent
       >
         <div
-          class="absolute inset-y-0 left-0 z-10 w-2 -translate-x-1 cursor-col-resize border-l border-transparent hover:border-primary/60"
+          class="absolute inset-y-0 left-0 z-10 w-2 -translate-x-1 cursor-col-resize border-l border-transparent hover:border-[var(--ds-accent-line)]"
           @pointerdown.prevent="startResizeMemberSheet"
         />
-        <SheetHeader class="border-b px-5 py-4 pr-12">
-          <SheetTitle class="flex items-center gap-2">
+        <SheetHeader class="border-b border-[var(--ds-border)] px-5 py-4 pr-12">
+          <SheetTitle class="flex items-center gap-2 text-[var(--ds-text-1)]">
             <span class="truncate">{{ selectedMemberTitle || t("redis.memberDetail") }}</span>
-            <Badge variant="outline" class="shrink-0 text-xs">{{ selectedMemberDetail.format.toUpperCase() }}</Badge>
+            <span :class="dsChip" class="shrink-0">{{ selectedMemberDetail.format.toUpperCase() }}</span>
           </SheetTitle>
         </SheetHeader>
         <textarea
           v-if="isEditingMember"
           v-model="memberEditValue"
-          class="dbx-editor-font-family min-h-0 flex-1 resize-none bg-background p-5 text-[13px] leading-6 outline-none"
+          class="dbx-editor-font-family min-h-0 flex-1 resize-none bg-[var(--ds-bg-panel)] p-5 text-[13px] leading-6 outline-none"
           spellcheck="false"
         />
         <template v-else-if="selectedMemberJsonDetail">
-          <div class="flex h-9 items-center gap-2 border-b px-5 text-xs">
-            <div class="flex overflow-hidden rounded-md border bg-muted/20 p-0.5">
+          <div class="flex h-9 items-center gap-2 border-b border-[var(--ds-border)] px-5 text-xs">
+            <div
+              class="flex overflow-hidden rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-elevated)] p-0.5"
+            >
               <Button
                 variant="ghost"
                 size="sm"
                 class="h-6 rounded-[5px] px-2 text-xs"
-                :class="{ 'bg-background shadow-sm': memberValueView === 'json' }"
+                :class="{
+                  'bg-[var(--ds-bg-panel)] text-[var(--ds-text-1)] shadow-[var(--ds-shadow-card)]':
+                    memberValueView === 'json',
+                }"
                 @click="memberValueView = 'json'"
               >
                 <Braces class="h-3.5 w-3.5" />
@@ -1332,7 +1400,10 @@ onBeforeUnmount(() => {
                 variant="ghost"
                 size="sm"
                 class="h-6 rounded-[5px] px-2 text-xs"
-                :class="{ 'bg-background shadow-sm': memberValueView === 'raw' }"
+                :class="{
+                  'bg-[var(--ds-bg-panel)] text-[var(--ds-text-1)] shadow-[var(--ds-shadow-card)]':
+                    memberValueView === 'raw',
+                }"
                 @click="memberValueView = 'raw'"
               >
                 <FileText class="h-3.5 w-3.5" />
@@ -1340,7 +1411,7 @@ onBeforeUnmount(() => {
               </Button>
             </div>
             <span class="flex-1" />
-            <label class="flex items-center gap-1.5 text-muted-foreground">
+            <label class="flex items-center gap-1.5 text-[var(--ds-text-3)]">
               <WrapText class="h-3.5 w-3.5" />
               {{ t("redis.wordWrap") }}
               <Switch
@@ -1352,7 +1423,7 @@ onBeforeUnmount(() => {
           </div>
           <div
             v-if="memberValueView === 'json'"
-            class="dbx-editor-font-family min-h-0 flex-1 overflow-auto bg-background p-5 text-[13px] leading-6"
+            class="dbx-editor-font-family min-h-0 flex-1 overflow-auto bg-[var(--ds-bg-panel)] p-5 text-[13px] leading-6"
           >
             <RedisJsonTree
               :value="selectedMemberJsonDetail.value"
@@ -1362,17 +1433,17 @@ onBeforeUnmount(() => {
           </div>
           <pre
             v-else
-            class="dbx-editor-font-family min-h-0 flex-1 overflow-auto bg-background p-5 text-[13px] leading-6"
+            class="dbx-editor-font-family min-h-0 flex-1 overflow-auto bg-[var(--ds-bg-panel)] p-5 text-[13px] leading-6"
             :class="redisJsonWordWrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'"
             v-html="memberRawJsonHtml"
           ></pre>
         </template>
         <pre
           v-else
-          class="dbx-editor-font-family min-h-0 flex-1 overflow-auto bg-background p-5 text-[13px] leading-6 whitespace-pre-wrap break-words"
+          class="dbx-editor-font-family min-h-0 flex-1 overflow-auto bg-[var(--ds-bg-panel)] p-5 text-[13px] leading-6 whitespace-pre-wrap break-words"
           >{{ selectedMemberDetail.text }}</pre
         >
-        <SheetFooter class="shrink-0 border-t px-5 py-3">
+        <SheetFooter class="shrink-0 border-t border-[var(--ds-border)] px-5 py-3">
           <template v-if="isEditingMember">
             <Button variant="ghost" :disabled="savingMember" @click="cancelEditMember">
               {{ t("grid.discard") }}
