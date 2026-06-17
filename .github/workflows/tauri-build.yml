@@ -20,7 +20,12 @@ jobs:
             target: x86_64-apple-darwin
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-          - platform: windows-latest
+          # Pinned to windows-2022 (VS 2022, MSVC 14.4x). windows-latest moved
+          # to windows-2025 with VS 2026 (MSVC 14.51), which removed
+          # stdext::checked_array_iterator — a symbol DuckDB's bundled fmt
+          # (libduckdb-sys) still references, breaking the MSVC build. See
+          # https://github.com/fmtlib/fmt/issues/3540
+          - platform: windows-2022
             target: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.platform }}
