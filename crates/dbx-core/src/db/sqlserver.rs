@@ -12,6 +12,27 @@ use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 
 pub type SqlServerClient = Client<Compat<TcpStream>>;
 const SIMPLE_QUERY_MODULE_KEYWORDS: &[&str] = &["FUNCTION", "PROC", "PROCEDURE", "TRIGGER", "VIEW"];
+const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(3);
+
+async fn check_conn_health(client: &mut SqlServerClient) -> Result<(), String> {
+    match tokio::time::timeout(HEALTH_CHECK_TIMEOUT, client.query("SELECT 1", &[])).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(err)) => {
+            log::warn!("[sqlserver][conn] health-check failed: {err}; connection may be stale");
+            Err(format!("SQL Server connection is unhealthy: {err}. Please reconnect."))
+        }
+        Err(_) => {
+            log::warn!(
+                "[sqlserver][conn] health-check did not respond within {}s — connection may be half-open/stale",
+                HEALTH_CHECK_TIMEOUT.as_secs()
+            );
+            Err(format!(
+                "SQL Server health check did not respond within {}s — connection may be stale. Please reconnect.",
+                HEALTH_CHECK_TIMEOUT.as_secs()
+            ))
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 struct SqlServerEndpoint<'a> {
@@ -926,6 +947,7 @@ pub async fn execute_query_with_max_rows(
     sql: &str,
     max_rows: Option<usize>,
 ) -> Result<QueryResult, String> {
+    check_conn_health(client).await?;
     let start = Instant::now();
 
     if starts_with_executable_sql_keyword(sql, &["SELECT", "EXEC", "WITH", "TABLE"]) {

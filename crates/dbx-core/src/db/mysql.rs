@@ -1403,17 +1403,80 @@ fn query_result_row_limit(max_rows: Option<usize>) -> usize {
     max_rows.unwrap_or(crate::query::MAX_ROWS).max(1)
 }
 
-/// Get a connection from the pool with a health check. If the connection is dead
-/// (e.g. after app was backgrounded), it tries again with a fresh connection.
+/// Upper bound on the health-check ping. A *cleanly* closed socket errors
+/// almost instantly, but a half-open socket (RDS idle-kill, laptop sleep,
+/// NAT/VPN dropping an idle flow) makes `ping()` block on a dead read with no
+/// FIN/RST — without this cap it would hang until the query timeout fires
+/// (~60s). A healthy ping is sub-100ms, so 3s is generously safe.
+const PING_HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// How many pooled connections to probe-and-discard before giving up. After a
+/// long sleep every pooled connection can be stale at once; discarding them
+/// forces the pool to open fresh sockets, so a few attempts reliably recovers.
+const MAX_HEALTH_CHECK_ATTEMPTS: usize = 3;
+
+/// Get a connection from the pool with a bounded health check. If a pooled
+/// connection is dead (app backgrounded, replica idle-timeout, network drop),
+/// it is discarded and a fresh one is fetched instead of blocking on it.
+///
+/// Phase logging: each step (pool checkout, health-check ping, reconnect) is
+/// timed and logged under the `[mysql][conn]` target so the dev console can
+/// pinpoint which step stalls.
 pub async fn get_conn_with_health_check(pool: &MySqlPool) -> Result<mysql_async::Conn, String> {
-    let mut conn = pool.get_conn().await.map_err(|e| e.to_string())?;
-    match conn.ping().await {
-        Ok(()) => Ok(conn),
-        Err(_) => {
-            let _ = conn.disconnect().await;
-            pool.get_conn().await.map_err(|e| e.to_string())
+    let mut last_failure: Option<String> = None;
+
+    for attempt in 1..=MAX_HEALTH_CHECK_ATTEMPTS {
+        let checkout_start = Instant::now();
+        log::debug!("[mysql][conn] checking out connection from pool (attempt {attempt}/{MAX_HEALTH_CHECK_ATTEMPTS})");
+        let mut conn = pool.get_conn().await.map_err(|e| e.to_string())?;
+        let checkout_ms = checkout_start.elapsed().as_millis();
+        log::debug!("[mysql][conn] pool checkout took {checkout_ms}ms; running health-check ping");
+
+        let ping_start = Instant::now();
+        // `timeout` owns the ping future and drops it on elapse, releasing the
+        // borrow on `conn` so we can dispose of it afterwards.
+        match tokio::time::timeout(PING_HEALTH_CHECK_TIMEOUT, conn.ping()).await {
+            Ok(Ok(())) => {
+                log::debug!(
+                    "[mysql][conn] ping ok in {}ms (checkout {checkout_ms}ms)",
+                    ping_start.elapsed().as_millis()
+                );
+                if attempt > 1 {
+                    log::info!("[mysql][conn] recovered a healthy connection on attempt {attempt}");
+                }
+                return Ok(conn);
+            }
+            Ok(Err(err)) => {
+                last_failure = Some(err.to_string());
+                log::warn!(
+                    "[mysql][conn] ping failed after {}ms ({err}); discarding stale connection (attempt {attempt}/{MAX_HEALTH_CHECK_ATTEMPTS})",
+                    ping_start.elapsed().as_millis()
+                );
+            }
+            Err(_) => {
+                last_failure =
+                    Some(format!("health-check ping did not respond within {}s", PING_HEALTH_CHECK_TIMEOUT.as_secs()));
+                log::warn!(
+                    "[mysql][conn] health-check ping did not respond within {}s \u{2014} pooled connection is half-open/stale; discarding it (attempt {attempt}/{MAX_HEALTH_CHECK_ATTEMPTS})",
+                    PING_HEALTH_CHECK_TIMEOUT.as_secs()
+                );
+            }
         }
+
+        // Dispose of the bad connection off-thread: `disconnect()` can hang on
+        // the same dead socket, and a plain drop would hand the connection back
+        // to the pool to be reused. Moving it into a detached task closes it
+        // (bounded by the OS TCP timeout) without blocking this request, and
+        // removes it from the pool so the next checkout opens a fresh socket.
+        tokio::spawn(async move {
+            let _ = conn.disconnect().await;
+        });
     }
+
+    Err(format!(
+        "MySQL connection health check failed after {MAX_HEALTH_CHECK_ATTEMPTS} attempts: {}",
+        last_failure.unwrap_or_else(|| "unknown error".to_string())
+    ))
 }
 
 async fn execute_result_set_with_text_protocol_on_conn(
@@ -1515,8 +1578,37 @@ pub async fn execute_query_with_max_rows(
     max_rows: Option<usize>,
     dialect: MySqlQueryDialect,
 ) -> Result<QueryResult, String> {
+    log::debug!("[mysql][exec] phase=acquire start sql={}", sql_log_preview(sql));
+    let acquire_start = Instant::now();
     let mut conn = get_conn_with_health_check(pool).await?;
-    execute_query_on_conn_with_max_rows(&mut conn, sql, bare, max_rows, dialect).await
+    let acquire_ms = acquire_start.elapsed().as_millis();
+
+    log::debug!("[mysql][exec] phase=execute start (acquire took {acquire_ms}ms)");
+    let execute_start = Instant::now();
+    let result = execute_query_on_conn_with_max_rows(&mut conn, sql, bare, max_rows, dialect).await;
+    match &result {
+        Ok(r) => log::debug!(
+            "[mysql][exec] phase=execute done in {}ms rows={} (acquire {acquire_ms}ms)",
+            execute_start.elapsed().as_millis(),
+            r.rows.len()
+        ),
+        Err(err) => log::warn!(
+            "[mysql][exec] phase=execute failed in {}ms (acquire {acquire_ms}ms): {err}",
+            execute_start.elapsed().as_millis()
+        ),
+    }
+    result
+}
+
+/// Truncate SQL for log lines so a large statement can't flood the console.
+fn sql_log_preview(sql: &str) -> String {
+    const MAX: usize = 200;
+    let trimmed = sql.trim();
+    let mut preview: String = trimmed.chars().take(MAX).collect();
+    if trimmed.chars().count() > MAX {
+        preview.push_str(" \u{2026}");
+    }
+    preview.replace('\n', " ")
 }
 
 pub async fn execute_query_on_conn_with_max_rows(
@@ -1531,17 +1623,21 @@ pub async fn execute_query_on_conn_with_max_rows(
 
     if is_result_set_query(sql, dialect) {
         if bare || requires_text_protocol_query(sql, dialect) {
+            log::debug!("[mysql][exec] running result-set query via text protocol");
             execute_result_set_with_text_protocol_on_conn(conn, sql, row_limit, start).await
         } else {
+            log::debug!("[mysql][exec] running result-set query via prepared protocol");
             match execute_result_set_with_prepared_protocol_on_conn(conn, sql, row_limit, start).await {
                 Ok(result) => Ok(result),
                 Err(err) if mysql_error_should_retry_with_text_protocol(&err) => {
+                    log::debug!("[mysql][exec] prepared protocol unsupported ({err}); retrying via text protocol");
                     execute_result_set_with_text_protocol_on_conn(conn, sql, row_limit, start).await
                 }
                 Err(err) => Err(err),
             }
         }
     } else {
+        log::debug!("[mysql][exec] running non-result-set statement");
         let previous_explicit_timestamp_defaults = enable_explicit_timestamp_defaults_for_query(conn, sql).await;
         let result = match conn.query_iter(sql).await {
             Ok(result) => result,
