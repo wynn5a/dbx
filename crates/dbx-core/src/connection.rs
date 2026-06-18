@@ -28,6 +28,11 @@ use crate::storage::Storage;
 pub const JDBC_PLUGIN_NOT_INSTALLED: &str =
     "JDBC plugin is not installed. Install the optional JDBC plugin to use this connection.";
 
+/// Upper bound for a single pool's health check during `refresh_connections`.
+/// Keeps the visibility-regain refresh sweep responsive even if one pool's
+/// socket has silently stalled.
+const REFRESH_HEALTH_CHECK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MysqlMode {
     Normal,
@@ -638,6 +643,10 @@ impl AppState {
         self.get_or_create_pool_for_session(connection_id, database, client_session_id).await
     }
 
+    /// Drop a single query tab's session-scoped pool (the `:session:<tab>` key).
+    /// The shared base pool (reused by the schema tree and other tabs) and the
+    /// shared out-of-process agent daemon are deliberately left intact, so closing
+    /// a tab never tears down the connection's driver repository for remaining tabs.
     pub async fn close_client_session_pool(
         &self,
         connection_id: &str,
@@ -688,6 +697,17 @@ impl AppState {
             close_pool_kind(pool).await;
         }
         Ok(closed)
+    }
+
+    /// Remove and close a single pool by its exact key. Used to drop a
+    /// protocol-stateful connection whose query timed out and left the wire
+    /// desynced (or its out-of-process driver killed). The pool is re-created
+    /// lazily on next use via `get_or_create_pool*`.
+    pub async fn discard_pool(&self, pool_key: &str) {
+        let removed = self.connections.write().await.remove(pool_key);
+        if let Some(pool) = removed {
+            close_pool_kind(pool).await;
+        }
     }
 
     pub async fn active_agent_driver_keys(&self) -> HashSet<String> {
@@ -793,35 +813,38 @@ impl AppState {
                 .collect()
         };
 
-        let mut dead_keys = Vec::new();
-        for (key, pool) in &checks {
-            let healthy = match pool {
-                PoolKind::Mysql(p, _) => match db::mysql::get_conn_with_health_check(p).await {
-                    Ok(_) => true,
-                    Err(e) => {
-                        log::warn!("MySQL connection pool '{key}' is unhealthy: {e}");
-                        false
+        // Run health checks concurrently and bound each one: a pool whose socket
+        // has silently stalled (no RST) could otherwise block the whole refresh
+        // sweep — which runs on window-visibility regain — for the full connect
+        // timeout. `Postgres::simple_query` in particular has no inherent timeout,
+        // so wrap every check in an outer deadline and treat elapsed as unhealthy.
+        let health_checks = checks.iter().map(|(key, pool)| async move {
+            let check = async {
+                match pool {
+                    PoolKind::Mysql(p, _) => db::mysql::get_conn_with_health_check(p).await.map(|_| ()),
+                    PoolKind::Postgres(p) => {
+                        let client = p.get().await.map_err(|e| e.to_string())?;
+                        client.simple_query("SELECT 1").await.map(|_| ()).map_err(|e| e.to_string())
                     }
-                },
-                PoolKind::Postgres(p) => match p.get().await {
-                    Ok(client) => match client.simple_query("SELECT 1").await {
-                        Ok(_) => true,
-                        Err(e) => {
-                            log::warn!("PostgreSQL connection pool '{key}' is unhealthy: {e}");
-                            false
-                        }
-                    },
-                    Err(e) => {
-                        log::warn!("PostgreSQL connection pool '{key}' is unhealthy: {e}");
-                        false
-                    }
-                },
-                _ => true,
+                    _ => Ok(()),
+                }
             };
-            if !healthy {
-                dead_keys.push(key.clone());
+            match tokio::time::timeout(REFRESH_HEALTH_CHECK_TIMEOUT, check).await {
+                Ok(Ok(())) => None,
+                Ok(Err(e)) => {
+                    log::warn!("Connection pool '{key}' is unhealthy: {e}");
+                    Some(key.clone())
+                }
+                Err(_) => {
+                    log::warn!(
+                        "Connection pool '{key}' health check timed out after {}s; treating as unhealthy",
+                        REFRESH_HEALTH_CHECK_TIMEOUT.as_secs()
+                    );
+                    Some(key.clone())
+                }
             }
-        }
+        });
+        let dead_keys: Vec<String> = futures::future::join_all(health_checks).await.into_iter().flatten().collect();
 
         // Remove dead pools
         if !dead_keys.is_empty() {
@@ -931,6 +954,10 @@ fn clone_pool_kind(pool: &PoolKind) -> PoolKind {
     }
 }
 
+/// Close a single pool. For agent-backed pools this disconnects only the
+/// *per-connection* driver client; the shared agent daemon in
+/// `AgentManager::daemons` — the driver repository other connections reuse — is
+/// never stopped here.
 pub async fn close_pool_kind(pool: PoolKind) {
     match pool {
         PoolKind::Mysql(p, _) => {
@@ -1469,6 +1496,37 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let storage = Storage::open(&dir.join("storage.db")).await.unwrap();
         (AppState::new(storage), dir)
+    }
+
+    #[tokio::test]
+    async fn closing_a_tab_session_pool_keeps_the_shared_base_pool() {
+        // Item #3 invariant: closing a query tab drops only that tab's
+        // session-scoped pool, never the shared base pool the schema tree and
+        // other tabs reuse. (The shared out-of-process agent daemon is likewise
+        // untouched, but exercising that needs the Java agent runtime, so it is
+        // guarded by doc comments on `close_pool_kind`/`disconnect_db` instead.)
+        let (state, dir) = test_app_state().await;
+        let base_path = dir.join("conn.db");
+        let session_path = dir.join("conn-session.db");
+        std::fs::File::create(&base_path).unwrap();
+        std::fs::File::create(&session_path).unwrap();
+        let base = db::sqlite::connect_path(&base_path.to_string_lossy()).await.unwrap();
+        let session = db::sqlite::connect_path(&session_path.to_string_lossy()).await.unwrap();
+        {
+            let mut conns = state.connections.write().await;
+            conns.insert("conn".to_string(), PoolKind::Sqlite(base));
+            conns.insert("conn:session:tab-123".to_string(), PoolKind::Sqlite(session));
+        }
+
+        let removed = state.close_client_session_pool("conn", None, "tab-123").await.unwrap();
+        assert!(removed, "the tab's own session pool should be dropped");
+
+        let conns = state.connections.read().await;
+        assert!(conns.contains_key("conn"), "shared base pool must survive a tab close");
+        assert!(!conns.contains_key("conn:session:tab-123"), "only the closed tab's session pool is removed");
+        drop(conns);
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     fn touch_executable(path: &std::path::Path) {

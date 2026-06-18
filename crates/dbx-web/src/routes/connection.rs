@@ -96,6 +96,9 @@ pub async fn connection_final_proxy_port(
     Ok(Json(port))
 }
 
+/// Tear down all pools for a connection. Only the per-connection driver clients
+/// are dropped; the shared agent daemon repository (`AgentManager::daemons`) is
+/// left running so other connections of the same driver type keep working.
 pub async fn disconnect_db(
     State(state): State<Arc<WebState>>,
     Json(body): Json<DisconnectRequest>,

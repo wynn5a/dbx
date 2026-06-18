@@ -598,6 +598,10 @@ pub async fn connection_final_proxy_port(
     Ok(port)
 }
 
+/// Tear down all pools for a connection. Only the per-connection driver clients
+/// are disconnected (via `close_pool_kind`); the shared agent daemon repository
+/// (`AgentManager::daemons`) stays alive so other connections of the same driver
+/// type keep working.
 #[tauri::command]
 pub async fn disconnect_db(state: State<'_, Arc<AppState>>, connection_id: String) -> Result<(), String> {
     let mut conns = state.connections.write().await;

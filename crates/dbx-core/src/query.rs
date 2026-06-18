@@ -607,7 +607,16 @@ pub async fn do_execute(
     }
     let pool = connections.get(pool_key).ok_or("Connection not found")?;
 
-    match pool {
+    // Protocol-stateful single-connection pools desync on a query-execution
+    // timeout: the dropped future leaves unread bytes on the wire (SqlServer
+    // TDS), an in-flight stdio response that becomes the next call's reply, or
+    // an out-of-process driver that self-killed its child. These must be
+    // discarded so the next query rebuilds a clean connection. HTTP-per-request
+    // (ClickHouse/Elasticsearch) and self-recycling native pools (MySQL/Postgres)
+    // recover on their own and are left in place.
+    let discard_pool_on_timeout = pool_discards_on_query_timeout(pool);
+
+    let result = match pool {
         PoolKind::DuckDb(con) => {
             let con = con.clone();
             if let Some(ref execution_id) = options.execution_id {
@@ -789,7 +798,32 @@ pub async fn do_execute(
             .await
             .map(|result| normalize_query_result_for_js(truncate_result_with_max_rows(result, max_rows)))
         }
+    };
+
+    if discard_pool_on_timeout {
+        if let Err(e) = &result {
+            if is_query_execution_timeout(e) {
+                log::warn!(
+                    "[query][do_execute] discarding protocol-stateful pool '{pool_key}' after query-execution timeout"
+                );
+                state.discard_pool(pool_key).await;
+            }
+        }
     }
+
+    result
+}
+
+/// Whether a pool must be discarded after a query-execution timeout.
+///
+/// Only protocol-stateful single-connection pools qualify: a dropped/timed-out
+/// future leaves them desynced (unread TDS tokens for SqlServer, an in-flight
+/// stdio response that would become the next call's reply for Agent, or a
+/// self-killed child process for an out-of-process plugin driver). HTTP-per-request
+/// clients (ClickHouse/Elasticsearch) and self-recycling native pools
+/// (MySQL/Postgres/SQLite/DuckDb/...) recover on their own and are kept.
+fn pool_discards_on_query_timeout(pool: &PoolKind) -> bool {
+    matches!(pool, PoolKind::Agent(_) | PoolKind::SqlServer(_) | PoolKind::ExternalDriver { .. })
 }
 
 fn external_driver_query_params(
@@ -1635,6 +1669,21 @@ mod tests {
         assert!(is_query_execution_timeout(&err));
         assert!(is_query_execution_timeout(&timeout_error_after(Duration::from_secs(60))));
         assert!(!is_query_execution_timeout("Postgres connection timed out (30s)"));
+    }
+
+    #[test]
+    fn http_per_request_pools_are_not_discarded_on_query_timeout() {
+        // ClickHouse/Elasticsearch are reqwest HTTP clients: each query is an
+        // independent request, so a timed-out query never desyncs the pool.
+        // Discarding them would needlessly tear down a healthy connection — guard
+        // against accidentally widening the discard set to HTTP-per-request kinds.
+        let ch = crate::connection::PoolKind::ClickHouse(db::clickhouse_driver::ChClient::new(
+            "http://localhost:8123",
+            None,
+            None,
+            Duration::from_secs(5),
+        ));
+        assert!(!pool_discards_on_query_timeout(&ch));
     }
 
     #[test]
