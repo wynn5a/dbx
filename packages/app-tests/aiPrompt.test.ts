@@ -30,7 +30,7 @@ Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
 });
 
-const { buildSystemPrompt } = await import("../../apps/desktop/src/lib/ai.ts");
+const { buildSystemPrompt, buildTurnContextBlock } = await import("../../apps/desktop/src/lib/ai.ts");
 
 function context(overrides: Partial<AiContext> = {}): AiContext {
   return {
@@ -90,6 +90,29 @@ test("focused table context is not presented as a complete table list", () => {
   assert.doesNotMatch(prompt, /Schema context is complete\./);
 });
 
+test("system prompt is stable when only volatile turn context changes (cacheability invariant)", () => {
+  const a = buildSystemPrompt(
+    "generate",
+    context({ currentSql: "select 1", lastError: "boom", lastResultPreview: "x=1" }),
+    "agent",
+  );
+  const b = buildSystemPrompt(
+    "generate",
+    context({ currentSql: "select 2", lastError: undefined, lastResultPreview: undefined }),
+    "agent",
+  );
+  // The cacheable prefix must not change just because the current SQL/error/result did.
+  assert.equal(a, b);
+  assert.doesNotMatch(a, /Current SQL:/);
+  assert.doesNotMatch(a, /Last error:/);
+  assert.doesNotMatch(a, /Last result preview:/);
+
+  // The volatile values instead live in the per-turn context block.
+  const turn = buildTurnContextBlock(context({ currentSql: "select 2", lastError: "nope" }));
+  assert.match(turn, /Current SQL:\nselect 2/);
+  assert.match(turn, /Last error:\nnope/);
+});
+
 test("prompt enforces database dialect and single executable statement safety", () => {
   const prompt = buildSystemPrompt("generate", context({ databaseType: "sqlserver" }), "agent");
 
@@ -97,4 +120,55 @@ test("prompt enforces database dialect and single executable statement safety", 
   assert.match(prompt, /分页、日期函数、字符串拼接/);
   assert.match(prompt, /不要生成多语句 SQL/);
   assert.match(prompt, /不要在同一个回答里混合 SELECT 和写操作/);
+});
+
+test("postgres schema quotes mixed-case identifiers so the model copies the exact reference", () => {
+  const prompt = buildSystemPrompt(
+    "generate",
+    context({
+      databaseType: "postgres",
+      tables: [
+        {
+          schema: "public",
+          name: "AsinSelectionTask",
+          tableType: "TABLE",
+          columns: [
+            { name: "id", data_type: "uuid", is_nullable: false, is_primary_key: true },
+            { name: "createdAt", data_type: "timestamptz", is_nullable: false },
+            { name: "status", data_type: "text", is_nullable: false },
+          ],
+        },
+      ],
+    }),
+    "agent",
+  );
+
+  // Mixed-case table and column appear in their quoted, copy-ready form...
+  assert.match(prompt, /public\."AsinSelectionTask" \(TABLE\)/);
+  assert.match(prompt, /- "createdAt": timestamptz/);
+  // ...while simple lowercase snake_case identifiers stay bare.
+  assert.match(prompt, /- status: text/);
+  // The base rule explains why and points at the quoted schema form.
+  assert.match(prompt, /保留 Schema 中表名和列名的精确大小写/);
+  assert.match(prompt, /混合大小写/);
+});
+
+test("mysql schema quotes mixed-case identifiers with backticks", () => {
+  const prompt = buildSystemPrompt(
+    "generate",
+    context({
+      databaseType: "mysql",
+      tables: [
+        {
+          name: "AsinSelectionTask",
+          tableType: "TABLE",
+          columns: [{ name: "createdAt", data_type: "datetime", is_nullable: false }],
+        },
+      ],
+    }),
+    "agent",
+  );
+
+  assert.match(prompt, /`AsinSelectionTask` \(TABLE\)/);
+  assert.match(prompt, /- `createdAt`: datetime/);
 });

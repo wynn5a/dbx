@@ -59,6 +59,7 @@ import { useDatabaseOptions } from "@/composables/useDatabaseOptions";
 import type { ColumnInfo, DatabaseType, TreeNode, TreeNodeType } from "@/types/database";
 import * as api from "@/lib/api";
 import { uuid } from "@/lib/utils";
+import { isMacOS } from "@/lib/platform";
 import { resolveDefaultDatabase } from "@/lib/defaultDatabase";
 import { canTreeNodeShowExpander, treeItemPaddingLeft, usesFullWidthTreeLabel } from "@/lib/sidebarTreeItemLayout";
 import { buildTableSelectSql } from "@/lib/tableSelectSql";
@@ -343,6 +344,19 @@ function visibleLabel(node: TreeNode): string {
 // (pointermove-driven) evaluates `disabled` — so the measurement stays lazy.
 const labelTooltipEnabled = ref(false);
 
+// Chevron click handler. Stops propagation (so the row's onClick doesn't also
+// run) and honors the context-menu-gesture flag set on mousedown, so a macOS
+// Ctrl+click on the expander opens the menu instead of toggling.
+function onToggleClick(event: MouseEvent) {
+  event.stopPropagation();
+  if (suppressNextClickFromContextMenu) {
+    suppressNextClickFromContextMenu = false;
+    event.preventDefault();
+    return;
+  }
+  void toggle();
+}
+
 async function toggle() {
   const node = props.node;
   if (node.isLoading) return;
@@ -540,6 +554,14 @@ function selectTreeNodeRange(node: TreeNode) {
 function onClick(event: MouseEvent) {
   if (suppressNextTableReferenceClick) {
     suppressNextTableReferenceClick = false;
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+  // A context-menu gesture just opened the menu; the trailing click from that
+  // same gesture (e.g. macOS Ctrl+click) must not also select / activate the row.
+  if (suppressNextClickFromContextMenu) {
+    suppressNextClickFromContextMenu = false;
     event.preventDefault();
     event.stopPropagation();
     return;
@@ -2817,6 +2839,11 @@ let pendingTableReferenceDrag: {
 } | null = null;
 let draggingTableReferencePayload: QueryEditorTableReferencePayload | null = null;
 let suppressNextTableReferenceClick = false;
+// Set when a context-menu gesture opens the menu, so the trailing `click` that
+// some platforms (notably macOS Ctrl+click) fire from the same gesture doesn't
+// also run the row action / selection. Reset on the next mousedown so a fresh
+// left click is never swallowed.
+let suppressNextClickFromContextMenu = false;
 
 function tableReferenceDragPayload(): QueryEditorTableReferencePayload | null {
   if (!canDragTableReference.value) return null;
@@ -2892,6 +2919,13 @@ function startTableReferenceMouseDrag(event: MouseEvent) {
 }
 
 function onRowMouseDown(event: MouseEvent) {
+  // A context-menu gesture — the secondary button, or a macOS Ctrl+left-click
+  // (which acts as a right-click) — opens the menu and must NOT also run the
+  // row's click action. mousedown fires before both `contextmenu` and `click`
+  // (regardless of their order in WebKit) and carries reliable modifier state,
+  // so decide here and let onClick consume the flag. A normal click clears it so
+  // the click is never swallowed.
+  suppressNextClickFromContextMenu = event.button === 2 || (isMacOS() && event.ctrlKey && event.button === 0);
   if (isDraggable.value) {
     startDrag(event, props.node.id, props.node.type);
   } else if (canDragTableReference.value) {
@@ -3404,7 +3438,7 @@ function treeItemMenuItems(): ContextMenuItem[] {
           <button
             type="button"
             class="tree-row-chevron -m-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm"
-            @click.stop="toggle"
+            @click="onToggleClick"
           >
             <Loader2 v-if="node.isLoading" class="w-3.5 h-3.5 animate-spin" />
             <ChevronDown v-else-if="node.isExpanded" class="w-3.5 h-3.5" />

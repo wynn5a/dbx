@@ -14,6 +14,7 @@ import { currentLocale, type Locale } from "@/i18n";
 import { aiTableMentionKey, type AiTableMention } from "@/lib/aiTableMentions";
 import { aiSkillForAction } from "@/lib/aiSkills";
 import { isSchemaAware } from "@/lib/databaseCapabilities";
+import { quoteTableIdentifier } from "@/lib/tableSelectSql";
 
 export type AiAction = "generate" | "explain" | "optimize" | "fix" | "convert" | "sampleData";
 export type AiAssistantMode = "ask" | "agent";
@@ -52,18 +53,28 @@ export interface AiRequestInput {
   context: AiContext;
 }
 
-export async function runAiAction(input: AiRequestInput, history?: api.AiMessage[]): Promise<string> {
+// The system prompt is the stable, cacheable prefix (persona, rules, schema). The
+// per-turn user message carries the skill instruction, the user request, and the
+// volatile context (current SQL / last error / result preview) so the system block
+// stays byte-identical across turns and provider prompt caching can hit.
+function buildTurnUserPrompt(input: AiRequestInput): string {
   const isZh = isChineseLocale(currentLocale());
   const skill = aiSkillForAction(input.action);
-  const systemPrompt = buildSystemPrompt(input.action, input.context, input.mode);
   const instruction = isZh ? skill.userInstruction.zh : skill.userInstruction.en;
-  const userPrompt = [
+  return [
     `Action: ${input.action}`,
     instruction,
     "",
     "User request:",
     input.instruction.trim() || "(No extra instruction provided.)",
+    "",
+    buildTurnContextBlock(input.context),
   ].join("\n");
+}
+
+export async function runAiAction(input: AiRequestInput, history?: api.AiMessage[]): Promise<string> {
+  const systemPrompt = buildSystemPrompt(input.action, input.context, input.mode);
+  const userPrompt = buildTurnUserPrompt(input);
 
   const messages: api.AiMessage[] = [...(history || []), { role: "user", content: userPrompt }];
 
@@ -84,17 +95,8 @@ export async function runAiStream(
   sessionId?: string,
   onReasoningDelta?: (delta: string) => void,
 ): Promise<void> {
-  const isZh = isChineseLocale(currentLocale());
-  const skill = aiSkillForAction(input.action);
   const systemPrompt = buildSystemPrompt(input.action, input.context, input.mode);
-  const instruction = isZh ? skill.userInstruction.zh : skill.userInstruction.en;
-  const userPrompt = [
-    `Action: ${input.action}`,
-    instruction,
-    "",
-    "User request:",
-    input.instruction.trim() || "(No extra instruction provided.)",
-  ].join("\n");
+  const userPrompt = buildTurnUserPrompt(input);
 
   const messages: api.AiMessage[] = [...(history || []), { role: "user", content: userPrompt }];
 
@@ -110,6 +112,61 @@ export async function runAiStream(
       messages,
       maxTokens,
       temperature: params.temperature,
+    },
+    (chunk) => {
+      if (!chunk.done) {
+        if (chunk.reasoning_delta) onReasoningDelta?.(chunk.reasoning_delta);
+        if (chunk.delta) onDelta(chunk.delta);
+      }
+    },
+  );
+}
+
+export async function runAiSummaryStream(
+  input: {
+    config: AiConfig;
+    databaseType: DatabaseType;
+    originalQuestion: string;
+    resultPreview?: string;
+    history?: api.AiMessage[];
+  },
+  onDelta: (delta: string) => void,
+  sessionId?: string,
+  onReasoningDelta?: (delta: string) => void,
+): Promise<void> {
+  const isZh = isChineseLocale(currentLocale());
+  const preview = input.resultPreview?.trim();
+  const systemPrompt = [
+    isZh ? "你是 DBX 内置的数据库助手。用中文回复。" : "You are DBX's built-in database assistant. Reply in English.",
+    isZh
+      ? "下面是刚刚执行的 SQL 查询结果。请用结果中的真实数值直接回答用户的问题，简明扼要。不要输出 SQL 或代码块。"
+      : "Below are the results of a SQL query that was just executed. Answer the user's question directly using the actual values from the results. Be concise. Do not output SQL or code blocks.",
+    "",
+    `Database type: ${input.databaseType}`,
+    "",
+    isZh ? "查询结果：" : "Query results:",
+    preview || (isZh ? "(查询执行成功，没有返回数据行。)" : "(Query executed successfully; no rows returned.)"),
+  ].join("\n");
+
+  const messages: api.AiMessage[] = [
+    ...(input.history || []),
+    {
+      role: "user",
+      content: input.originalQuestion.trim() || (isZh ? "总结上面的查询结果。" : "Summarize the query results above."),
+    },
+  ];
+
+  const sid = sessionId || uuid();
+  const maxTokens = input.config.enableThinking ? 8192 : 1200;
+
+  await api.aiStream(
+    sid,
+    {
+      config: input.config,
+      systemPrompt,
+      messages,
+      maxTokens,
+      temperature: 0.3,
     },
     (chunk) => {
       if (!chunk.done) {
@@ -137,10 +194,12 @@ export function extractSql(text: string): string {
   return text.trim();
 }
 
+// Stable, cacheable system prompt: persona + rules + mode/action + db identity +
+// schema. It must NOT include per-turn volatile content (current SQL, last error,
+// result preview) — that lives in the user turn via buildTurnContextBlock so this
+// prefix stays byte-identical across turns and prompt caching can hit.
 export function buildSystemPrompt(action: AiAction, context: AiContext, mode: AiAssistantMode = "ask"): string {
   const schema = formatSchema(context);
-  const resultPreview = context.lastResultPreview ? `\nLast result preview:\n${context.lastResultPreview}\n` : "";
-  const lastError = context.lastError ? `\nLast error:\n${context.lastError}\n` : "";
   const schemaScope = context.schemaScope ?? "database";
 
   const isZh = isChineseLocale(currentLocale());
@@ -175,13 +234,34 @@ export function buildSystemPrompt(action: AiAction, context: AiContext, mode: Ai
     `Database: ${context.database}`,
     schemaCoverageLine(context, isZh),
     "",
-    `Current SQL:\n${context.currentSql.trim() || "(empty)"}`,
-    lastError,
-    resultPreview,
     `Schema:\n${schema}`,
   );
 
   return lines.filter(Boolean).join("\n");
+}
+
+// Per-turn volatile context appended to the user message (kept out of the system
+// prompt so that prefix stays cacheable). Labels are English regardless of locale,
+// matching the previous in-prompt format.
+export function buildTurnContextBlock(context: AiContext): string {
+  const lines: string[] = [`Current SQL:\n${context.currentSql.trim() || "(empty)"}`];
+  if (context.lastError) lines.push(`\nLast error:\n${context.lastError}`);
+  if (context.lastResultPreview) lines.push(`\nLast result preview:\n${context.lastResultPreview}`);
+  return lines.join("\n");
+}
+
+// Cheap, schema-free refresh of the volatile context fields from the current tab,
+// so a cached schema context can be reused across turns without reloading schema.
+export function buildVolatileContext(tab: QueryTab): {
+  currentSql: string;
+  lastError?: string;
+  lastResultPreview?: string;
+} {
+  return {
+    currentSql: tab.sql,
+    lastError: extractLastError(tab.result),
+    lastResultPreview: formatResultPreview(tab.result),
+  };
 }
 
 function buildBasePromptLines(isZh: boolean): string[] {
@@ -193,6 +273,9 @@ function buildBasePromptLines(isZh: boolean): string[] {
     isZh
       ? "严格使用当前数据库方言；标识符引用、分页、日期函数、字符串拼接、LIMIT/TOP/OFFSET 语法必须匹配数据库类型。"
       : "Strictly use the active database dialect; identifier quoting, pagination, date functions, string concatenation, and LIMIT/TOP/OFFSET syntax must match the database type.",
+    isZh
+      ? "保留 Schema 中表名和列名的精确大小写。会折叠未加引号标识符的方言（PostgreSQL、DuckDB、SQLite 折叠为小写，Oracle 折叠为大写）中，凡不是简单小写蛇形命名的标识符（例如 createdAt 这类混合大小写、含特殊字符或与保留字冲突的名称）都必须用方言对应的引用符包裹（PostgreSQL/Oracle/SQLite 用双引号，MySQL 用反引号，SQL Server 用方括号）。下方 Schema 已将这类标识符以加引号的形式给出，请原样照抄，不要去掉引号。"
+      : "Preserve the exact case of table and column names from the schema. In dialects that fold unquoted identifiers (PostgreSQL, DuckDB, and SQLite fold to lowercase; Oracle to uppercase), any identifier that is not simple lowercase snake_case — e.g. mixed-case names like createdAt, names with special characters, or reserved words — MUST be wrapped in the dialect's quoting character (double quotes for PostgreSQL/Oracle/SQLite, backticks for MySQL, square brackets for SQL Server). The schema below already shows such identifiers in their quoted form; copy them verbatim and do not strip the quotes.",
     isZh
       ? "对于普通数据查询，优先使用下面已加载的 Schema 上下文，不要为了重复确认已给出的结构而查询 information_schema 或系统表。"
       : "For ordinary data queries, prefer the loaded schema context below. Do not query information_schema or system tables merely to rediscover structure already provided.",
@@ -264,12 +347,24 @@ function buildActionPromptLines(action: AiAction, isZh: boolean): string[] {
     : [...skill.systemRules.en, ...skill.outputContract.en];
 }
 
+// Render an identifier the way it must be referenced in the active dialect: bare
+// when it is simple lowercase snake_case, otherwise wrapped in the dialect's
+// quoting character. Dialects that fold unquoted identifiers (Postgres → lower,
+// Oracle → upper) would otherwise turn a bare `createdAt` into `createdat`, so we
+// show the model the exact quoted token to copy.
+function schemaIdentifier(databaseType: DatabaseType, name: string): string {
+  if (/^[a-z_][a-z0-9_]*$/.test(name)) return name;
+  return quoteTableIdentifier(databaseType, name);
+}
+
 function formatSchema(context: AiContext): string {
   if (!context.tables.length) return "(No table schema loaded.)";
+  const dbType = context.databaseType;
 
   return context.tables
     .map((table) => {
-      const name = table.schema ? `${table.schema}.${table.name}` : table.name;
+      const tableRef = schemaIdentifier(dbType, table.name);
+      const name = table.schema ? `${schemaIdentifier(dbType, table.schema)}.${tableRef}` : tableRef;
       const lines: string[] = [`${name} (${table.tableType})`];
       const tableComment = table.comment?.trim();
       if (tableComment) lines.push(`  Comment: ${tableComment}`);
@@ -285,7 +380,7 @@ function formatSchema(context: AiContext): string {
           .join(", ");
         const columnComment = column.comment?.trim();
         lines.push(
-          `  - ${column.name}: ${column.data_type}${flags ? ` (${flags})` : ""}${columnComment ? ` -- ${columnComment}` : ""}`,
+          `  - ${schemaIdentifier(dbType, column.name)}: ${column.data_type}${flags ? ` (${flags})` : ""}${columnComment ? ` -- ${columnComment}` : ""}`,
         );
       }
 
@@ -490,4 +585,17 @@ function formatResultPreview(result?: QueryResult): string | undefined {
     return result.columns.map((column, index) => `${column}=${JSON.stringify(row[index] ?? null)}`).join(", ");
   });
   return rows.join("\n");
+}
+
+// Reduce a finished query result to the agent-loop outcome. `success` mirrors
+// useSqlExecution: the backend signals failure with an "Error" column.
+export function summarizeQueryOutcome(result?: QueryResult): {
+  success: boolean;
+  error?: string;
+  resultPreview?: string;
+} {
+  if (result?.columns.includes("Error")) {
+    return { success: false, error: extractLastError(result) ?? "" };
+  }
+  return { success: true, resultPreview: formatResultPreview(result) };
 }

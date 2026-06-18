@@ -30,7 +30,7 @@ Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
 });
 
-const { buildSystemPrompt } = await import("../../apps/desktop/src/lib/ai.ts");
+const { buildSystemPrompt, buildTurnContextBlock } = await import("../../apps/desktop/src/lib/ai.ts");
 
 function baseContext(overrides: Partial<AiContext> = {}): AiContext {
   return {
@@ -173,7 +173,11 @@ const cases: PromptEvalCase[] = [
 
 for (const item of cases) {
   test(`AI prompt eval: ${item.name}`, () => {
-    const prompt = buildSystemPrompt(item.action, baseContext(item.context), item.mode);
+    // Evaluate what the model actually sees per turn: the stable system prompt
+    // plus the volatile turn-context block that runAiStream appends to the user
+    // message (current SQL / last error / result preview live there now).
+    const context = baseContext(item.context);
+    const prompt = `${buildSystemPrompt(item.action, context, item.mode)}\n${buildTurnContextBlock(context)}`;
 
     for (const pattern of item.mustInclude) {
       assert.match(prompt, pattern, `${item.name} should include ${pattern}`);

@@ -853,6 +853,7 @@ export default {
     thinking: "思考中……",
     reasoningProcess: "思考過程",
     stopGenerating: "停止產生",
+    tableMentionHeader: "資料表",
     tableMentionEmpty: "沒有相符的資料表",
     tableMentionPlaceholderHint: "輸入 {'@'} 可提及資料表作為脈絡",
     tableMentionTypes: {
@@ -882,6 +883,12 @@ export default {
       autoExecute: "準備執行",
       notRequested: "未請求執行",
       skipped: "未執行",
+    },
+    agentOutcome: {
+      executed: "已執行",
+      failed: "執行失敗",
+      retrying: "修復中 ({attempt}/{max})",
+      exhausted: "無法自動修復",
     },
     agentStepTitles: {
       riskCheck: "風險檢查：{action} · {category} · {environment} · {reasons}",

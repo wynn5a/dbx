@@ -43,9 +43,23 @@ import { connectionIconType } from "@/lib/connectionPresentation";
 import DatabaseIcon from "@/components/icons/DatabaseIcon.vue";
 import { useQueryStore } from "@/stores/queryStore";
 import { useToast } from "@/composables/useToast";
-import { buildAiContext, runAiStream, type AiAction } from "@/lib/ai";
-import { buildAiAgentPlan } from "@/lib/aiAgentPlan";
+import {
+  buildAiContext,
+  buildVolatileContext,
+  runAiStream,
+  runAiSummaryStream,
+  type AiAction,
+  type AiContext,
+} from "@/lib/ai";
+import { buildAiAgentPlan, type AiAgentPlan } from "@/lib/aiAgentPlan";
 import { buildAiAgentStepItems, type AiAgentStepItem, type AiAgentStepTone } from "@/lib/aiAgentStepPresentation";
+import {
+  buildAgentFixInstruction,
+  nextAgentLoopStep,
+  MAX_AGENT_FIX_ATTEMPTS,
+  type AiAgentExecutionOutcome,
+} from "@/lib/aiAgentLoop";
+import type { AiSqlExecutionDecision } from "@/lib/aiSqlExecutionPolicy";
 import { createAiShikiCodeHighlighter, type AiCodeHighlighter } from "@/lib/aiCodeHighlighter";
 import { createAiMessageRenderer } from "@/lib/aiMessageRender";
 import { Marked } from "marked";
@@ -54,12 +68,11 @@ import {
   saveAiConversation,
   loadAiConversations,
   deleteAiConversation,
-  listSchemas,
-  listTables,
   type AiConversation,
 } from "@/lib/api";
 import type { AiMessage } from "@/lib/api";
-import type { ConnectionConfig, QueryTab, TableInfo } from "@/types/database";
+import type { ConnectionConfig, QueryTab } from "@/types/database";
+import type { SqlCompletionTable } from "@/lib/sqlCompletion";
 import { useDatabaseOptions } from "@/composables/useDatabaseOptions";
 import {
   decodeSelectableDatabaseValue,
@@ -67,7 +80,6 @@ import {
   formatDatabaseLabel,
   resolveDefaultDatabase,
 } from "@/lib/defaultDatabase";
-import { isSchemaAware } from "@/lib/databaseCapabilities";
 import { copyToClipboard } from "@/lib/clipboard";
 import { formatAiTableMention, parseAiTableMentions, type AiTableMention } from "@/lib/aiTableMentions";
 import { isAiPromptImeCompositionEvent, shouldSubmitAiPromptOnKeydown } from "@/lib/aiPromptKeyboard";
@@ -85,6 +97,7 @@ interface ChatMessage {
   reasoning?: string;
   isThinking?: boolean;
   agentSteps?: AiAgentStepItem[];
+  agentOutcome?: { status: "executed" | "failed" | "retrying" | "exhausted"; error?: string; attempt?: number };
 }
 
 const props = defineProps<{
@@ -95,7 +108,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   replaceSql: [sql: string];
   executeSql: [sql: string];
-  requestAutoExecuteSql: [sql: string];
+  requestAutoExecuteSql: [sql: string, decision: AiSqlExecutionDecision];
   close: [];
 }>();
 
@@ -107,6 +120,19 @@ const activeAction = ref<AiAction>("generate");
 const assistantMode = ref<"ask" | "agent">("ask");
 const currentSessionId = ref("");
 const conversationId = ref("");
+// Bounded agent loop state. A run token identifies one user-initiated agent
+// run; bumping it (new send or cancel) invalidates stale execution callbacks.
+const agentRunToken = ref(0);
+const agentFixAttempts = ref(0);
+const agentUserRequest = ref("");
+const pendingAutoExec = ref<{ assistantIdx: number; sql: string; token: number } | null>(null);
+// Schema context is expensive to build (many backend calls) and large in the
+// prompt. Cache it per (connection, database, mentions, focused table) so turns
+// reuse it instead of rebuilding/re-sending — and so the system prompt prefix
+// stays stable for provider prompt caching. `runSchemaContext` is the context
+// resolved for the active run, reused by its follow-up (fix) turns.
+const cachedSchemaContext = ref<{ signature: string; context: AiContext } | null>(null);
+const runSchemaContext = ref<AiContext | null>(null);
 const conversations = ref<AiConversation[]>([]);
 const showConversationList = ref(false);
 const promptTextareaRef = ref<HTMLTextAreaElement | null>(null);
@@ -282,21 +308,41 @@ function agentStepIcon(tone: AiAgentStepTone) {
 function agentStepClass(tone: AiAgentStepTone): string {
   switch (tone) {
     case "success":
-      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+      return "border-[color-mix(in_srgb,var(--ds-green)_30%,transparent)] bg-[color-mix(in_srgb,var(--ds-green)_14%,transparent)] text-[var(--ds-green)]";
     case "active":
-      return "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300";
+      return "border-[color-mix(in_srgb,var(--ds-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--ds-blue)_14%,transparent)] text-[var(--ds-blue)]";
     case "warning":
-      return "border-amber-500/35 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+      return "border-[color-mix(in_srgb,var(--ds-amber)_35%,transparent)] bg-[color-mix(in_srgb,var(--ds-amber)_14%,transparent)] text-[var(--ds-amber)]";
     case "danger":
-      return "border-red-500/35 bg-red-500/10 text-red-700 dark:text-red-300";
+      return "border-[color-mix(in_srgb,var(--ds-red)_35%,transparent)] bg-[color-mix(in_srgb,var(--ds-red)_14%,transparent)] text-[var(--ds-red)]";
     default:
-      return "border-border bg-background/60 text-muted-foreground";
+      return "border-[var(--ds-border)] bg-[var(--ds-bg-active)] text-[var(--ds-text-3)]";
   }
 }
 
 function agentStepTitle(step: AiAgentStepItem): string {
   if (!step.titleKey) return t(step.labelKey);
   return t(step.titleKey, step.titleParams || {});
+}
+
+type AgentOutcome = NonNullable<ChatMessage["agentOutcome"]>;
+
+function agentOutcomeTone(outcome: AgentOutcome): AiAgentStepTone {
+  if (outcome.status === "executed") return "success";
+  if (outcome.status === "retrying") return "warning";
+  return "danger";
+}
+
+function agentOutcomeLabel(outcome: AgentOutcome): string {
+  if (outcome.status === "executed") return t("ai.agentOutcome.executed");
+  if (outcome.status === "retrying") {
+    return t("ai.agentOutcome.retrying", {
+      attempt: String(outcome.attempt ?? 1),
+      max: String(MAX_AGENT_FIX_ATTEMPTS),
+    });
+  }
+  if (outcome.status === "exhausted") return t("ai.agentOutcome.exhausted");
+  return t("ai.agentOutcome.failed");
 }
 
 function toggleReasoning(index: number) {
@@ -324,17 +370,6 @@ function mentionCacheKey(connectionId: string, database: string, query: string) 
   return `${connectionId}:${database}:${query.toLowerCase()}`;
 }
 
-function mentionSchemaOrder(schemas: string[]): string[] {
-  const currentSchema = props.tab?.tableMeta?.schema;
-  const preferred = [currentSchema, "public", "dbo", "main"].filter((value): value is string => !!value);
-  return [...schemas].sort((a, b) => {
-    const ai = preferred.indexOf(a);
-    const bi = preferred.indexOf(b);
-    if (ai >= 0 || bi >= 0) return (ai >= 0 ? ai : 99) - (bi >= 0 ? bi : 99);
-    return a.localeCompare(b);
-  });
-}
-
 function activeMentionAtCursor(): { start: number; query: string } | null {
   const textarea = promptTextareaRef.value;
   const cursor = textarea?.selectionStart ?? prompt.value.length;
@@ -357,67 +392,59 @@ function normalizeMentionQuery(query: string): { schemaPrefix: string; tableFilt
 async function loadMentionCandidates(query: string) {
   if (!props.connection || !props.tab?.connectionId || !props.tab.database) return;
 
-  const key = mentionCacheKey(props.tab.connectionId, props.tab.database, query);
+  const connectionId = props.tab.connectionId;
+  const database = props.tab.database;
+  const key = mentionCacheKey(connectionId, database, query);
   if (mentionCache.value[key]) {
     mentionCandidates.value = mentionCache.value[key];
     return;
   }
 
   const requestId = ++mentionRequestId;
-  mentionLoading.value = true;
-  mentionError.value = "";
   const { schemaPrefix, tableFilter } = normalizeMentionQuery(query);
+  const bySchemaPrefix = (items: AiMentionCandidate[]) =>
+    schemaPrefix
+      ? items.filter((item) => (item.schema || "").toLowerCase().includes(schemaPrefix.toLowerCase()))
+      : items;
+
+  // Instant path: reuse the SQL editor's warmed in-memory completion index. This
+  // is synchronous and never touches the backend, so the dropdown appears at once
+  // whenever tables have already been loaded for this connection/database.
+  const local = bySchemaPrefix(
+    connectionStore
+      .lookupLocalCompletionTables(connectionId, database, tableFilter, 40)
+      .map(mentionCandidateFromCompletionTable),
+  );
+  if (local.length) {
+    mentionCandidates.value = local;
+    mentionSelectedIndex.value = 0;
+  }
+  mentionLoading.value = local.length === 0;
+  mentionError.value = "";
 
   try {
-    await connectionStore.ensureConnected(props.tab.connectionId);
-    let candidates: AiMentionCandidate[] = [];
-    if (isSchemaAware(props.connection.db_type)) {
-      const schemas = mentionSchemaOrder(await listSchemas(props.tab.connectionId, props.tab.database));
-      const filteredSchemas = schemaPrefix
-        ? schemas.filter((schema) => schema.toLowerCase().includes(schemaPrefix.toLowerCase()))
-        : schemas;
-      const results = await Promise.all(
-        filteredSchemas.slice(0, 8).map(async (schema) => {
-          const tables = await listTables(
-            props.tab!.connectionId,
-            props.tab!.database,
-            schema,
-            tableFilter || undefined,
-            20,
-          );
-          return filterMentionCandidates(
-            tables.map((table) => mentionCandidateFromTable(table, schema)),
-            tableFilter,
-            20,
-          );
-        }),
-      );
-      candidates = results.flat();
-    } else {
-      const schema = props.tab.database || props.connection.database || "main";
-      const tables = await listTables(props.tab.connectionId, props.tab.database, schema, tableFilter || undefined, 40);
-      candidates = filterMentionCandidates(
-        tables.map((table) => mentionCandidateFromTable(table)),
-        tableFilter,
-        40,
-      );
-    }
-
+    // Backfill/refresh from the store's shared, persistent completion cache. It
+    // de-duplicates in-flight requests and only hits the backend on a cold cache,
+    // so mentions and editor autocomplete warm each other.
+    const tables = await connectionStore.listCompletionTables(connectionId, database, tableFilter, 40);
     if (requestId !== mentionRequestId) return;
-    mentionCache.value[key] = candidates.slice(0, 40);
-    mentionCandidates.value = mentionCache.value[key];
+    const candidates = bySchemaPrefix(tables.map(mentionCandidateFromCompletionTable)).slice(0, 40);
+    mentionCache.value[key] = candidates;
+    mentionCandidates.value = candidates;
     mentionSelectedIndex.value = 0;
   } catch (e: any) {
     if (requestId !== mentionRequestId) return;
-    mentionError.value = translateBackendError(t, e?.message || String(e));
-    mentionCandidates.value = [];
+    if (!local.length) {
+      mentionError.value = translateBackendError(t, e?.message || String(e));
+      mentionCandidates.value = [];
+    }
   } finally {
     if (requestId === mentionRequestId) mentionLoading.value = false;
   }
 }
 
-function mentionCandidateFromTable(table: TableInfo, schema?: string): AiMentionCandidate {
-  return { schema, name: table.name, tableType: table.table_type };
+function mentionCandidateFromCompletionTable(table: SqlCompletionTable): AiMentionCandidate {
+  return { schema: table.schema, name: table.name, tableType: table.type === "view" ? "VIEW" : "TABLE" };
 }
 
 function mentionDisplayName(mention: AiTableMention) {
@@ -443,17 +470,6 @@ function formatMentionTableType(tableType: string) {
   if (normalized.includes("SYSTEM")) return t("ai.tableMentionTypes.systemTable");
   if (normalized.includes("TEMP")) return t("ai.tableMentionTypes.temporaryTable");
   return t("ai.tableMentionTypes.table");
-}
-
-function filterMentionCandidates(
-  candidates: AiMentionCandidate[],
-  tableFilter: string,
-  limit: number,
-): AiMentionCandidate[] {
-  const normalizedFilter = tableFilter.toLowerCase();
-  return candidates
-    .filter((candidate) => !normalizedFilter || candidate.name.toLowerCase().includes(normalizedFilter))
-    .slice(0, limit);
 }
 
 function refreshMentionState() {
@@ -539,64 +555,244 @@ async function send() {
   selectedMentions.value = [];
   scrollToBottom();
 
-  const requestedAction = activeAction.value;
   const requestedMode = assistantMode.value;
+  const requestedAction = activeAction.value;
+
+  // Begin a fresh agent run; the token invalidates any in-flight or pending callbacks.
+  const token = ++agentRunToken.value;
+  agentFixAttempts.value = 0;
+  agentUserRequest.value = displayText;
+  pendingAutoExec.value = null;
   isGenerating.value = true;
+
+  let schemaContext: AiContext;
+  try {
+    schemaContext = await getSchemaContext(mentionedTables);
+  } catch (e: any) {
+    messages.value.push({ role: "assistant", content: `Error: ${e?.message || e}` });
+    finalizeRun();
+    return;
+  }
+  runSchemaContext.value = schemaContext;
+
+  const result = await runAgentTurn({
+    action: requestedAction,
+    mode: requestedMode,
+    instruction: displayText,
+    schemaContext,
+  });
+  handleTurnResult({ ...result, mode: requestedMode, token });
+}
+
+// Signature over the inputs that change the schema context. Same signature →
+// reuse the cached context (no rebuild, identical cacheable system prompt).
+function schemaContextSignature(mentionedTables: AiTableMention[]): string {
+  const conn = props.tab?.connectionId || "";
+  const db = props.tab?.database || "";
+  const focused = props.tab?.tableMeta ? `${props.tab.tableMeta.schema || ""}.${props.tab.tableMeta.tableName}` : "";
+  const mentions = mentionedTables
+    .map((m) => `${m.schema || ""}.${m.table}`.toLowerCase())
+    .sort()
+    .join(",");
+  return `${conn}|${db}|${focused}|${mentions}`;
+}
+
+async function getSchemaContext(mentionedTables: AiTableMention[]): Promise<AiContext> {
+  const signature = schemaContextSignature(mentionedTables);
+  const cached = cachedSchemaContext.value;
+  if (cached && cached.signature === signature) return cached.context;
+  const context = await buildAiContext(props.tab!, props.connection!, { mentionedTables });
+  cachedSchemaContext.value = { signature, context };
+  return context;
+}
+
+interface RunAgentTurnParams {
+  action: AiAction;
+  mode: "ask" | "agent";
+  instruction: string;
+  schemaContext: AiContext;
+}
+
+// Run one streaming assistant turn (initial or follow-up). Pushes a fresh
+// assistant bubble, streams into it, and returns the resulting agent plan.
+// `completed` is false when the turn errored or the run was cancelled/superseded.
+async function runAgentTurn(
+  params: RunAgentTurnParams,
+): Promise<{ plan: AiAgentPlan; assistantIdx: number; completed: boolean }> {
   messages.value.push({ role: "assistant", content: "" });
   const assistantIdx = messages.value.length - 1;
   const sessionId = uuid();
   currentSessionId.value = sessionId;
+  const myToken = agentRunToken.value;
+  let errored = false;
+
   try {
-    const context = await buildAiContext(props.tab, props.connection, {
-      mentionedTables,
-    });
-    const history: AiMessage[] = messages.value.slice(0, -2).map((m) => ({
+    // Reuse the run's cached schema context; only the volatile fields (current
+    // SQL / last error / result preview) are refreshed from the tab each turn.
+    const context: AiContext = props.tab
+      ? { ...params.schemaContext, ...buildVolatileContext(props.tab) }
+      : params.schemaContext;
+    const history: AiMessage[] = messages.value.slice(0, assistantIdx).map((m) => ({
       role: m.role,
       content: m.content,
     }));
     await runAiStream(
       {
         config: settings.aiConfig,
-        action: activeAction.value,
-        mode: requestedMode,
-        instruction: displayText,
+        action: params.action,
+        mode: params.mode,
+        instruction: params.instruction,
         context,
       },
       history,
-      (delta) => {
-        appendAssistantDelta(assistantIdx, delta);
-      },
+      (delta) => appendAssistantDelta(assistantIdx, delta),
       sessionId,
-      (reasoningDelta) => {
-        appendAssistantReasoning(assistantIdx, reasoningDelta);
+      (reasoningDelta) => appendAssistantReasoning(assistantIdx, reasoningDelta),
+    );
+  } catch (e: any) {
+    errored = true;
+    messages.value[assistantIdx].content = `Error: ${e.message || e}`;
+  } finally {
+    const msg = messages.value[assistantIdx];
+    if (msg) msg.isThinking = false;
+    if (currentSessionId.value === sessionId) currentSessionId.value = "";
+  }
+
+  const completed = !errored && agentRunToken.value === myToken;
+  const plan = buildAiAgentPlan({
+    mode: params.mode,
+    action: params.action,
+    instruction: params.instruction,
+    assistantContent: messages.value[assistantIdx]?.content || "",
+    connection: props.connection,
+  });
+  if (params.mode === "agent") {
+    messages.value[assistantIdx].agentSteps = buildAiAgentStepItems(plan);
+  }
+  return { plan, assistantIdx, completed };
+}
+
+function handleTurnResult(args: {
+  plan: AiAgentPlan;
+  assistantIdx: number;
+  mode: "ask" | "agent";
+  completed: boolean;
+  token: number;
+}) {
+  const { plan, assistantIdx, mode, completed, token } = args;
+  // Do not auto-run SQL from a cancelled, errored, or superseded turn (#3).
+  if (!completed || token !== agentRunToken.value) {
+    finalizeRun();
+    return;
+  }
+
+  if (mode === "agent" && plan.handoffSql && plan.decision) {
+    emit("requestAutoExecuteSql", plan.handoffSql, plan.decision);
+    if (plan.decision.action === "auto_execute") {
+      // Arm the loop; App.vue runs the SQL and calls reportAutoExecuteOutcome.
+      pendingAutoExec.value = { assistantIdx, sql: plan.handoffSql, token };
+      scrollToBottom();
+      return;
+    }
+  }
+
+  finalizeRun();
+}
+
+function finalizeRun() {
+  isGenerating.value = false;
+  activeAction.value = "generate";
+  currentSessionId.value = "";
+  pendingAutoExec.value = null;
+  persistConversation();
+  scrollToBottom();
+}
+
+// Called by App.vue after it auto-executes a handed-off statement. Drives the
+// bounded loop: summarize on success, self-correct on failure (up to the budget).
+async function reportAutoExecuteOutcome(outcome: AiAgentExecutionOutcome) {
+  const pending = pendingAutoExec.value;
+  if (!pending || pending.token !== agentRunToken.value) return;
+  pendingAutoExec.value = null;
+
+  const target = messages.value[pending.assistantIdx];
+  const step = nextAgentLoopStep(outcome, agentFixAttempts.value);
+
+  if (step.kind === "summarize") {
+    if (target) target.agentOutcome = { status: "executed" };
+    await runSummaryTurn(outcome.resultPreview);
+    return;
+  }
+
+  if (step.kind === "stop") {
+    if (target) target.agentOutcome = { status: "exhausted", error: outcome.error };
+    finalizeRun();
+    return;
+  }
+
+  agentFixAttempts.value = step.attempt;
+  if (target) target.agentOutcome = { status: "retrying", error: outcome.error, attempt: step.attempt };
+
+  if (!props.connection || !props.tab || !runSchemaContext.value) {
+    finalizeRun();
+    return;
+  }
+
+  const instruction = buildAgentFixInstruction(agentUserRequest.value, pending.sql, outcome.error || "");
+  // Reuse the run's schema context so the fix turn keeps the @-mentioned tables
+  // and the cacheable system-prompt prefix stays identical to the initial turn.
+  const result = await runAgentTurn({
+    action: "generate",
+    mode: "agent",
+    instruction,
+    schemaContext: runSchemaContext.value,
+  });
+  handleTurnResult({ ...result, mode: "agent", token: agentRunToken.value });
+}
+
+// Terminal turn: summarize the successful query result in natural language. It
+// never produces auto-executable SQL, so the loop ends here.
+async function runSummaryTurn(resultPreview?: string) {
+  if (!props.connection) {
+    finalizeRun();
+    return;
+  }
+  messages.value.push({ role: "assistant", content: "" });
+  const assistantIdx = messages.value.length - 1;
+  const sessionId = uuid();
+  currentSessionId.value = sessionId;
+  try {
+    const history: AiMessage[] = messages.value.slice(0, assistantIdx).map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+    await runAiSummaryStream(
+      {
+        config: settings.aiConfig,
+        databaseType: props.connection.db_type,
+        originalQuestion: agentUserRequest.value,
+        resultPreview,
+        history,
       },
+      (delta) => appendAssistantDelta(assistantIdx, delta),
+      sessionId,
+      (reasoningDelta) => appendAssistantReasoning(assistantIdx, reasoningDelta),
     );
   } catch (e: any) {
     messages.value[assistantIdx].content = `Error: ${e.message || e}`;
   } finally {
     const msg = messages.value[assistantIdx];
     if (msg) msg.isThinking = false;
-    isGenerating.value = false;
-    const agentPlan = buildAiAgentPlan({
-      mode: requestedMode,
-      action: requestedAction,
-      instruction: displayText,
-      assistantContent: msg?.content || "",
-      connection: props.connection,
-    });
-    if (msg && requestedMode === "agent") msg.agentSteps = buildAiAgentStepItems(agentPlan);
-    if (agentPlan.handoffSql) emit("requestAutoExecuteSql", agentPlan.handoffSql);
-    activeAction.value = "generate";
-    currentSessionId.value = "";
-    persistConversation();
-    scrollToBottom();
   }
+  finalizeRun();
 }
 
 async function cancelStream() {
-  if (currentSessionId.value) {
-    await aiCancelStream(currentSessionId.value).catch(() => {});
-  }
+  // Invalidate the run so any in-flight turn or pending outcome is dropped.
+  agentRunToken.value++;
+  pendingAutoExec.value = null;
+  if (currentSessionId.value) await aiCancelStream(currentSessionId.value).catch(() => {});
+  finalizeRun();
 }
 
 function applySql(code: string) {
@@ -625,6 +821,8 @@ async function copyCode(code: string, key: string) {
 function clearMessages() {
   messages.value = [];
   conversationId.value = "";
+  cachedSchemaContext.value = null;
+  runSchemaContext.value = null;
 }
 
 async function persistConversation() {
@@ -658,6 +856,8 @@ function selectConversation(conv: AiConversation) {
     content: m.content,
     reasoning: m.reasoning,
   }));
+  cachedSchemaContext.value = null;
+  runSchemaContext.value = null;
   showConversationList.value = false;
   scrollToBottom();
 }
@@ -690,14 +890,14 @@ function triggerAction(action: AiAction, instruction?: string) {
   send();
 }
 
-defineExpose({ triggerAction });
+defineExpose({ triggerAction, reportAutoExecuteOutcome });
 
 const markedInstance = new Marked({
   breaks: true,
   gfm: true,
   renderer: {
     code({ text }: { text: string }) {
-      return `<code class="rounded bg-muted px-1.5 py-0.5 text-[11px] font-mono">${text}</code>`;
+      return `<code class="rounded-[4px] bg-[var(--ds-bg-canvas)] px-1.5 py-0.5 text-[11px] font-mono text-[var(--ds-text-1)]">${text}</code>`;
     },
   },
 });
@@ -718,8 +918,11 @@ const messageRenderer = computed(() => {
 
 <template>
   <div class="flex h-full min-h-0 flex-col overflow-hidden">
-    <div class="flex items-center gap-2 border-b px-3 shrink-0 h-10">
-      <span class="flex flex-1 self-stretch items-center truncate text-xs font-medium" data-tauri-drag-region>
+    <div class="flex items-center gap-1 border-b border-[var(--ds-border)] px-2 shrink-0 h-10">
+      <span
+        class="flex flex-1 self-stretch items-center truncate px-1 text-xs font-medium text-[var(--ds-text-2)]"
+        data-tauri-drag-region
+      >
         {{ chatTitle }}
       </span>
       <Button variant="ghost" size="icon-sm" @click="startNewChat" :title="t('ai.newChat')">
@@ -730,33 +933,33 @@ const messageRenderer = computed(() => {
           <Button
             variant="ghost"
             size="icon-sm"
-            :class="{ 'bg-accent': showConversationList }"
+            :class="{ 'bg-[var(--ds-bg-active)] text-[var(--ds-text-1)]': showConversationList }"
             :title="t('history.title')"
           >
             <History class="h-3.5 w-3.5" />
           </Button>
         </PopoverTrigger>
         <PopoverContent align="end" class="w-72 gap-0 p-0" @click.stop>
-          <div class="flex items-center border-b px-3 py-2">
-            <span class="flex-1 text-xs font-medium">{{ t("history.title") }}</span>
+          <div class="flex items-center border-b border-[var(--ds-border)] px-3 py-2">
+            <span class="flex-1 text-xs font-medium text-[var(--ds-text-2)]">{{ t("history.title") }}</span>
             <Button variant="ghost" size="icon-sm" @click="startNewChat">
               <MessageSquarePlus class="h-3.5 w-3.5" />
             </Button>
           </div>
-          <div v-if="!conversations.length" class="p-3 text-center text-xs text-muted-foreground">
+          <div v-if="!conversations.length" class="p-3 text-center text-xs text-[var(--ds-text-3)]">
             {{ t("history.empty") }}
           </div>
           <div v-else class="max-h-64 overflow-auto p-1">
             <div
               v-for="conv in conversations"
               :key="conv.id"
-              class="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted"
-              :class="{ 'bg-muted': conv.id === conversationId }"
+              class="group flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs text-[var(--ds-text-2)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)]"
+              :class="{ 'bg-[var(--ds-bg-active)] text-[var(--ds-text-1)]': conv.id === conversationId }"
               @click="selectConversation(conv)"
             >
               <span class="min-w-0 flex-1 truncate">{{ conv.title }}</span>
               <button
-                class="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-background hover:text-destructive"
+                class="shrink-0 rounded p-0.5 text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-red)]"
                 @click.stop="deleteConversation(conv.id)"
               >
                 <X class="h-3 w-3" />
@@ -775,25 +978,29 @@ const messageRenderer = computed(() => {
 
     <div
       v-if="messages.length === 0"
-      class="flex-1 min-h-0 flex flex-col items-center justify-center text-center text-muted-foreground"
+      class="flex-1 min-h-0 flex flex-col items-center justify-center gap-2.5 px-6 text-center"
     >
-      <Bot class="h-10 w-10 mb-3 opacity-30" />
-      <p class="text-sm">{{ t("ai.welcome") }}</p>
+      <Bot class="h-9 w-9 text-[var(--ds-text-4)]" />
+      <p class="text-[13px] text-[var(--ds-text-2)]">{{ t("ai.welcome") }}</p>
     </div>
     <ScrollArea v-else ref="scrollRef" class="min-h-0 flex-1 overflow-hidden">
       <div class="flex flex-col gap-3 p-3">
         <template v-for="(msg, i) in messages" :key="i">
           <div v-if="msg.role === 'user'" class="flex justify-end">
-            <div class="max-w-[85%] rounded-lg bg-primary px-3 py-2 text-xs text-primary-foreground">
+            <div
+              class="max-w-[85%] rounded-lg border border-[var(--ds-accent-line)] bg-[var(--ds-accent-soft)] px-3 py-2 text-xs leading-relaxed text-[var(--ds-text-1)]"
+            >
               {{ msg.content }}
             </div>
           </div>
 
           <div v-else-if="msg.content || msg.reasoning || msg.isThinking" class="flex">
-            <div class="max-w-[95%] rounded-lg bg-muted px-3 py-2 text-xs leading-relaxed">
+            <div
+              class="max-w-[95%] rounded-lg border border-[var(--ds-border)] bg-[var(--ds-bg-elevated)] px-3 py-2 text-xs leading-relaxed text-[var(--ds-text-1)]"
+            >
               <div v-if="msg.reasoning || msg.isThinking" class="mb-2">
                 <button
-                  class="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                  class="flex items-center gap-1 text-[11px] text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:text-[var(--ds-text-1)]"
                   @click="toggleReasoning(i)"
                 >
                   <ChevronRight
@@ -811,7 +1018,7 @@ const messageRenderer = computed(() => {
                   }"
                 >
                   <div
-                    class="mt-1.5 pl-4 border-l-2 border-muted-foreground/20 text-[11px] text-muted-foreground whitespace-pre-wrap"
+                    class="mt-1.5 pl-4 border-l-2 border-[var(--ds-border-strong)] text-[11px] text-[var(--ds-text-3)] whitespace-pre-wrap"
                   >
                     {{ msg.reasoning }}
                   </div>
@@ -829,24 +1036,34 @@ const messageRenderer = computed(() => {
                   <span class="truncate">{{ t(step.labelKey) }}</span>
                 </span>
               </div>
+              <div v-if="msg.agentOutcome" class="mb-2 flex flex-wrap gap-1.5">
+                <span
+                  class="inline-flex h-5 max-w-full items-center gap-1 rounded-full border px-1.5 text-[10px] font-medium"
+                  :class="agentStepClass(agentOutcomeTone(msg.agentOutcome))"
+                  :title="msg.agentOutcome.error || ''"
+                >
+                  <component :is="agentStepIcon(agentOutcomeTone(msg.agentOutcome))" class="h-3 w-3 shrink-0" />
+                  <span class="truncate">{{ agentOutcomeLabel(msg.agentOutcome) }}</span>
+                </span>
+              </div>
               <template v-for="(seg, j) in messageRenderer.render(msg.content)" :key="j">
                 <div v-if="seg.type === 'text'" class="ai-markdown whitespace-normal">
                   <div v-html="seg.html" />
                 </div>
                 <div
                   v-else
-                  class="my-2 overflow-hidden rounded-md border border-zinc-200 bg-zinc-50 dark:border-zinc-700/50 dark:bg-zinc-900"
+                  class="my-2 overflow-hidden rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)]"
                 >
                   <div
-                    class="flex items-center border-b border-zinc-200 px-3 py-1.5 text-[10px] font-medium text-zinc-600 dark:border-zinc-700/50 dark:text-zinc-400"
+                    class="flex items-center border-b border-[var(--ds-border)] px-3 py-1.5 text-[10px] font-medium text-[var(--ds-text-3)]"
                   >
                     <component :is="seg.isSql ? Database : Terminal" class="h-3 w-3 mr-1.5" />
-                    <span>{{ seg.lang }}</span>
+                    <span class="font-mono uppercase tracking-wide">{{ seg.lang }}</span>
                     <span class="flex-1" />
                     <div class="flex items-center gap-1.5">
                       <button
                         v-if="seg.isSql"
-                        class="rounded p-0.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+                        class="rounded p-0.5 text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]"
                         :title="t('ai.executeSql')"
                         @click="executeSql(seg.content)"
                       >
@@ -854,26 +1071,26 @@ const messageRenderer = computed(() => {
                       </button>
                       <button
                         v-if="seg.isSql"
-                        class="rounded p-0.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+                        class="rounded p-0.5 text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]"
                         :title="t('ai.apply')"
                         @click="applySql(seg.content)"
                       >
                         <Replace class="h-3.5 w-3.5" />
                       </button>
                       <button
-                        class="rounded p-0.5 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+                        class="rounded p-0.5 text-[var(--ds-text-3)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]"
                         :title="
                           copiedIndex === `${i}-${j}` ? t('ai.copied') : t(seg.isSql ? 'ai.copySql' : 'ai.copyCode')
                         "
                         @click="copyCode(seg.content, `${i}-${j}`)"
                       >
-                        <Check v-if="copiedIndex === `${i}-${j}`" class="h-3.5 w-3.5 text-green-400" />
+                        <Check v-if="copiedIndex === `${i}-${j}`" class="h-3.5 w-3.5 text-[var(--ds-green)]" />
                         <Copy v-else class="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
                   <pre
-                    class="ai-code-block whitespace-pre-wrap break-words p-3 text-xs leading-relaxed text-zinc-900 dark:text-zinc-100"
+                    class="ai-code-block whitespace-pre-wrap break-words p-3 text-xs leading-relaxed text-[var(--ds-text-1)]"
                   ><code v-html="seg.html"></code></pre>
                 </div>
               </template>
@@ -881,7 +1098,7 @@ const messageRenderer = computed(() => {
           </div>
         </template>
 
-        <div v-if="isWaitingForFirstDelta" class="flex items-center gap-2 text-xs text-muted-foreground">
+        <div v-if="isWaitingForFirstDelta" class="flex items-center gap-2 text-xs text-[var(--ds-text-3)]">
           <Loader2 class="h-3.5 w-3.5 animate-spin" />
           <span>{{ t("ai.thinking") }}</span>
         </div>
@@ -889,13 +1106,18 @@ const messageRenderer = computed(() => {
     </ScrollArea>
 
     <div class="p-2">
-      <div class="relative rounded-lg border bg-background px-2 pb-2 pt-1">
-        <div v-if="connectionStore.connections.length" class="flex items-center gap-1 mb-1 text-xs text-foreground/80">
+      <div
+        class="relative rounded-lg border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-2 pb-2 pt-1 transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] focus-within:border-[var(--ds-accent-line)]"
+      >
+        <div
+          v-if="connectionStore.connections.length"
+          class="flex items-center gap-1 mb-1 text-xs text-[var(--ds-text-3)]"
+        >
           <DatabaseIcon v-if="connection" :db-type="connectionIconType(connection)" class="h-3 w-3 shrink-0" />
           <Server v-else class="h-3 w-3 shrink-0" />
           <Select :model-value="connection?.id || ''" @update:model-value="(v: any) => changeConnection(v)">
             <SelectTrigger
-              class="h-5 w-auto border-0 rounded-md bg-transparent dark:bg-transparent p-0 px-1 text-xs text-foreground/80 shadow-none focus:ring-0 focus-visible:ring-0 [&_svg]:size-3"
+              class="h-5 w-auto border-0 rounded-md bg-transparent dark:bg-transparent p-0 px-1 text-xs text-[var(--ds-text-3)] shadow-none focus:ring-0 focus-visible:ring-0 [&_svg]:size-3"
             >
               <SelectValue :placeholder="t('editor.selectConnection')">{{
                 connection?.name || t("editor.selectConnection")
@@ -911,7 +1133,7 @@ const messageRenderer = computed(() => {
             </SelectContent>
           </Select>
           <template v-if="connection">
-            <Database class="h-3 w-3 shrink-0 text-foreground/40" />
+            <Database class="h-3 w-3 shrink-0 text-[var(--ds-text-4)]" />
             <Select
               :model-value="selectedDatabaseSelectValue"
               @update:model-value="(v: any) => changeDatabase(v)"
@@ -922,7 +1144,7 @@ const messageRenderer = computed(() => {
               "
             >
               <SelectTrigger
-                class="h-5 w-auto border-0 rounded-md bg-transparent dark:bg-transparent p-0 px-1 text-xs text-foreground/80 shadow-none focus:ring-0 focus-visible:ring-0 [&_svg]:size-3"
+                class="h-5 w-auto border-0 rounded-md bg-transparent dark:bg-transparent p-0 px-1 text-xs text-[var(--ds-text-3)] shadow-none focus:ring-0 focus-visible:ring-0 [&_svg]:size-3"
               >
                 <SelectValue :placeholder="t('editor.selectDatabase')">{{ selectedDatabaseLabel }}</SelectValue>
               </SelectTrigger>
@@ -939,33 +1161,38 @@ const messageRenderer = computed(() => {
         </div>
         <div
           v-if="mentionOpen"
-          class="absolute bottom-full left-2 right-2 z-20 mb-1 max-h-56 overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md"
+          class="ds-popover absolute bottom-full left-2 right-2 z-20 mb-1.5 overflow-hidden p-1 text-[var(--ds-text-1)]"
         >
-          <div v-if="mentionLoading" class="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground">
+          <div class="ds-menu-label flex items-center gap-1.5 px-2 pb-1 pt-1.5">
+            <Table2 class="h-3 w-3" />
+            <span>{{ t("ai.tableMentionHeader") }}</span>
+          </div>
+          <div v-if="mentionLoading" class="flex items-center gap-2 px-2 py-2 text-[12px] text-[var(--ds-text-3)]">
             <Loader2 class="h-3.5 w-3.5 animate-spin" />
             <span>{{ t("common.loading") }}</span>
           </div>
-          <div v-else-if="mentionError" class="px-2 py-2 text-xs text-destructive">
+          <div v-else-if="mentionError" class="px-2 py-2 text-[12px] text-[var(--ds-red)]">
             {{ mentionError }}
           </div>
-          <div v-else-if="!mentionCandidates.length" class="px-2 py-2 text-xs text-muted-foreground">
+          <div v-else-if="!mentionCandidates.length" class="px-2 py-2 text-[12px] text-[var(--ds-text-3)]">
             {{ t("ai.tableMentionEmpty") }}
           </div>
-          <div v-else class="max-h-56 overflow-auto p-1">
+          <div v-else class="max-h-56 overflow-auto">
             <button
               v-for="(candidate, index) in mentionCandidates"
               :key="`${candidate.schema || ''}.${candidate.name}`"
               type="button"
-              class="flex w-full min-w-0 items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
-              :class="{ 'bg-muted': index === mentionSelectedIndex }"
+              class="flex w-full min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-[13px] leading-4 text-[var(--ds-text-2)] outline-hidden transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[var(--ds-accent-soft)] hover:text-[var(--ds-text-1)]"
+              :class="{ 'bg-[var(--ds-accent-soft)] text-[var(--ds-text-1)]': index === mentionSelectedIndex }"
               @mousedown.prevent="insertMention(candidate)"
               @mouseenter="mentionSelectedIndex = index"
             >
-              <Table2 class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <Table2 class="h-3.5 w-3.5 shrink-0 text-[var(--ds-text-3)]" />
               <span class="min-w-0 flex-1 truncate">
-                <template v-if="candidate.schema">{{ candidate.schema }}.</template>{{ candidate.name }}
+                <span v-if="candidate.schema" class="text-[var(--ds-text-3)]">{{ candidate.schema }}.</span
+                >{{ candidate.name }}
               </span>
-              <span class="shrink-0 text-[10px] text-muted-foreground">{{
+              <span class="shrink-0 text-[10px] uppercase tracking-wide text-[var(--ds-text-4)]">{{
                 formatMentionTableType(candidate.tableType)
               }}</span>
             </button>
@@ -976,20 +1203,20 @@ const messageRenderer = computed(() => {
             v-for="mention in promptMentionChips"
             :key="mention.raw"
             type="button"
-            class="group inline-flex max-w-full items-center gap-1 rounded border border-border/80 bg-muted/60 px-1.5 py-0.5 text-[11px] text-foreground/90 hover:bg-muted"
+            class="group inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--ds-border)] bg-[var(--ds-bg-hover)] px-2 py-0.5 text-[11px] text-[var(--ds-text-2)] transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-bg-active)] hover:text-[var(--ds-text-1)]"
             :title="mentionDisplayName(mention)"
             @click="removeMentionChip(mention)"
           >
-            <Table2 class="h-3 w-3 shrink-0 text-primary" />
+            <Table2 class="h-3 w-3 shrink-0 text-[var(--ds-accent)]" />
             <span class="truncate">{{ mentionDisplayName(mention) }}</span>
-            <X class="h-3 w-3 shrink-0 text-muted-foreground group-hover:text-foreground" />
+            <X class="h-3 w-3 shrink-0 text-[var(--ds-text-3)] group-hover:text-[var(--ds-text-1)]" />
           </button>
         </div>
         <textarea
           ref="promptTextareaRef"
           v-model="prompt"
           rows="3"
-          class="w-full resize-none bg-transparent text-xs outline-none placeholder:text-muted-foreground mb-1"
+          class="w-full resize-none bg-transparent text-xs text-[var(--ds-text-1)] outline-none placeholder:text-[var(--ds-text-3)] mb-1"
           :placeholder="activePlaceholder"
           :disabled="isGenerating"
           @input="refreshMentionState"
@@ -1016,7 +1243,7 @@ const messageRenderer = computed(() => {
           <span class="flex-1" />
           <button
             v-if="isGenerating"
-            class="h-7 w-7 shrink-0 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center"
+            class="h-7 w-7 shrink-0 rounded-full border border-[color-mix(in_srgb,var(--ds-red)_25%,transparent)] bg-[color-mix(in_srgb,var(--ds-red)_16%,transparent)] text-[var(--ds-red)] flex items-center justify-center transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:bg-[color-mix(in_srgb,var(--ds-red)_24%,transparent)]"
             :title="t('ai.stopGenerating')"
             @click="cancelStream"
           >
@@ -1024,7 +1251,7 @@ const messageRenderer = computed(() => {
           </button>
           <button
             v-else
-            class="h-7 w-7 shrink-0 rounded-full bg-foreground text-background flex items-center justify-center disabled:opacity-30"
+            class="h-7 w-7 shrink-0 rounded-full bg-[var(--ds-accent)] text-white flex items-center justify-center transition-[filter,opacity] duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:brightness-110 disabled:opacity-30 disabled:hover:brightness-100"
             :disabled="!prompt.trim() || !props.tab?.database"
             @click="send"
           >
@@ -1073,24 +1300,26 @@ const messageRenderer = computed(() => {
   font-weight: 600;
 }
 .ai-markdown :deep(a) {
-  color: hsl(var(--primary));
+  color: var(--ds-accent);
   text-decoration: underline;
 }
 .ai-markdown :deep(blockquote) {
-  border-left: 2px solid hsl(var(--muted-foreground) / 0.3);
+  border-left: 2px solid var(--ds-border-strong);
   padding-left: 0.75em;
   margin: 0.3em 0;
-  color: hsl(var(--muted-foreground));
+  color: var(--ds-text-3);
 }
 .ai-markdown :deep(code) {
   border-radius: 0.25rem;
-  background: hsl(var(--muted));
+  background: var(--ds-bg-canvas);
+  color: var(--ds-text-1);
   padding: 0.125rem 0.375rem;
   font-size: 11px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--ds-mono);
 }
 .ai-markdown :deep(pre) {
-  background: hsl(var(--muted));
+  background: var(--ds-bg-canvas);
+  border: 1px solid var(--ds-border);
   border-radius: 0.375rem;
   padding: 0.5em 0.75em;
   margin: 0.3em 0;
@@ -1107,13 +1336,13 @@ const messageRenderer = computed(() => {
 }
 .ai-markdown :deep(th),
 .ai-markdown :deep(td) {
-  border: 1px solid hsl(var(--border));
+  border: 1px solid var(--ds-border);
   padding: 0.25em 0.5em;
   text-align: left;
 }
 .ai-markdown :deep(th) {
   font-weight: 600;
-  background: hsl(var(--muted));
+  background: var(--ds-bg-canvas);
 }
 .ai-code-block :deep(.line) {
   min-height: 1lh;

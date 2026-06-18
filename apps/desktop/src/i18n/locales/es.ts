@@ -831,10 +831,17 @@ export default {
     reasoningProcess: "Proceso de razonamiento",
     stopGenerating: "Detener generación",
     fixWithAi: "Corregir con IA",
+    tableMentionHeader: "Tablas",
     truncated: "Contexto truncado",
     contextSummary: "{database} · {tables} tablas",
     autoSqlBlocked:
       "El SQL generado por la IA parecía demasiado riesgoso para ejecutarse automáticamente. Revísalo manualmente antes de ejecutar.",
+    agentOutcome: {
+      executed: "Ejecutado",
+      failed: "Error de ejecución",
+      retrying: "Corrigiendo ({attempt}/{max})",
+      exhausted: "No se pudo corregir",
+    },
     proxy: "Proxy",
     proxyEnable: "Enviar solicitudes de IA mediante proxy",
     proxyDescription: "Enruta el tráfico del asistente a través de un proxy local o corporativo.",

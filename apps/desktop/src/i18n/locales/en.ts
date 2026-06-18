@@ -922,6 +922,7 @@ export default {
     thinking: "Thinking...",
     reasoningProcess: "Thinking process",
     stopGenerating: "Stop generating",
+    tableMentionHeader: "Tables",
     tableMentionEmpty: "No matching tables",
     tableMentionPlaceholderHint: "Type {'@'} to mention tables for context",
     tableMentionTypes: {
@@ -951,6 +952,12 @@ export default {
       autoExecute: "Ready to run",
       notRequested: "Run not requested",
       skipped: "Not run",
+    },
+    agentOutcome: {
+      executed: "Executed",
+      failed: "Execution failed",
+      retrying: "Fixing ({attempt}/{max})",
+      exhausted: "Couldn't auto-fix",
     },
     agentStepTitles: {
       riskCheck: "Risk check: {action} · {category} · {environment} · {reasons}",

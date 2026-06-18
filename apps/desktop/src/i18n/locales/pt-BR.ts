@@ -907,6 +907,7 @@ export default {
     thinking: "Pensando...",
     reasoningProcess: "Processo de raciocínio",
     stopGenerating: "Parar geração",
+    tableMentionHeader: "Tabelas",
     tableMentionEmpty: "Nenhuma tabela correspondente",
     tableMentionPlaceholderHint: "Digite {'@'} para mencionar tabelas como contexto",
     tableMentionTypes: {
@@ -937,6 +938,12 @@ export default {
       autoExecute: "Pronto para executar",
       notRequested: "Execução não solicitada",
       skipped: "Não executado",
+    },
+    agentOutcome: {
+      executed: "Executado",
+      failed: "Falha na execução",
+      retrying: "Corrigindo ({attempt}/{max})",
+      exhausted: "Não foi possível corrigir",
     },
     agentStepTitles: {
       riskCheck: "Verificação de risco: {action} · {category} · {environment} · {reasons}",

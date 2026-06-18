@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
+use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::{Notify, RwLock};
@@ -318,6 +319,18 @@ pub fn extract_error(data: &serde_json::Value) -> Option<String> {
     data["error"]["message"].as_str().or_else(|| data["error"].as_str()).map(ToString::to_string)
 }
 
+/// Build the Claude `system` field as a single cacheable text block. Marking it
+/// ephemeral lets Anthropic cache the (stable) system prompt across turns and read
+/// it back at a fraction of the input cost; below the model's minimum cacheable
+/// size Anthropic simply ignores the directive, so this is always safe to send.
+pub fn claude_system_blocks(system_prompt: &str) -> serde_json::Value {
+    json!([{
+        "type": "text",
+        "text": system_prompt,
+        "cache_control": { "type": "ephemeral" },
+    }])
+}
+
 pub fn build_responses_input(system_prompt: &str, messages: &[AiMessage]) -> serde_json::Value {
     let mut input = Vec::new();
     if !system_prompt.is_empty() {
@@ -503,7 +516,7 @@ pub async fn call_claude(client: &reqwest::Client, request: AiCompletionRequest)
         "model": request.config.model,
         "max_tokens": request.max_tokens.unwrap_or(2048),
         "temperature": request.temperature.unwrap_or(0.2),
-        "system": request.system_prompt,
+        "system": claude_system_blocks(&request.system_prompt),
         "messages": request.messages,
     });
 
@@ -721,6 +734,55 @@ pub async fn stream(
     }
 }
 
+/// Reads a Server-Sent Events byte stream and invokes `on_line` for each
+/// complete `\n`-terminated line, decoded as UTF-8.
+///
+/// Bytes are buffered and split only on the `\n` delimiter (0x0A, which never
+/// occurs inside a multi-byte UTF-8 sequence), so characters straddling network
+/// chunk boundaries are decoded intact instead of being mangled into replacement
+/// characters. Returns when the stream ends, `on_line` asks to stop, or
+/// cancellation fires.
+async fn read_sse_stream<F>(res: reqwest::Response, cancelled: &Notify, mut on_line: F) -> Result<(), String>
+where
+    F: FnMut(&str) -> ControlFlow<()>,
+{
+    let mut byte_stream = res.bytes_stream();
+    let mut buf: Vec<u8> = Vec::new();
+
+    loop {
+        tokio::select! {
+            chunk = byte_stream.next() => {
+                let Some(chunk) = chunk else { break };
+                let chunk = chunk.map_err(|e| e.to_string())?;
+                buf.extend_from_slice(&chunk);
+
+                for line in drain_complete_lines(&mut buf) {
+                    if on_line(&line).is_break() {
+                        return Ok(());
+                    }
+                }
+            }
+            _ = cancelled.notified() => { break; }
+        }
+    }
+
+    Ok(())
+}
+
+/// Drains every complete `\n`-terminated line from `buf`, decoded as UTF-8, and
+/// leaves any trailing partial line in `buf`. Splitting on `\n` (which never
+/// appears inside a multi-byte UTF-8 sequence) means a character straddling two
+/// network chunks stays buffered until its bytes are complete.
+fn drain_complete_lines(buf: &mut Vec<u8>) -> Vec<String> {
+    let mut lines = Vec::new();
+    while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+        let mut line: Vec<u8> = buf.drain(..=pos).collect();
+        line.pop(); // drop the trailing '\n'
+        lines.push(String::from_utf8_lossy(&line).into_owned());
+    }
+    lines
+}
+
 async fn stream_claude(
     client: &reqwest::Client,
     session_id: &str,
@@ -732,7 +794,7 @@ async fn stream_claude(
         "model": request.config.model,
         "max_tokens": request.max_tokens.unwrap_or(2048),
         "temperature": request.temperature.unwrap_or(0.2),
-        "system": request.system_prompt,
+        "system": claude_system_blocks(&request.system_prompt),
         "messages": request.messages,
         "stream": true,
     });
@@ -750,44 +812,26 @@ async fn stream_claude(
         return Err(extract_error(&data).unwrap_or_else(|| "Claude API error".to_string()));
     }
 
-    let mut byte_stream = res.bytes_stream();
-    let mut buf = String::new();
-
-    loop {
-        tokio::select! {
-            chunk = byte_stream.next() => {
-                let Some(chunk) = chunk else { break };
-                let chunk = chunk.map_err(|e| e.to_string())?;
-                buf.push_str(&String::from_utf8_lossy(&chunk));
-
-                let mut finished = false;
-                while let Some(pos) = buf.find('\n') {
-                    let line = buf[..pos].to_string();
-                    buf = buf[pos + 1..].to_string();
-
-                    let Some(data) = stream_data_payload(&line) else { continue };
-                    if data == "[DONE]" {
-                        finished = true;
-                        break;
-                    }
-
-                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
-                        if let Some(text) = claude_stream_text(&event) {
-                            on_chunk(AiStreamChunk {
-                                session_id: session_id.to_string(),
-                                delta: text.to_string(),
-                                reasoning_delta: None,
-                                done: false,
-                            });
-                        }
-                    }
-                }
-
-                if finished { break; }
-            }
-            _ = cancelled.notified() => { break; }
+    read_sse_stream(res, cancelled, |line| {
+        let Some(data) = stream_data_payload(line) else {
+            return ControlFlow::Continue(());
+        };
+        if data == "[DONE]" {
+            return ControlFlow::Break(());
         }
-    }
+        if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+            if let Some(text) = claude_stream_text(&event) {
+                on_chunk(AiStreamChunk {
+                    session_id: session_id.to_string(),
+                    delta: text.to_string(),
+                    reasoning_delta: None,
+                    done: false,
+                });
+            }
+        }
+        ControlFlow::Continue(())
+    })
+    .await?;
 
     on_chunk(AiStreamChunk {
         session_id: session_id.to_string(),
@@ -837,52 +881,34 @@ async fn stream_openai(
         return Err(extract_error(&data).unwrap_or_else(|| "API error".to_string()));
     }
 
-    let mut byte_stream = res.bytes_stream();
-    let mut buf = String::new();
-
-    loop {
-        tokio::select! {
-            chunk = byte_stream.next() => {
-                let Some(chunk) = chunk else { break };
-                let chunk = chunk.map_err(|e| e.to_string())?;
-                buf.push_str(&String::from_utf8_lossy(&chunk));
-
-                let mut finished = false;
-                while let Some(pos) = buf.find('\n') {
-                    let line = buf[..pos].to_string();
-                    buf = buf[pos + 1..].to_string();
-
-                    let Some(data) = stream_data_payload(&line) else { continue };
-                    if data == "[DONE]" {
-                        finished = true;
-                        break;
-                    }
-
-                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
-                        if let Some(reasoning) = openai_stream_reasoning(&event) {
-                            on_chunk(AiStreamChunk {
-                                session_id: session_id.to_string(),
-                                delta: String::new(),
-                                reasoning_delta: Some(reasoning.to_string()),
-                                done: false,
-                            });
-                        }
-                        if let Some(text) = openai_stream_text(&event) {
-                            on_chunk(AiStreamChunk {
-                                session_id: session_id.to_string(),
-                                delta: text,
-                                reasoning_delta: None,
-                                done: false,
-                            });
-                        }
-                    }
-                }
-
-                if finished { break; }
-            }
-            _ = cancelled.notified() => { break; }
+    read_sse_stream(res, cancelled, |line| {
+        let Some(data) = stream_data_payload(line) else {
+            return ControlFlow::Continue(());
+        };
+        if data == "[DONE]" {
+            return ControlFlow::Break(());
         }
-    }
+        if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+            if let Some(reasoning) = openai_stream_reasoning(&event) {
+                on_chunk(AiStreamChunk {
+                    session_id: session_id.to_string(),
+                    delta: String::new(),
+                    reasoning_delta: Some(reasoning.to_string()),
+                    done: false,
+                });
+            }
+            if let Some(text) = openai_stream_text(&event) {
+                on_chunk(AiStreamChunk {
+                    session_id: session_id.to_string(),
+                    delta: text,
+                    reasoning_delta: None,
+                    done: false,
+                });
+            }
+        }
+        ControlFlow::Continue(())
+    })
+    .await?;
 
     on_chunk(AiStreamChunk {
         session_id: session_id.to_string(),
@@ -924,44 +950,26 @@ async fn stream_responses_api(
         return Err(extract_error(&data).unwrap_or_else(|| "API error".to_string()));
     }
 
-    let mut byte_stream = res.bytes_stream();
-    let mut buf = String::new();
-
-    loop {
-        tokio::select! {
-            chunk = byte_stream.next() => {
-                let Some(chunk) = chunk else { break };
-                let chunk = chunk.map_err(|e| e.to_string())?;
-                buf.push_str(&String::from_utf8_lossy(&chunk));
-
-                let mut finished = false;
-                while let Some(pos) = buf.find('\n') {
-                    let line = buf[..pos].to_string();
-                    buf = buf[pos + 1..].to_string();
-
-                    let Some(data) = stream_data_payload(&line) else { continue };
-                    if data == "[DONE]" {
-                        finished = true;
-                        break;
-                    }
-
-                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
-                        if let Some(text) = responses_stream_text(&event) {
-                            on_chunk(AiStreamChunk {
-                                session_id: session_id.to_string(),
-                                delta: text.to_string(),
-                                reasoning_delta: None,
-                                done: false,
-                            });
-                        }
-                    }
-                }
-
-                if finished { break; }
-            }
-            _ = cancelled.notified() => { break; }
+    read_sse_stream(res, cancelled, |line| {
+        let Some(data) = stream_data_payload(line) else {
+            return ControlFlow::Continue(());
+        };
+        if data == "[DONE]" {
+            return ControlFlow::Break(());
         }
-    }
+        if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+            if let Some(text) = responses_stream_text(&event) {
+                on_chunk(AiStreamChunk {
+                    session_id: session_id.to_string(),
+                    delta: text.to_string(),
+                    reasoning_delta: None,
+                    done: false,
+                });
+            }
+        }
+        ControlFlow::Continue(())
+    })
+    .await?;
 
     on_chunk(AiStreamChunk {
         session_id: session_id.to_string(),
@@ -1014,37 +1022,24 @@ async fn stream_gemini(
         return Err(extract_error(&data).unwrap_or_else(|| "Gemini API error".to_string()));
     }
 
-    let mut byte_stream = res.bytes_stream();
-    let mut buf = String::new();
-
-    loop {
-        tokio::select! {
-            chunk = byte_stream.next() => {
-                let Some(chunk) = chunk else { break };
-                let chunk = chunk.map_err(|e| e.to_string())?;
-                buf.push_str(&String::from_utf8_lossy(&chunk));
-
-                while let Some(pos) = buf.find('\n') {
-                    let line = buf[..pos].to_string();
-                    buf = buf[pos + 1..].to_string();
-
-                    let Some(data) = stream_data_payload(&line) else { continue };
-                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
-                        let text = gemini_text(&event);
-                        if !text.is_empty() {
-                            on_chunk(AiStreamChunk {
-                                session_id: session_id.to_string(),
-                                delta: text,
-                                reasoning_delta: None,
-                                done: false,
-                            });
-                        }
-                    }
-                }
+    read_sse_stream(res, cancelled, |line| {
+        let Some(data) = stream_data_payload(line) else {
+            return ControlFlow::Continue(());
+        };
+        if let Ok(event) = serde_json::from_str::<serde_json::Value>(data) {
+            let text = gemini_text(&event);
+            if !text.is_empty() {
+                on_chunk(AiStreamChunk {
+                    session_id: session_id.to_string(),
+                    delta: text,
+                    reasoning_delta: None,
+                    done: false,
+                });
             }
-            _ = cancelled.notified() => { break; }
         }
-    }
+        ControlFlow::Continue(())
+    })
+    .await?;
 
     on_chunk(AiStreamChunk {
         session_id: session_id.to_string(),
@@ -1111,10 +1106,41 @@ pub fn load_config(path: &Path) -> Result<Option<AiConfig>, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_ai_http_client, gemini_text, openai_response_text, openai_stream_text, parse_model_list_response,
-        resolve_endpoint, resolve_model_list_endpoint, responses_max_output_tokens, responses_text, validate_config,
-        AiApiStyle, AiConfig, AiModelInfo, AiProvider,
+        build_ai_http_client, claude_system_blocks, drain_complete_lines, gemini_text, openai_response_text,
+        openai_stream_text, parse_model_list_response, resolve_endpoint, resolve_model_list_endpoint,
+        responses_max_output_tokens, responses_text, validate_config, AiApiStyle, AiConfig, AiModelInfo, AiProvider,
     };
+
+    #[test]
+    fn claude_system_is_a_cacheable_ephemeral_block() {
+        let blocks = claude_system_blocks("You are DBX's assistant.\nSchema: ...");
+        assert_eq!(blocks[0]["type"], "text");
+        assert_eq!(blocks[0]["text"], "You are DBX's assistant.\nSchema: ...");
+        assert_eq!(blocks[0]["cache_control"]["type"], "ephemeral");
+    }
+
+    #[test]
+    fn sse_buffer_preserves_multibyte_char_split_across_chunks() {
+        // "data: 查询\n" — split the first chunk inside the 3-byte '查' (bytes 6..=8).
+        let full = "data: 查询\n".as_bytes();
+        let mut buf = Vec::new();
+
+        buf.extend_from_slice(&full[..7]); // ends mid-character, before any newline
+        assert!(drain_complete_lines(&mut buf).is_empty());
+
+        buf.extend_from_slice(&full[7..]);
+        assert_eq!(drain_complete_lines(&mut buf), vec!["data: 查询".to_string()]);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn sse_buffer_splits_multiple_lines_and_keeps_remainder() {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"a\nbb\nccc");
+        assert_eq!(drain_complete_lines(&mut buf), vec!["a".to_string(), "bb".to_string()]);
+        assert_eq!(buf, b"ccc");
+        assert!(drain_complete_lines(&mut buf).is_empty());
+    }
 
     #[test]
     fn ai_config_proxy_fields_default_for_legacy_config() {

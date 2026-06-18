@@ -54,7 +54,7 @@ function close() {
   show.value = false;
 }
 
-function onClickOutside(e: MouseEvent) {
+function onMouseDownOutside(e: MouseEvent) {
   const target = e.target as Node;
   const inMenu = menuRef.value?.contains(target);
   const inSub = subRef.value?.contains(target);
@@ -78,13 +78,20 @@ function onResize() {
 watch(show, (val) => {
   if (val) {
     openMenus.add(close);
-    document.addEventListener("click", onClickOutside, true);
+    // Dismiss on `mousedown`, not `click`: the macOS Ctrl+click gesture that opens
+    // the menu fires a trailing `click` from the same gesture, which `click`-based
+    // dismissal would treat as an outside click and close the menu instantly.
+    // `mousedown` fires before `contextmenu` within the opening gesture, so the
+    // listener added here never sees the opening gesture's own mousedown; only a
+    // later mousedown elsewhere dismisses. (mousedown is also more reliable than
+    // pointerdown in the macOS WKWebView.)
+    document.addEventListener("mousedown", onMouseDownOutside, true);
     document.addEventListener("keydown", onKeydown);
     document.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onResize);
   } else {
     openMenus.delete(close);
-    document.removeEventListener("click", onClickOutside, true);
+    document.removeEventListener("mousedown", onMouseDownOutside, true);
     document.removeEventListener("keydown", onKeydown);
     document.removeEventListener("scroll", onScroll, true);
     window.removeEventListener("resize", onResize);
@@ -238,7 +245,7 @@ function shortcutKeys(shortcut?: string): string[] {
 
 onBeforeUnmount(() => {
   openMenus.delete(close);
-  document.removeEventListener("click", onClickOutside, true);
+  document.removeEventListener("mousedown", onMouseDownOutside, true);
   document.removeEventListener("keydown", onKeydown);
   document.removeEventListener("scroll", onScroll, true);
   window.removeEventListener("resize", onResize);

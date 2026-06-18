@@ -902,6 +902,7 @@ export default {
     thinking: "思考中...",
     reasoningProcess: "思考过程",
     stopGenerating: "停止生成",
+    tableMentionHeader: "数据表",
     tableMentionEmpty: "没有匹配的表",
     tableMentionPlaceholderHint: "输入 {'@'} 可选择表并带入上下文",
     tableMentionTypes: {
@@ -931,6 +932,12 @@ export default {
       autoExecute: "准备执行",
       notRequested: "未请求执行",
       skipped: "未执行",
+    },
+    agentOutcome: {
+      executed: "已执行",
+      failed: "执行失败",
+      retrying: "修复中 ({attempt}/{max})",
+      exhausted: "无法自动修复",
     },
     agentStepTitles: {
       riskCheck: "风险检查：{action} · {category} · {environment} · {reasons}",

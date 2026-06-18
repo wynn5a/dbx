@@ -39,6 +39,7 @@ export interface AiAgentPlan {
   steps: AiAgentStep[];
   executableSql?: string;
   handoffSql?: string;
+  decision?: AiSqlExecutionDecision;
 }
 
 export function buildAiAgentPlan(input: AiAgentPlanInput): AiAgentPlan {
@@ -74,7 +75,7 @@ export function buildAiAgentPlan(input: AiAgentPlanInput): AiAgentPlan {
 
   if (decision.action === "auto_execute") {
     steps.push({ kind: "execute_sql", status: "pending", sql });
-    return { steps, executableSql: sql, handoffSql: sql };
+    return { steps, executableSql: sql, handoffSql: sql, decision };
   }
 
   steps.push({
@@ -82,7 +83,7 @@ export function buildAiAgentPlan(input: AiAgentPlanInput): AiAgentPlan {
     status: "skipped",
     reason: decision.action === "block" ? "blocked_by_policy" : "requires_confirmation",
   });
-  return { steps, handoffSql: sql };
+  return { steps, handoffSql: sql, decision };
 }
 
 function extractFirstExecutableSqlCodeBlock(content: string): string | undefined {
