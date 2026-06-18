@@ -57,7 +57,6 @@ import {
 } from "@/lib/keyboardShortcuts";
 import { isPreviewTab } from "@/lib/tabPresentation";
 import { supportsSqlFileExecution } from "@/lib/databaseCapabilities";
-import type { AiSqlExecutionDecision } from "@/lib/aiSqlExecutionPolicy";
 import { buildHistoryAiAnalysisPrompt } from "@/lib/historyAiAnalysis";
 import { countAvailableAgentDriverUpdates, type AgentDriverUpdateBadgeState } from "@/lib/agentDriverUpdateBadge";
 import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/safeStorage";
@@ -67,7 +66,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { HistoryEntry } from "@/lib/tauri";
-import { summarizeQueryOutcome, type AiAction } from "@/lib/ai";
+import type { AiAction } from "@/lib/ai";
 
 const AiAssistant = defineAsyncComponent(() => import("@/components/editor/AiAssistant.vue"));
 const QueryHistory = defineAsyncComponent(() => import("@/components/editor/QueryHistory.vue"));
@@ -77,7 +76,6 @@ const LoginPage = defineAsyncComponent(() => import("@/components/auth/LoginPage
 
 type AiAssistantHandle = {
   triggerAction: (action: AiAction, instruction?: string) => void;
-  reportAutoExecuteOutcome: (outcome: { success: boolean; error?: string; resultPreview?: string }) => void;
 };
 
 const { t } = useI18n();
@@ -207,11 +205,9 @@ async function resolveActiveExecutableSql() {
 
 const {
   dangerSql,
-  pendingDangerSql,
   showDangerDialog,
   suppressDangerConfirm,
   tryExecute,
-  doExecute,
   cancelActiveExecution,
   tryExplain,
   onDangerConfirm,
@@ -746,33 +742,6 @@ function onAiExecuteSql(sql: string) {
   nextTick(() => tryExecute(sql));
 }
 
-function onAiRequestAutoExecuteSql(sql: string, decision: AiSqlExecutionDecision) {
-  const tabId = ensureQueryTab();
-  queryStore.updateSql(tabId, sql);
-  selectedSql.value = "";
-
-  if (decision.action === "block") {
-    toast(t("ai.autoSqlBlocked"), 5000);
-    return;
-  }
-
-  if (decision.action === "auto_execute") {
-    // Run it, then feed the outcome back so the agent loop can summarize or self-correct.
-    nextTick(async () => {
-      await doExecute(sql);
-      aiAssistantRef.value?.reportAutoExecuteOutcome(summarizeQueryOutcome(activeTab.value?.result));
-    });
-    return;
-  }
-
-  // confirm: leave it to the user via the danger dialog (no auto-loop continuation).
-  nextTick(() => {
-    dangerSql.value = sql;
-    pendingDangerSql.value = sql;
-    showDangerDialog.value = true;
-  });
-}
-
 function handleKeydown(e: KeyboardEvent) {
   if (e.defaultPrevented) return;
 
@@ -1198,7 +1167,6 @@ onUnmounted(() => {
                 :connection="activeConnection"
                 @replace-sql="onAiReplaceSql"
                 @execute-sql="onAiExecuteSql"
-                @request-auto-execute-sql="onAiRequestAutoExecuteSql"
                 @close="toggleAiPanel"
               />
             </div>

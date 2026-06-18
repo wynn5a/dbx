@@ -6,6 +6,8 @@ use axum::Json;
 use futures::stream::Stream;
 use serde::Deserialize;
 
+use dbx_core::agent_events::AgentEvent;
+use dbx_core::agent_loop::AgentStreamRequest;
 use dbx_core::ai::{AiCompletionRequest, AiConfig, AiConversation, AiModelInfo, AiStreamChunk};
 
 use crate::error::AppError;
@@ -56,6 +58,21 @@ pub struct AiListModelsRequest {
 #[serde(rename_all = "camelCase")]
 pub struct AiCancelStreamRequest {
     pub session_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct AiAgentStreamRequest {
+    #[serde(alias = "sessionId")]
+    pub session_id: String,
+    pub request: AgentStreamRequest,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiAgentConfirmRequest {
+    pub session_id: String,
+    pub tool_call_id: String,
+    pub approved: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -170,4 +187,64 @@ pub async fn ai_stream(
     };
 
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+// ---------------------------------------------------------------------------
+// AI agent stream (tool-calling loop; POST returns SSE of AgentEvents)
+// ---------------------------------------------------------------------------
+
+pub async fn ai_agent_stream(
+    State(state): State<Arc<WebState>>,
+    Json(body): Json<AiAgentStreamRequest>,
+) -> Result<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>, AppError> {
+    let session_id = body.session_id;
+    let request = body.request;
+    let ctx = request.loop_context(Arc::clone(&state.app));
+    let is_agent_mode = request.is_agent_mode();
+
+    let cancelled = dbx_core::ai::register_stream(&session_id).await;
+    let (tx, rx) = tokio::sync::broadcast::channel::<String>(256);
+
+    let sid = session_id.clone();
+    tokio::spawn(async move {
+        let tx_events = tx.clone();
+        let result = dbx_core::agent_loop::run_agent_loop(
+            &request.config,
+            &request.system_prompt,
+            &request.messages,
+            &ctx,
+            &sid,
+            move |event| {
+                if let Ok(json) = serde_json::to_string(&event) {
+                    let _ = tx_events.send(json);
+                }
+            },
+            &cancelled,
+            request.max_tokens,
+            request.temperature,
+            is_agent_mode,
+        )
+        .await;
+
+        if let Err(e) = result {
+            let error_event = AgentEvent::Error { message: e };
+            let _ = tx.send(serde_json::to_string(&error_event).unwrap_or_default());
+        }
+
+        dbx_core::ai::unregister_stream(&sid).await;
+    });
+
+    let stream = async_stream::stream! {
+        let mut rx = rx;
+        while let Ok(data) = rx.recv().await {
+            yield Ok(Event::default().data(data));
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+pub async fn ai_agent_confirm_tool(Json(body): Json<AiAgentConfirmRequest>) -> Result<Json<bool>, AppError> {
+    let resolved = dbx_core::ai::resolve_confirmation(&body.session_id, &body.tool_call_id, body.approved).await;
+    Ok(Json(resolved))
 }

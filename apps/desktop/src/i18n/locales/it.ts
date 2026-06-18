@@ -943,6 +943,11 @@ export default {
       notRequested: "Esecuzione non richiesta",
       skipped: "Non eseguito",
     },
+    toolConfirm: {
+      title: "Eseguire questa istruzione?",
+      run: "Esegui",
+      reject: "Rifiuta",
+    },
     agentOutcome: {
       executed: "Eseguito",
       failed: "Esecuzione non riuscita",

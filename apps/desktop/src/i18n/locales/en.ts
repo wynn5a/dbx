@@ -953,6 +953,11 @@ export default {
       notRequested: "Run not requested",
       skipped: "Not run",
     },
+    toolConfirm: {
+      title: "Run this statement?",
+      run: "Run",
+      reject: "Reject",
+    },
     agentOutcome: {
       executed: "Executed",
       failed: "Execution failed",

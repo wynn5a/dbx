@@ -24,6 +24,8 @@ import type { SidebarObjectKind } from "@/lib/databaseObjectCapabilities";
 import type { AiConfig } from "@/stores/settingsStore";
 import type {
   AgentDriverInfo,
+  AgentEvent,
+  AgentStreamRequest,
   AiCompletionRequest,
   AiStreamChunk,
   AiConversation,
@@ -851,6 +853,49 @@ export async function aiStream(
       }
     }
   }
+}
+
+export async function aiAgentStream(
+  sessionId: string,
+  request: AgentStreamRequest,
+  onEvent: (event: AgentEvent) => void,
+): Promise<void> {
+  const res = await fetch("/api/ai/agent/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, request }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+      try {
+        const event: AgentEvent = JSON.parse(data);
+        onEvent(event);
+        if (event.type === "agent_end" || event.type === "error") return;
+      } catch {
+        // skip malformed JSON
+      }
+    }
+  }
+}
+
+export async function aiAgentConfirmTool(sessionId: string, toolCallId: string, approved: boolean): Promise<boolean> {
+  return post("/api/ai/agent/confirm", { sessionId, toolCallId, approved });
 }
 
 export async function aiCancelStream(sessionId: string): Promise<boolean> {

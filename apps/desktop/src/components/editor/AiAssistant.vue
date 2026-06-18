@@ -44,33 +44,31 @@ import DatabaseIcon from "@/components/icons/DatabaseIcon.vue";
 import { useQueryStore } from "@/stores/queryStore";
 import { useToast } from "@/composables/useToast";
 import {
+  buildAgentSystemPrompt,
   buildAiContext,
+  buildTurnContextBlock,
   buildVolatileContext,
   runAiStream,
-  runAiSummaryStream,
   type AiAction,
   type AiContext,
 } from "@/lib/ai";
-import { buildAiAgentPlan, type AiAgentPlan } from "@/lib/aiAgentPlan";
-import { buildAiAgentStepItems, type AiAgentStepItem, type AiAgentStepTone } from "@/lib/aiAgentStepPresentation";
-import {
-  buildAgentFixInstruction,
-  nextAgentLoopStep,
-  MAX_AGENT_FIX_ATTEMPTS,
-  type AiAgentExecutionOutcome,
-} from "@/lib/aiAgentLoop";
-import type { AiSqlExecutionDecision } from "@/lib/aiSqlExecutionPolicy";
+import { classifyAiSqlExecution, type AiSqlExecutionDecision } from "@/lib/aiSqlExecutionPolicy";
+import ExplainPlanViewer from "@/components/explain/ExplainPlanViewer.vue";
+import { parseExplainResult, type ParsedExplainPlan } from "@/lib/explainPlan";
+import type { QueryResult } from "@/types/database";
 import { createAiShikiCodeHighlighter, type AiCodeHighlighter } from "@/lib/aiCodeHighlighter";
 import { createAiMessageRenderer } from "@/lib/aiMessageRender";
 import { Marked } from "marked";
 import {
+  aiAgentStream,
+  aiAgentConfirmTool,
   aiCancelStream,
   saveAiConversation,
   loadAiConversations,
   deleteAiConversation,
   type AiConversation,
 } from "@/lib/api";
-import type { AiMessage } from "@/lib/api";
+import type { AgentEvent, AgentStreamRequest, AiMessage } from "@/lib/api";
 import type { ConnectionConfig, QueryTab } from "@/types/database";
 import type { SqlCompletionTable } from "@/lib/sqlCompletion";
 import { useDatabaseOptions } from "@/composables/useDatabaseOptions";
@@ -91,13 +89,33 @@ const queryStore = useQueryStore();
 const { toast } = useToast();
 const { isDark } = useTheme();
 
+type AgentStepTone = "active" | "success" | "danger";
+
+interface AgentToolStep {
+  /** tool_call_id */
+  id: string;
+  name: string;
+  args?: Record<string, unknown>;
+  status: "running" | "done" | "error";
+  resultText?: string;
+  explainData?: unknown;
+}
+
+interface PendingToolConfirm {
+  sessionId: string;
+  toolCallId: string;
+  toolName: string;
+  sql: string;
+  decision: AiSqlExecutionDecision;
+}
+
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   reasoning?: string;
   isThinking?: boolean;
-  agentSteps?: AiAgentStepItem[];
-  agentOutcome?: { status: "executed" | "failed" | "retrying" | "exhausted"; error?: string; attempt?: number };
+  toolSteps?: AgentToolStep[];
+  pendingConfirm?: PendingToolConfirm | null;
 }
 
 const props = defineProps<{
@@ -108,7 +126,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   replaceSql: [sql: string];
   executeSql: [sql: string];
-  requestAutoExecuteSql: [sql: string, decision: AiSqlExecutionDecision];
   close: [];
 }>();
 
@@ -120,19 +137,14 @@ const activeAction = ref<AiAction>("generate");
 const assistantMode = ref<"ask" | "agent">("ask");
 const currentSessionId = ref("");
 const conversationId = ref("");
-// Bounded agent loop state. A run token identifies one user-initiated agent
-// run; bumping it (new send or cancel) invalidates stale execution callbacks.
+// A run token identifies one user-initiated turn; bumping it (new send or
+// cancel) invalidates stale stream/confirmation callbacks.
 const agentRunToken = ref(0);
-const agentFixAttempts = ref(0);
-const agentUserRequest = ref("");
-const pendingAutoExec = ref<{ assistantIdx: number; sql: string; token: number } | null>(null);
 // Schema context is expensive to build (many backend calls) and large in the
 // prompt. Cache it per (connection, database, mentions, focused table) so turns
 // reuse it instead of rebuilding/re-sending — and so the system prompt prefix
-// stays stable for provider prompt caching. `runSchemaContext` is the context
-// resolved for the active run, reused by its follow-up (fix) turns.
+// stays stable for provider prompt caching.
 const cachedSchemaContext = ref<{ signature: string; context: AiContext } | null>(null);
-const runSchemaContext = ref<AiContext | null>(null);
 const conversations = ref<AiConversation[]>([]);
 const showConversationList = ref(false);
 const promptTextareaRef = ref<HTMLTextAreaElement | null>(null);
@@ -298,21 +310,24 @@ function appendAssistantReasoning(assistantIdx: number, delta: string) {
 
 const expandedReasoning = ref<Set<number>>(new Set());
 
-function agentStepIcon(tone: AiAgentStepTone) {
+function toolStepTone(step: AgentToolStep): AgentStepTone {
+  if (step.status === "error") return "danger";
+  if (step.status === "running") return "active";
+  return "success";
+}
+
+function agentStepIcon(tone: AgentStepTone) {
   if (tone === "danger") return CircleSlash;
-  if (tone === "warning") return AlertTriangle;
-  if (tone === "active") return Play;
+  if (tone === "active") return Loader2;
   return ShieldCheck;
 }
 
-function agentStepClass(tone: AiAgentStepTone): string {
+function agentStepClass(tone: AgentStepTone): string {
   switch (tone) {
     case "success":
       return "border-[color-mix(in_srgb,var(--ds-green)_30%,transparent)] bg-[color-mix(in_srgb,var(--ds-green)_14%,transparent)] text-[var(--ds-green)]";
     case "active":
       return "border-[color-mix(in_srgb,var(--ds-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--ds-blue)_14%,transparent)] text-[var(--ds-blue)]";
-    case "warning":
-      return "border-[color-mix(in_srgb,var(--ds-amber)_35%,transparent)] bg-[color-mix(in_srgb,var(--ds-amber)_14%,transparent)] text-[var(--ds-amber)]";
     case "danger":
       return "border-[color-mix(in_srgb,var(--ds-red)_35%,transparent)] bg-[color-mix(in_srgb,var(--ds-red)_14%,transparent)] text-[var(--ds-red)]";
     default:
@@ -320,29 +335,15 @@ function agentStepClass(tone: AiAgentStepTone): string {
   }
 }
 
-function agentStepTitle(step: AiAgentStepItem): string {
-  if (!step.titleKey) return t(step.labelKey);
-  return t(step.titleKey, step.titleParams || {});
-}
-
-type AgentOutcome = NonNullable<ChatMessage["agentOutcome"]>;
-
-function agentOutcomeTone(outcome: AgentOutcome): AiAgentStepTone {
-  if (outcome.status === "executed") return "success";
-  if (outcome.status === "retrying") return "warning";
-  return "danger";
-}
-
-function agentOutcomeLabel(outcome: AgentOutcome): string {
-  if (outcome.status === "executed") return t("ai.agentOutcome.executed");
-  if (outcome.status === "retrying") {
-    return t("ai.agentOutcome.retrying", {
-      attempt: String(outcome.attempt ?? 1),
-      max: String(MAX_AGENT_FIX_ATTEMPTS),
-    });
+/** Parse a tool's `explain_data` (a serialized QueryResult) into a plan for the viewer. */
+function parseExplainFromData(explainData: unknown, dbType: string): ParsedExplainPlan | undefined {
+  if (!explainData || typeof explainData !== "object") return undefined;
+  if (dbType !== "mysql" && dbType !== "postgres" && dbType !== "dameng") return undefined;
+  try {
+    return parseExplainResult(dbType, explainData as QueryResult);
+  } catch {
+    return undefined;
   }
-  if (outcome.status === "exhausted") return t("ai.agentOutcome.exhausted");
-  return t("ai.agentOutcome.failed");
 }
 
 function toggleReasoning(index: number) {
@@ -558,11 +559,8 @@ async function send() {
   const requestedMode = assistantMode.value;
   const requestedAction = activeAction.value;
 
-  // Begin a fresh agent run; the token invalidates any in-flight or pending callbacks.
+  // Begin a fresh run; the token invalidates any in-flight stream or pending confirm.
   const token = ++agentRunToken.value;
-  agentFixAttempts.value = 0;
-  agentUserRequest.value = displayText;
-  pendingAutoExec.value = null;
   isGenerating.value = true;
 
   let schemaContext: AiContext;
@@ -573,15 +571,13 @@ async function send() {
     finalizeRun();
     return;
   }
-  runSchemaContext.value = schemaContext;
 
-  const result = await runAgentTurn({
-    action: requestedAction,
-    mode: requestedMode,
-    instruction: displayText,
-    schemaContext,
-  });
-  handleTurnResult({ ...result, mode: requestedMode, token });
+  if (requestedMode === "agent") {
+    await runBackendAgent({ action: requestedAction, instruction: displayText, schemaContext, token });
+  } else {
+    await runAskTurn({ action: requestedAction, instruction: displayText, schemaContext });
+    if (token === agentRunToken.value) finalizeRun();
+  }
 }
 
 // Signature over the inputs that change the schema context. Same signature →
@@ -606,29 +602,21 @@ async function getSchemaContext(mentionedTables: AiTableMention[]): Promise<AiCo
   return context;
 }
 
-interface RunAgentTurnParams {
+interface RunTurnParams {
   action: AiAction;
-  mode: "ask" | "agent";
   instruction: string;
   schemaContext: AiContext;
 }
 
-// Run one streaming assistant turn (initial or follow-up). Pushes a fresh
-// assistant bubble, streams into it, and returns the resulting agent plan.
-// `completed` is false when the turn errored or the run was cancelled/superseded.
-async function runAgentTurn(
-  params: RunAgentTurnParams,
-): Promise<{ plan: AiAgentPlan; assistantIdx: number; completed: boolean }> {
+// Ask mode: one streaming assistant turn, no tools. Generates SQL/explanations
+// into a fresh assistant bubble.
+async function runAskTurn(params: RunTurnParams) {
   messages.value.push({ role: "assistant", content: "" });
   const assistantIdx = messages.value.length - 1;
   const sessionId = uuid();
   currentSessionId.value = sessionId;
-  const myToken = agentRunToken.value;
-  let errored = false;
 
   try {
-    // Reuse the run's cached schema context; only the volatile fields (current
-    // SQL / last error / result preview) are refreshed from the tab each turn.
     const context: AiContext = props.tab
       ? { ...params.schemaContext, ...buildVolatileContext(props.tab) }
       : params.schemaContext;
@@ -640,7 +628,7 @@ async function runAgentTurn(
       {
         config: settings.aiConfig,
         action: params.action,
-        mode: params.mode,
+        mode: "ask",
         instruction: params.instruction,
         context,
       },
@@ -650,147 +638,155 @@ async function runAgentTurn(
       (reasoningDelta) => appendAssistantReasoning(assistantIdx, reasoningDelta),
     );
   } catch (e: any) {
-    errored = true;
     messages.value[assistantIdx].content = `Error: ${e.message || e}`;
   } finally {
     const msg = messages.value[assistantIdx];
     if (msg) msg.isThinking = false;
     if (currentSessionId.value === sessionId) currentSessionId.value = "";
   }
-
-  const completed = !errored && agentRunToken.value === myToken;
-  const plan = buildAiAgentPlan({
-    mode: params.mode,
-    action: params.action,
-    instruction: params.instruction,
-    assistantContent: messages.value[assistantIdx]?.content || "",
-    connection: props.connection,
-  });
-  if (params.mode === "agent") {
-    messages.value[assistantIdx].agentSteps = buildAiAgentStepItems(plan);
-  }
-  return { plan, assistantIdx, completed };
 }
 
-function handleTurnResult(args: {
-  plan: AiAgentPlan;
-  assistantIdx: number;
-  mode: "ask" | "agent";
-  completed: boolean;
-  token: number;
-}) {
-  const { plan, assistantIdx, mode, completed, token } = args;
-  // Do not auto-run SQL from a cancelled, errored, or superseded turn (#3).
-  if (!completed || token !== agentRunToken.value) {
+// Agent mode: drive the server-side tool-calling loop. The backend streams
+// AgentEvents (text, reasoning, tool calls, write-confirmation requests) which
+// we render into a single assistant bubble.
+async function runBackendAgent(params: RunTurnParams & { token: number }) {
+  if (!props.connection || !props.tab) {
     finalizeRun();
     return;
   }
+  messages.value.push({ role: "assistant", content: "", toolSteps: [], pendingConfirm: null });
+  const assistantIdx = messages.value.length - 1;
+  const sessionId = uuid();
+  currentSessionId.value = sessionId;
 
-  if (mode === "agent" && plan.handoffSql && plan.decision) {
-    emit("requestAutoExecuteSql", plan.handoffSql, plan.decision);
-    if (plan.decision.action === "auto_execute") {
-      // Arm the loop; App.vue runs the SQL and calls reportAutoExecuteOutcome.
-      pendingAutoExec.value = { assistantIdx, sql: plan.handoffSql, token };
-      scrollToBottom();
-      return;
+  const context: AiContext = { ...params.schemaContext, ...buildVolatileContext(props.tab) };
+  // Prior turns become conversation history; the current user turn carries the
+  // instruction plus the volatile context block (current SQL / last error).
+  const priorHistory: AiMessage[] = messages.value.slice(0, assistantIdx - 1).map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+  const contextBlock = buildTurnContextBlock(context);
+  const userPrompt = contextBlock ? `${params.instruction}\n\n${contextBlock}` : params.instruction;
+
+  const request: AgentStreamRequest = {
+    config: settings.aiConfig,
+    systemPrompt: buildAgentSystemPrompt(params.action, context),
+    messages: [...priorHistory, { role: "user", content: userPrompt }],
+    maxTokens: settings.aiConfig.enableThinking ? 8192 : 2400,
+    temperature: 0.15,
+    connectionId: props.tab.connectionId,
+    database: props.tab.database,
+    dbType: props.connection.db_type,
+    mode: "agent",
+  };
+
+  try {
+    await aiAgentStream(sessionId, request, (event) => handleAgentEvent(assistantIdx, sessionId, event));
+  } catch (e: any) {
+    const msg = messages.value[assistantIdx];
+    if (msg) msg.content += `${msg.content ? "\n\n" : ""}Error: ${e?.message || e}`;
+  } finally {
+    const msg = messages.value[assistantIdx];
+    if (msg) {
+      msg.isThinking = false;
+      msg.pendingConfirm = null;
     }
+    if (currentSessionId.value === sessionId) currentSessionId.value = "";
   }
 
-  finalizeRun();
+  if (params.token === agentRunToken.value) finalizeRun();
+}
+
+function handleAgentEvent(assistantIdx: number, sessionId: string, event: AgentEvent) {
+  const msg = messages.value[assistantIdx];
+  if (!msg) return;
+  switch (event.type) {
+    case "reasoning_delta":
+      appendAssistantReasoning(assistantIdx, event.delta);
+      break;
+    case "text_delta":
+      appendAssistantDelta(assistantIdx, event.delta);
+      break;
+    case "tool_call_start": {
+      if (!msg.toolSteps) msg.toolSteps = [];
+      msg.toolSteps.push({
+        id: event.tool_call_id,
+        name: event.tool_name,
+        args: event.args && typeof event.args === "object" ? (event.args as Record<string, unknown>) : undefined,
+        status: "running",
+      });
+      scrollToBottom();
+      break;
+    }
+    case "tool_call_end": {
+      const step = msg.toolSteps?.find((s) => s.id === event.tool_call_id);
+      if (step) {
+        step.status = event.is_error ? "error" : "done";
+        const { content, explainData } = extractToolResult(event.result);
+        step.resultText = content;
+        step.explainData = explainData;
+      }
+      if (msg.pendingConfirm?.toolCallId === event.tool_call_id) msg.pendingConfirm = null;
+      scrollToBottom();
+      break;
+    }
+    case "tool_confirm_request": {
+      msg.pendingConfirm = {
+        sessionId,
+        toolCallId: event.tool_call_id,
+        toolName: event.tool_name,
+        sql: event.sql,
+        decision: classifyAiSqlExecution(event.sql, props.connection),
+      };
+      scrollToBottom();
+      break;
+    }
+    case "error":
+      msg.content += `${msg.content ? "\n\n" : ""}Error: ${event.message}`;
+      break;
+    case "turn_start":
+    case "turn_end":
+    case "agent_end":
+      break;
+  }
+}
+
+function extractToolResult(result: unknown): { content?: string; explainData?: unknown } {
+  if (!result || typeof result !== "object") return {};
+  const obj = result as Record<string, unknown>;
+  return {
+    content: typeof obj.content === "string" ? obj.content : undefined,
+    explainData: obj.explain_data,
+  };
+}
+
+async function confirmTool(assistantIdx: number, approved: boolean) {
+  const msg = messages.value[assistantIdx];
+  const confirm = msg?.pendingConfirm;
+  if (!confirm) return;
+  if (msg) msg.pendingConfirm = null;
+  await aiAgentConfirmTool(confirm.sessionId, confirm.toolCallId, approved).catch(() => {});
+}
+
+function clearPendingConfirms() {
+  for (const msg of messages.value) {
+    if (msg.pendingConfirm) msg.pendingConfirm = null;
+  }
 }
 
 function finalizeRun() {
   isGenerating.value = false;
   activeAction.value = "generate";
   currentSessionId.value = "";
-  pendingAutoExec.value = null;
   persistConversation();
   scrollToBottom();
 }
 
-// Called by App.vue after it auto-executes a handed-off statement. Drives the
-// bounded loop: summarize on success, self-correct on failure (up to the budget).
-async function reportAutoExecuteOutcome(outcome: AiAgentExecutionOutcome) {
-  const pending = pendingAutoExec.value;
-  if (!pending || pending.token !== agentRunToken.value) return;
-  pendingAutoExec.value = null;
-
-  const target = messages.value[pending.assistantIdx];
-  const step = nextAgentLoopStep(outcome, agentFixAttempts.value);
-
-  if (step.kind === "summarize") {
-    if (target) target.agentOutcome = { status: "executed" };
-    await runSummaryTurn(outcome.resultPreview);
-    return;
-  }
-
-  if (step.kind === "stop") {
-    if (target) target.agentOutcome = { status: "exhausted", error: outcome.error };
-    finalizeRun();
-    return;
-  }
-
-  agentFixAttempts.value = step.attempt;
-  if (target) target.agentOutcome = { status: "retrying", error: outcome.error, attempt: step.attempt };
-
-  if (!props.connection || !props.tab || !runSchemaContext.value) {
-    finalizeRun();
-    return;
-  }
-
-  const instruction = buildAgentFixInstruction(agentUserRequest.value, pending.sql, outcome.error || "");
-  // Reuse the run's schema context so the fix turn keeps the @-mentioned tables
-  // and the cacheable system-prompt prefix stays identical to the initial turn.
-  const result = await runAgentTurn({
-    action: "generate",
-    mode: "agent",
-    instruction,
-    schemaContext: runSchemaContext.value,
-  });
-  handleTurnResult({ ...result, mode: "agent", token: agentRunToken.value });
-}
-
-// Terminal turn: summarize the successful query result in natural language. It
-// never produces auto-executable SQL, so the loop ends here.
-async function runSummaryTurn(resultPreview?: string) {
-  if (!props.connection) {
-    finalizeRun();
-    return;
-  }
-  messages.value.push({ role: "assistant", content: "" });
-  const assistantIdx = messages.value.length - 1;
-  const sessionId = uuid();
-  currentSessionId.value = sessionId;
-  try {
-    const history: AiMessage[] = messages.value.slice(0, assistantIdx).map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
-    await runAiSummaryStream(
-      {
-        config: settings.aiConfig,
-        databaseType: props.connection.db_type,
-        originalQuestion: agentUserRequest.value,
-        resultPreview,
-        history,
-      },
-      (delta) => appendAssistantDelta(assistantIdx, delta),
-      sessionId,
-      (reasoningDelta) => appendAssistantReasoning(assistantIdx, reasoningDelta),
-    );
-  } catch (e: any) {
-    messages.value[assistantIdx].content = `Error: ${e.message || e}`;
-  } finally {
-    const msg = messages.value[assistantIdx];
-    if (msg) msg.isThinking = false;
-  }
-  finalizeRun();
-}
-
 async function cancelStream() {
-  // Invalidate the run so any in-flight turn or pending outcome is dropped.
+  // Invalidate the run so any in-flight stream or pending confirmation is dropped.
   agentRunToken.value++;
-  pendingAutoExec.value = null;
+  clearPendingConfirms();
   if (currentSessionId.value) await aiCancelStream(currentSessionId.value).catch(() => {});
   finalizeRun();
 }
@@ -822,7 +818,6 @@ function clearMessages() {
   messages.value = [];
   conversationId.value = "";
   cachedSchemaContext.value = null;
-  runSchemaContext.value = null;
 }
 
 async function persistConversation() {
@@ -857,7 +852,6 @@ function selectConversation(conv: AiConversation) {
     reasoning: m.reasoning,
   }));
   cachedSchemaContext.value = null;
-  runSchemaContext.value = null;
   showConversationList.value = false;
   scrollToBottom();
 }
@@ -890,7 +884,7 @@ function triggerAction(action: AiAction, instruction?: string) {
   send();
 }
 
-defineExpose({ triggerAction, reportAutoExecuteOutcome });
+defineExpose({ triggerAction });
 
 const markedInstance = new Marked({
   breaks: true,
@@ -1024,27 +1018,68 @@ const messageRenderer = computed(() => {
                   </div>
                 </div>
               </div>
-              <div v-if="msg.agentSteps?.length" class="mb-2 flex flex-wrap gap-1.5">
-                <span
-                  v-for="step in msg.agentSteps"
-                  :key="step.key"
-                  class="inline-flex h-5 max-w-full items-center gap-1 rounded-full border px-1.5 text-[10px] font-medium"
-                  :class="agentStepClass(step.tone)"
-                  :title="agentStepTitle(step)"
-                >
-                  <component :is="agentStepIcon(step.tone)" class="h-3 w-3 shrink-0" />
-                  <span class="truncate">{{ t(step.labelKey) }}</span>
-                </span>
+              <div v-if="msg.toolSteps?.length" class="mb-2 flex flex-col gap-1.5">
+                <div v-for="step in msg.toolSteps" :key="step.id" class="flex flex-col gap-1">
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <span
+                      class="inline-flex h-5 max-w-full items-center gap-1 rounded-full border px-1.5 text-[10px] font-medium"
+                      :class="agentStepClass(toolStepTone(step))"
+                      :title="(step.args?.sql as string) || step.name"
+                    >
+                      <component
+                        :is="agentStepIcon(toolStepTone(step))"
+                        class="h-3 w-3 shrink-0"
+                        :class="{ 'animate-spin': step.status === 'running' }"
+                      />
+                      <span class="truncate font-mono">{{ step.name }}</span>
+                    </span>
+                    <Button
+                      v-if="step.name === 'explain_query' && step.args?.sql"
+                      size="sm"
+                      variant="outline"
+                      class="h-5 gap-1 px-1.5 text-[10px]"
+                      :title="t('ai.executeSql')"
+                      @click="executeSql(step.args.sql as string)"
+                    >
+                      <Play class="h-3 w-3" />
+                      {{ t("ai.executeSql") }}
+                    </Button>
+                  </div>
+                  <ExplainPlanViewer
+                    v-if="step.explainData && connection?.db_type"
+                    :plan="parseExplainFromData(step.explainData, connection.db_type)"
+                    class="max-h-64"
+                  />
+                  <div
+                    v-else-if="step.resultText && step.status === 'error'"
+                    class="rounded bg-[var(--ds-bg-canvas)] px-2 py-1 text-[10px] text-[var(--ds-red)] whitespace-pre-wrap"
+                  >
+                    {{ step.resultText }}
+                  </div>
+                </div>
               </div>
-              <div v-if="msg.agentOutcome" class="mb-2 flex flex-wrap gap-1.5">
-                <span
-                  class="inline-flex h-5 max-w-full items-center gap-1 rounded-full border px-1.5 text-[10px] font-medium"
-                  :class="agentStepClass(agentOutcomeTone(msg.agentOutcome))"
-                  :title="msg.agentOutcome.error || ''"
+              <div
+                v-if="msg.pendingConfirm"
+                class="mb-2 rounded-md border border-[color-mix(in_srgb,var(--ds-amber)_35%,transparent)] bg-[color-mix(in_srgb,var(--ds-amber)_10%,transparent)] p-2"
+              >
+                <div class="flex items-center gap-1.5 text-[11px] font-medium text-[var(--ds-amber)]">
+                  <AlertTriangle class="h-3.5 w-3.5 shrink-0" />
+                  <span>{{ t("ai.toolConfirm.title") }}</span>
+                </div>
+                <pre
+                  class="mt-1.5 max-h-32 overflow-auto rounded bg-[var(--ds-bg-canvas)] px-2 py-1 font-mono text-[10px] text-[var(--ds-text-1)] whitespace-pre-wrap"
+                  >{{ msg.pendingConfirm.sql }}</pre
                 >
-                  <component :is="agentStepIcon(agentOutcomeTone(msg.agentOutcome))" class="h-3 w-3 shrink-0" />
-                  <span class="truncate">{{ agentOutcomeLabel(msg.agentOutcome) }}</span>
-                </span>
+                <div class="mt-2 flex items-center gap-1.5">
+                  <Button size="sm" class="h-6 gap-1 text-[10px]" @click="confirmTool(i, true)">
+                    <Play class="h-3 w-3" />
+                    {{ t("ai.toolConfirm.run") }}
+                  </Button>
+                  <Button size="sm" variant="outline" class="h-6 gap-1 text-[10px]" @click="confirmTool(i, false)">
+                    <X class="h-3 w-3" />
+                    {{ t("ai.toolConfirm.reject") }}
+                  </Button>
+                </div>
               </div>
               <template v-for="(seg, j) in messageRenderer.render(msg.content)" :key="j">
                 <div v-if="seg.type === 'text'" class="ai-markdown whitespace-normal">

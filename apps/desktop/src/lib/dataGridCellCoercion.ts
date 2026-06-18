@@ -112,27 +112,43 @@ function isPostgresArrayColumn(
   return dataType === "array" || dataType.endsWith("[]") || dataType.startsWith("_");
 }
 
+// Smart double-quote variants that input methods substitute for ASCII `"`:
+// curly “ ” (Chinese/macOS), low-9 „, high-reversed-9 ‟, and fullwidth ＂.
+// Matched by char code rather than a regex literal so the smart-quote chars
+// don't have to survive the source toolchain for this to keep working.
+const SMART_DOUBLE_QUOTE_CODES = new Set([0x201c, 0x201d, 0x201e, 0x201f, 0xff02]);
+
+function hasSmartDoubleQuotes(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    if (SMART_DOUBLE_QUOTE_CODES.has(value.charCodeAt(i))) return true;
+  }
+  return false;
+}
+
 function normalizeSmartQuotedJsonInput(value: string): string {
-  if (!/[“”]/.test(value)) return value;
+  // Input methods (Chinese IME, macOS smart punctuation) can replace the ASCII
+  // quotes in hand-typed JSON with smart-quote variants, breaking the parse.
+  if (!hasSmartDoubleQuotes(value)) return value;
   const trimmed = value.trim();
   if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return value;
-  try {
-    JSON.parse(value);
-    return value;
-  } catch {
-    // macOS smart punctuation can turn JSON delimiters into Chinese-style quotes.
-  }
   const normalized = normalizeSmartQuotes(value);
   try {
     JSON.parse(normalized);
     return normalized;
   } catch {
+    // Normalization didn't yield valid JSON (e.g. the smart quotes are part of a
+    // string value, not delimiters) — leave the original input untouched.
     return value;
   }
 }
 
 function normalizeSmartQuotes(value: string): string {
-  return value.replace(/[“”]/g, '"');
+  if (!hasSmartDoubleQuotes(value)) return value;
+  let result = "";
+  for (let i = 0; i < value.length; i++) {
+    result += SMART_DOUBLE_QUOTE_CODES.has(value.charCodeAt(i)) ? '"' : value[i];
+  }
+  return result;
 }
 
 function formatPostgresArrayText(value: unknown[]): string {

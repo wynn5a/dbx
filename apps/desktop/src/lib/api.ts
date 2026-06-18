@@ -166,6 +166,8 @@ export const buildDataCompareSyncPlan = forward("buildDataCompareSyncPlan");
 // AI
 export const aiComplete = forward("aiComplete");
 export const aiStream = forward("aiStream");
+export const aiAgentStream = forward("aiAgentStream");
+export const aiAgentConfirmTool = forward("aiAgentConfirmTool");
 export const aiCancelStream = forward("aiCancelStream");
 export const aiTestConnection = forward("aiTestConnection");
 export const aiListModels = forward("aiListModels");
@@ -285,6 +287,8 @@ export type {
   AiModelInfo,
   AiChatMessage,
   AiConversation,
+  AgentEvent,
+  AgentStreamRequest,
   AgentDriverInfo,
   DriverStoreUsage,
   DriverStoreUsageItem,

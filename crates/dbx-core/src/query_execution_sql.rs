@@ -74,6 +74,45 @@ pub fn supports_explain_plan(database_type: Option<DatabaseType>) -> bool {
     matches!(database_type, Some(DatabaseType::Mysql | DatabaseType::Postgres | DatabaseType::Dameng))
 }
 
+/// Databases that accept SQL query execution via the `execute_query` /
+/// `get_sample_data` agent tools. Non-SQL stores are excluded so the agent never
+/// offers a SQL tool it cannot honor.
+pub fn supports_sql_query(database_type: DatabaseType) -> bool {
+    !matches!(
+        database_type,
+        DatabaseType::Redis
+            | DatabaseType::MongoDb
+            | DatabaseType::Elasticsearch
+            | DatabaseType::Neo4j
+            | DatabaseType::Etcd
+    )
+}
+
+/// Whether `sql` is a single read-only statement safe to auto-execute without
+/// user confirmation. Anything that mutates data/schema, materializes rows
+/// (`SELECT ... INTO`), or chains a second statement returns false — the agent
+/// loop then pauses and asks the user to confirm before running it.
+pub fn is_read_only_sql(sql: &str, _database_type: DatabaseType) -> bool {
+    let source = strip_trailing_semicolons(sql.trim());
+    if source.is_empty() || has_extra_statement_after_semicolon(&source) {
+        return false;
+    }
+    if !starts_with_read_only_keyword(&source) || contains_dangerous_sql_keyword(&source) {
+        return false;
+    }
+    // `SELECT ... INTO <table>` (SQL Server / Postgres) materializes data; the
+    // dangerous-keyword list above does not cover it, so reject it explicitly.
+    let literal_free = strip_sql_comments_and_literals(&source).to_lowercase();
+    !contains_word(&literal_free, "into")
+}
+
+fn starts_with_read_only_keyword(sql: &str) -> bool {
+    let source = strip_sql_comments(sql).trim_start().to_lowercase();
+    ["select", "with", "show", "describe", "desc", "explain", "pragma", "values", "table"].iter().any(|keyword| {
+        source == *keyword || source.starts_with(&format!("{keyword} ")) || source.starts_with(&format!("{keyword}\n"))
+    })
+}
+
 pub fn is_safe_dameng_autotrace_sql(sql: &str) -> bool {
     let source = strip_trailing_semicolons(sql.trim());
     if source.is_empty() || has_extra_statement_after_semicolon(&source) {
@@ -295,6 +334,37 @@ mod tests {
                 reason: None,
             }
         );
+    }
+
+    #[test]
+    fn read_only_sql_accepts_reads_and_rejects_writes() {
+        let db = DatabaseType::Postgres;
+        // reads
+        assert!(is_read_only_sql("SELECT * FROM users WHERE id = 1", db));
+        assert!(is_read_only_sql("  with q as (select 1) select * from q ", db));
+        assert!(is_read_only_sql("SHOW TABLES", db));
+        assert!(is_read_only_sql("EXPLAIN SELECT 1", db));
+        assert!(is_read_only_sql("SELECT * FROM t WHERE name = 'delete';", db)); // literal, not a write
+                                                                                 // writes / unsafe
+        assert!(!is_read_only_sql("INSERT INTO t VALUES (1)", db));
+        assert!(!is_read_only_sql("UPDATE t SET x = 1 WHERE id = 2", db));
+        assert!(!is_read_only_sql("DELETE FROM t WHERE id = 1", db));
+        assert!(!is_read_only_sql("DROP TABLE t", db));
+        assert!(!is_read_only_sql("WITH x AS (SELECT 1) DELETE FROM t", db)); // CTE that mutates
+        assert!(!is_read_only_sql("SELECT * INTO backup FROM users", db)); // materializes data
+        assert!(!is_read_only_sql("SELECT 1; DROP TABLE t", db)); // chained statement
+        assert!(!is_read_only_sql("", db));
+    }
+
+    #[test]
+    fn sql_query_support_gates_non_sql_stores() {
+        assert!(supports_sql_query(DatabaseType::Mysql));
+        assert!(supports_sql_query(DatabaseType::Sqlite));
+        assert!(!supports_sql_query(DatabaseType::Redis));
+        assert!(!supports_sql_query(DatabaseType::MongoDb));
+        assert!(!supports_sql_query(DatabaseType::Elasticsearch));
+        assert!(!supports_sql_query(DatabaseType::Neo4j));
+        assert!(!supports_sql_query(DatabaseType::Etcd));
     }
 
     #[test]

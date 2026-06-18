@@ -122,61 +122,6 @@ export async function runAiStream(
   );
 }
 
-export async function runAiSummaryStream(
-  input: {
-    config: AiConfig;
-    databaseType: DatabaseType;
-    originalQuestion: string;
-    resultPreview?: string;
-    history?: api.AiMessage[];
-  },
-  onDelta: (delta: string) => void,
-  sessionId?: string,
-  onReasoningDelta?: (delta: string) => void,
-): Promise<void> {
-  const isZh = isChineseLocale(currentLocale());
-  const preview = input.resultPreview?.trim();
-  const systemPrompt = [
-    isZh ? "你是 DBX 内置的数据库助手。用中文回复。" : "You are DBX's built-in database assistant. Reply in English.",
-    isZh
-      ? "下面是刚刚执行的 SQL 查询结果。请用结果中的真实数值直接回答用户的问题，简明扼要。不要输出 SQL 或代码块。"
-      : "Below are the results of a SQL query that was just executed. Answer the user's question directly using the actual values from the results. Be concise. Do not output SQL or code blocks.",
-    "",
-    `Database type: ${input.databaseType}`,
-    "",
-    isZh ? "查询结果：" : "Query results:",
-    preview || (isZh ? "(查询执行成功，没有返回数据行。)" : "(Query executed successfully; no rows returned.)"),
-  ].join("\n");
-
-  const messages: api.AiMessage[] = [
-    ...(input.history || []),
-    {
-      role: "user",
-      content: input.originalQuestion.trim() || (isZh ? "总结上面的查询结果。" : "Summarize the query results above."),
-    },
-  ];
-
-  const sid = sessionId || uuid();
-  const maxTokens = input.config.enableThinking ? 8192 : 1200;
-
-  await api.aiStream(
-    sid,
-    {
-      config: input.config,
-      systemPrompt,
-      messages,
-      maxTokens,
-      temperature: 0.3,
-    },
-    (chunk) => {
-      if (!chunk.done) {
-        if (chunk.reasoning_delta) onReasoningDelta?.(chunk.reasoning_delta);
-        if (chunk.delta) onDelta(chunk.delta);
-      }
-    },
-  );
-}
-
 function actionParams(action: AiAction): { maxTokens: number; temperature: number } {
   switch (action) {
     case "explain":
@@ -238,6 +183,47 @@ export function buildSystemPrompt(action: AiAction, context: AiContext, mode: Ai
   );
 
   return lines.filter(Boolean).join("\n");
+}
+
+// Agent-mode system prompt: persona + dialect rules + tool-use instructions +
+// schema. Unlike the Ask-mode prompt, it tells the model to call backend tools
+// (executed server-side) rather than only emitting SQL in text. The schema is
+// still included so the model often answers without a metadata round-trip.
+export function buildAgentSystemPrompt(action: AiAction, context: AiContext): string {
+  const isZh = isChineseLocale(currentLocale());
+  const schema = formatSchema(context);
+
+  const lines: string[] = [
+    ...buildBasePromptLines(isZh),
+    ...buildAgentToolPromptLines(isZh),
+    ...buildActionPromptLines(action, isZh),
+  ];
+
+  lines.push(
+    "",
+    `Database type: ${context.databaseType}`,
+    `Connection: ${context.connectionName}`,
+    `Database: ${context.database}`,
+    schemaCoverageLine(context, isZh),
+    "",
+    `Schema:\n${schema}`,
+  );
+
+  return lines.filter(Boolean).join("\n");
+}
+
+function buildAgentToolPromptLines(isZh: boolean): string[] {
+  return [
+    isZh
+      ? "你处于 Agent 模式，可以调用工具直接与数据库交互：list_tables、get_columns、execute_query、get_sample_data、explain_query（部分数据库可用）。"
+      : "You are in Agent mode and can call tools to interact with the database directly: list_tables, get_columns, execute_query, get_sample_data, and explain_query (where supported).",
+    isZh
+      ? "优先调用工具来核实结构并执行只读查询，而不是仅在文本里给出 SQL。只读查询会立即执行；任何写操作（INSERT/UPDATE/DELETE/DDL）传给 execute_query 后，会先暂停请用户确认再执行。"
+      : "Prefer calling tools to verify structure and run read-only queries rather than only emitting SQL in text. Read-only queries run immediately; any write (INSERT/UPDATE/DELETE/DDL) passed to execute_query pauses for the user's confirmation before it runs.",
+    isZh
+      ? "拿到工具结果后，用简洁的自然语言直接回答用户的问题；需要展示最终 SQL 时放进 ```sql 代码块。不要凭空编造工具尚未返回的结果。"
+      : "After receiving tool results, answer the user's question directly and concisely in natural language; when showing final SQL, put it in a ```sql code block. Never fabricate results a tool has not returned.",
+  ];
 }
 
 // Per-turn volatile context appended to the user message (kept out of the system
@@ -585,17 +571,4 @@ function formatResultPreview(result?: QueryResult): string | undefined {
     return result.columns.map((column, index) => `${column}=${JSON.stringify(row[index] ?? null)}`).join(", ");
   });
   return rows.join("\n");
-}
-
-// Reduce a finished query result to the agent-loop outcome. `success` mirrors
-// useSqlExecution: the backend signals failure with an "Error" column.
-export function summarizeQueryOutcome(result?: QueryResult): {
-  success: boolean;
-  error?: string;
-  resultPreview?: string;
-} {
-  if (result?.columns.includes("Error")) {
-    return { success: false, error: extractLastError(result) ?? "" };
-  }
-  return { success: true, resultPreview: formatResultPreview(result) };
 }

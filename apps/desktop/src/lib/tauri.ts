@@ -291,6 +291,54 @@ export async function aiStream(
   }
 }
 
+/** Streaming events from the backend agent loop. `type` mirrors the Rust AgentEvent tag. */
+export type AgentEvent =
+  | { type: "turn_start"; turn: number }
+  | { type: "text_delta"; delta: string }
+  | { type: "reasoning_delta"; delta: string }
+  | { type: "tool_call_start"; tool_call_id: string; tool_name: string; args: unknown }
+  | { type: "tool_call_end"; tool_call_id: string; tool_name: string; result: unknown; is_error: boolean }
+  | { type: "tool_confirm_request"; tool_call_id: string; tool_name: string; sql: string }
+  | { type: "turn_end"; turn: number }
+  | { type: "agent_end"; input_tokens?: number; output_tokens?: number }
+  | { type: "error"; message: string };
+
+export interface AgentStreamRequest {
+  config: AiConfig;
+  systemPrompt: string;
+  messages: AiMessage[];
+  maxTokens?: number;
+  temperature?: number;
+  connectionId: string;
+  database: string;
+  dbType: string;
+  mode?: "ask" | "agent";
+}
+
+interface AgentEventEnvelope {
+  session_id: string;
+  event: AgentEvent;
+}
+
+export async function aiAgentStream(
+  sessionId: string,
+  request: AgentStreamRequest,
+  onEvent: (event: AgentEvent) => void,
+): Promise<void> {
+  const unlisten: UnlistenFn = await listen<AgentEventEnvelope>("ai-agent-event", (event) => {
+    if (event.payload.session_id === sessionId) onEvent(event.payload.event);
+  });
+  try {
+    await invoke("ai_agent_stream", { sessionId, request });
+  } finally {
+    unlisten();
+  }
+}
+
+export async function aiAgentConfirmTool(sessionId: string, toolCallId: string, approved: boolean): Promise<boolean> {
+  return invoke("ai_agent_confirm_tool", { sessionId, toolCallId, approved });
+}
+
 export async function saveAiConfig(config: AiConfig): Promise<void> {
   return invoke("save_ai_config", { config });
 }

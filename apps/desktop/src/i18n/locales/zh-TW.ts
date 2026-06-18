@@ -884,6 +884,11 @@ export default {
       notRequested: "未請求執行",
       skipped: "未執行",
     },
+    toolConfirm: {
+      title: "執行這條語句？",
+      run: "執行",
+      reject: "拒絕",
+    },
     agentOutcome: {
       executed: "已執行",
       failed: "執行失敗",

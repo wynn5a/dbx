@@ -836,6 +836,11 @@ export default {
     contextSummary: "{database} · {tables} tablas",
     autoSqlBlocked:
       "El SQL generado por la IA parecía demasiado riesgoso para ejecutarse automáticamente. Revísalo manualmente antes de ejecutar.",
+    toolConfirm: {
+      title: "¿Ejecutar esta sentencia?",
+      run: "Ejecutar",
+      reject: "Rechazar",
+    },
     agentOutcome: {
       executed: "Ejecutado",
       failed: "Error de ejecución",

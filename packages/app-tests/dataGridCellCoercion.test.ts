@@ -140,3 +140,44 @@ test("changed PG array value returns new array reference", () => {
   assert.notStrictEqual(result, oldValue);
   assert.deepEqual(result, [1, 2, 3, 4]);
 });
+
+const coerceJson = (value: string) =>
+  coerceDataGridCellValue({
+    value,
+    oldValue: "{}",
+    databaseType: "mysql",
+    columnInfo: { data_type: "json" },
+  });
+
+test("normalizes curly smart quotes in hand-typed JSON", () => {
+  // U+201C / U+201D, as inserted by macOS smart punctuation / Chinese IME.
+  assert.equal(coerceJson("{“name”:“发布”}"), '{"name":"发布"}');
+});
+
+test("normalizes low-9 and high-reversed-9 smart quotes in JSON", () => {
+  // U+201E / U+201F.
+  assert.equal(coerceJson("{„key‟:„value‟}"), '{"key":"value"}');
+});
+
+test("normalizes fullwidth quotes in JSON", () => {
+  // U+FF02.
+  assert.equal(coerceJson("{＂a＂:＂1＂}"), '{"a":"1"}');
+});
+
+test("normalizes smart quotes in a JSON array", () => {
+  assert.equal(coerceJson("[“a”,“b”]"), '["a","b"]');
+});
+
+test("leaves valid JSON containing smart quotes inside a string untouched", () => {
+  const input = '{"note":"he said “hi”"}';
+  assert.equal(coerceJson(input), input);
+});
+
+test("leaves non-JSON text with smart quotes untouched", () => {
+  const input = "she said “hello”";
+  assert.equal(coerceJson(input), input);
+});
+
+test("leaves plain ASCII JSON untouched", () => {
+  assert.equal(coerceJson('{"a":1}'), '{"a":1}');
+});

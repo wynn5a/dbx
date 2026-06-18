@@ -939,6 +939,11 @@ export default {
       notRequested: "Execução não solicitada",
       skipped: "Não executado",
     },
+    toolConfirm: {
+      title: "Executar esta instrução?",
+      run: "Executar",
+      reject: "Rejeitar",
+    },
     agentOutcome: {
       executed: "Executado",
       failed: "Falha na execução",

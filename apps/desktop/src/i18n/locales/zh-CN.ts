@@ -933,6 +933,11 @@ export default {
       notRequested: "未请求执行",
       skipped: "未执行",
     },
+    toolConfirm: {
+      title: "执行这条语句？",
+      run: "执行",
+      reject: "拒绝",
+    },
     agentOutcome: {
       executed: "已执行",
       failed: "执行失败",
