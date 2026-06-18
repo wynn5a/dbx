@@ -420,6 +420,41 @@ function normalizeCustomColumnFormatters(value: unknown): Record<string, CustomC
   return formatters;
 }
 
+const DEFAULT_SNIPPET_BY_ID = new Map(DEFAULT_SQL_SNIPPETS.map((snippet) => [snippet.id, snippet]));
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * A built-in snippet stored from an older release is considered "pristine" (never
+ * edited by the user) when its body matches the current default with each `{name}`
+ * placeholder either wrapped (`{name}`) or bare (`name`). This covers every form
+ * the built-ins have shipped in, so pristine built-ins can be safely upgraded to
+ * the latest default while user-customized ones are left untouched.
+ */
+function isPristineBuiltinSnippetBody(storedBody: string, defaultBody: string): boolean {
+  if (storedBody === defaultBody) return true;
+  let pattern = "";
+  let lastIndex = 0;
+  const placeholder = /\{(\w+)\}/g;
+  for (let match = placeholder.exec(defaultBody); match; match = placeholder.exec(defaultBody)) {
+    pattern += escapeRegExp(defaultBody.slice(lastIndex, match.index));
+    const name = escapeRegExp(match[1]!);
+    pattern += `(?:\\{${name}\\}|${name})`;
+    lastIndex = match.index + match[0].length;
+  }
+  pattern += escapeRegExp(defaultBody.slice(lastIndex));
+  return new RegExp(`^${pattern}$`).test(storedBody);
+}
+
+function upgradeBuiltinSnippet(snippet: SqlSnippet): SqlSnippet {
+  const def = DEFAULT_SNIPPET_BY_ID.get(snippet.id);
+  if (!def) return snippet;
+  if (isPristineBuiltinSnippetBody(snippet.body, def.body)) return { ...def };
+  return snippet;
+}
+
 function normalizeSqlSnippets(value: unknown, existing?: SqlSnippet[]): SqlSnippet[] {
   if (!Array.isArray(value)) return existing ?? DEFAULT_SQL_SNIPPETS;
   const valid: SqlSnippet[] = [];
@@ -440,7 +475,7 @@ function normalizeSqlSnippets(value: unknown, existing?: SqlSnippet[]): SqlSnipp
     }
     if (seenPrefixes.has(item.prefix)) continue;
     seenPrefixes.add(item.prefix);
-    valid.push({ id: item.id, label: item.label, prefix: item.prefix, body: item.body });
+    valid.push(upgradeBuiltinSnippet({ id: item.id, label: item.label, prefix: item.prefix, body: item.body }));
   }
   if (valid.length === 0) return existing ?? DEFAULT_SQL_SNIPPETS;
   return valid;
@@ -541,7 +576,13 @@ function loadEditorSettings(): EditorSettings {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<EditorSettings>;
-      return normalizeEditorSettings(parsed);
+      const normalized = normalizeEditorSettings(parsed);
+      // Persist back when normalization changed the stored snippets (e.g. pristine
+      // built-ins were upgraded to current defaults), so the migration is durable.
+      if (JSON.stringify(parsed.snippets) !== JSON.stringify(normalized.snippets)) {
+        saveEditorSettings(normalized);
+      }
+      return normalized;
     }
   } catch {
     /* ignore */

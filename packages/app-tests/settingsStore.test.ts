@@ -124,6 +124,48 @@ test("keeps saved shortcut overrides", () => {
   assert.equal(settings.shortcuts.saveSql, "Mod+S");
 });
 
+test("upgrades pristine built-in snippets stored from older releases to current defaults", () => {
+  const settings = normalizeEditorSettings({
+    snippets: [
+      // Original literal form (no placeholders) — should be upgraded.
+      { id: "builtin-sel", label: "select *", prefix: "sel", body: "SELECT *\nFROM table\nLIMIT 100;" },
+      // Interim form with only {table} wrapped — should also be upgraded.
+      {
+        id: "builtin-upd",
+        label: "update set",
+        prefix: "upd",
+        body: "UPDATE {table}\nSET column = value\nWHERE condition;",
+      },
+    ] as any,
+  });
+
+  const sel = settings.snippets.find((s) => s.id === "builtin-sel");
+  const upd = settings.snippets.find((s) => s.id === "builtin-upd");
+  assert.equal(sel?.body, "SELECT *\nFROM {table}\nLIMIT 100;");
+  assert.equal(upd?.body, "UPDATE {table}\nSET {column} = {value}\nWHERE {condition};");
+});
+
+test("leaves user-customized built-in snippets untouched", () => {
+  const customBody = "SELECT id, name\nFROM users\nWHERE active = 1;";
+  const settings = normalizeEditorSettings({
+    snippets: [{ id: "builtin-sel", label: "select *", prefix: "sel", body: customBody }] as any,
+  });
+  assert.equal(settings.snippets.find((s) => s.id === "builtin-sel")?.body, customBody);
+});
+
+test("does not resurrect a built-in snippet the user deleted", () => {
+  const settings = normalizeEditorSettings({
+    snippets: [
+      { id: "builtin-sel", label: "select *", prefix: "sel", body: "SELECT *\nFROM {table}\nLIMIT 100;" },
+    ] as any,
+  });
+  assert.equal(settings.snippets.length, 1);
+  assert.equal(
+    settings.snippets.some((s) => s.id === "builtin-join"),
+    false,
+  );
+});
+
 test("defaults sidebar activation to single click", () => {
   assert.equal(DEFAULT_EDITOR_SETTINGS.sidebarActivation, "single");
   assert.equal(normalizeEditorSettings({}).sidebarActivation, "single");

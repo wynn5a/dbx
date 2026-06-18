@@ -651,67 +651,67 @@ export const DEFAULT_SQL_SNIPPETS: SqlSnippet[] = [
     id: "builtin-sel",
     label: "select *",
     prefix: "sel",
-    body: "SELECT *\nFROM table\nLIMIT 100;",
+    body: "SELECT *\nFROM {table}\nLIMIT 100;",
   },
   {
     id: "builtin-ins",
     label: "insert into",
     prefix: "ins",
-    body: "INSERT INTO table (columns)\nVALUES (values);",
+    body: "INSERT INTO {table} ({columns})\nVALUES ({values});",
   },
   {
     id: "builtin-upd",
     label: "update set",
     prefix: "upd",
-    body: "UPDATE table\nSET column = value\nWHERE condition;",
+    body: "UPDATE {table}\nSET {column} = {value}\nWHERE {condition};",
   },
   {
     id: "builtin-cte",
     label: "common table expression",
     prefix: "cte",
-    body: "WITH name AS (\n  SELECT columns\n  FROM table\n)\nSELECT *\nFROM name;",
+    body: "WITH {name} AS (\n  SELECT {columns}\n  FROM {table}\n)\nSELECT *\nFROM {name};",
   },
   {
     id: "builtin-join",
     label: "join",
     prefix: "join",
-    body: "JOIN table ON left_column = right_column",
+    body: "JOIN {table} ON {left_column} = {right_column}",
   },
   {
     id: "builtin-case",
     label: "case when",
     prefix: "case",
-    body: "CASE\n  WHEN condition THEN value\n  ELSE default\nEND",
+    body: "CASE\n  WHEN {condition} THEN {value}\n  ELSE {default}\nEND",
   },
   {
     id: "builtin-ct",
     label: "create table",
     prefix: "ct",
-    body: "CREATE TABLE table (\n  column type\n);",
+    body: "CREATE TABLE {table} (\n  {column} {type}\n);",
   },
   {
     id: "builtin-ex",
     label: "exists",
     prefix: "ex",
-    body: "EXISTS (\n  SELECT 1\n  FROM table\n  WHERE condition\n)",
+    body: "EXISTS (\n  SELECT 1\n  FROM {table}\n  WHERE {condition}\n)",
   },
   {
     id: "builtin-nex",
     label: "not exists",
     prefix: "nex",
-    body: "NOT EXISTS (\n  SELECT 1\n  FROM table\n  WHERE condition\n)",
+    body: "NOT EXISTS (\n  SELECT 1\n  FROM {table}\n  WHERE {condition}\n)",
   },
   {
     id: "builtin-at",
     label: "alter table add column",
     prefix: "at",
-    body: "ALTER TABLE table\nADD COLUMN column type;",
+    body: "ALTER TABLE {table}\nADD COLUMN {column} {type};",
   },
   {
     id: "builtin-ci",
     label: "create index",
     prefix: "ci",
-    body: "CREATE INDEX idx_name\nON table (column);",
+    body: "CREATE INDEX {idx_name}\nON {table} ({column});",
   },
 ];
 
@@ -2833,6 +2833,16 @@ export function buildSnippetItemsForTest(prefix: string, snippets: SqlSnippet[])
   return buildSnippetItems(prefix, snippets);
 }
 
+/**
+ * Convert a snippet body's `{name}` placeholders into CodeMirror snippet fields
+ * (`${name}`) so that applying the snippet selects the first placeholder with the
+ * cursor at its end, letting the user immediately overtype it. Existing `${...}`
+ * / `#{...}` fields are left untouched (the lookbehind skips them).
+ */
+export function snippetBodyToTemplate(body: string): string {
+  return body.replace(/(?<![#$])\{(\w+)\}/g, "${$1}");
+}
+
 function buildSnippetItems(prefix: string, snippets: SqlSnippet[]): SqlCompletionItem[] {
   if (!prefix) return [];
   return snippets
@@ -2852,8 +2862,10 @@ function buildSnippetItems(prefix: string, snippets: SqlSnippet[]): SqlCompletio
       return {
         label: snippet.label,
         type: "snippet" as const,
+        // `detail` shows the human-readable body (with `{name}` placeholders),
+        // while `apply` carries the CodeMirror field template.
         detail: snippet.body,
-        apply: snippet.body,
+        apply: snippetBodyToTemplate(snippet.body),
         boost: Math.max(boostByPrefix, boostByLabel) + baseBoost,
       };
     });

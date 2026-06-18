@@ -588,7 +588,9 @@ test("suggests SQL snippets for common abbreviations", () => {
 
   const snippet = items.find((item) => item.type === "snippet" && item.label === "select *");
   assert.ok(snippet);
-  assert.equal(snippet.apply, "SELECT *\nFROM table\nLIMIT 100;");
+  // `{table}` placeholder is converted to a CodeMirror field for apply; detail stays readable.
+  assert.equal(snippet.apply, "SELECT *\nFROM ${table}\nLIMIT 100;");
+  assert.equal(snippet.detail, "SELECT *\nFROM {table}\nLIMIT 100;");
 });
 
 test("suggests DATE_FORMAT as parameter snippet", () => {

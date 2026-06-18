@@ -1804,7 +1804,9 @@ export default {
     snippetsBody: "Corpo SQL",
     snippetsLabelPlaceholder: "ex.: select *",
     snippetsPrefixPlaceholder: "ex.: sel",
-    snippetsBodyPlaceholder: "SELECT *\nFROM table\nLIMIT 100;",
+    snippetsBodyPlaceholder: "SELECT *\nFROM {table}\nLIMIT 100;",
+    snippetsBodyHint:
+      "Coloque uma palavra entre chaves para torná-la um espaço reservado, ex. {table}. Ao inserir o snippet, o cursor seleciona o primeiro espaço reservado.",
     snippetsRestoreDefaults: "Restaurar padrões",
     snippetsAddTitle: "Adicionar snippet",
     snippetsEditTitle: "Editar snippet",

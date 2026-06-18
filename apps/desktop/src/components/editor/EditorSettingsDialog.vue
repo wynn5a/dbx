@@ -3451,6 +3451,7 @@ watch(
             rows="6"
             class="flex min-h-[120px] w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-3 py-2 text-sm font-mono text-[var(--ds-text-1)] placeholder:text-[var(--ds-text-3)] focus-visible:border-[var(--ds-accent-line)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]"
           />
+          <p class="text-xs text-[var(--ds-text-3)]">{{ t("settings.snippetsBodyHint") }}</p>
         </div>
       </div>
       <template #footer>

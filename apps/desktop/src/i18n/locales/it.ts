@@ -1814,7 +1814,9 @@ export default {
     snippetsBody: "Corpo SQL",
     snippetsLabelPlaceholder: "es. select *",
     snippetsPrefixPlaceholder: "es. sel",
-    snippetsBodyPlaceholder: "SELECT *\nFROM tabella\nLIMIT 100;",
+    snippetsBodyPlaceholder: "SELECT *\nFROM {table}\nLIMIT 100;",
+    snippetsBodyHint:
+      "Racchiudi una parola tra parentesi graffe per renderla un segnaposto, es. {table}. Quando lo snippet viene inserito, il cursore seleziona il primo segnaposto.",
     snippetsRestoreDefaults: "Ripristina Predefiniti",
     snippetsAddTitle: "Aggiungi Snippet",
     snippetsEditTitle: "Modifica Snippet",

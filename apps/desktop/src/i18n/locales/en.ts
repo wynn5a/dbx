@@ -1879,7 +1879,9 @@ export default {
     snippetsBody: "SQL Body",
     snippetsLabelPlaceholder: "e.g. select *",
     snippetsPrefixPlaceholder: "e.g. sel",
-    snippetsBodyPlaceholder: "SELECT *\nFROM table\nLIMIT 100;",
+    snippetsBodyPlaceholder: "SELECT *\nFROM {table}\nLIMIT 100;",
+    snippetsBodyHint:
+      "Wrap a word in braces to make it a placeholder, e.g. {table}. When the snippet is inserted, the cursor selects the first placeholder.",
     snippetsRestoreDefaults: "Restore Defaults",
     snippetsAddTitle: "Add Snippet",
     snippetsEditTitle: "Edit Snippet",

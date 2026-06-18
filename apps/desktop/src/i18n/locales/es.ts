@@ -1672,7 +1672,9 @@ export default {
     snippetsBody: "SQL",
     snippetsLabelPlaceholder: "p. ej. select *",
     snippetsPrefixPlaceholder: "p. ej. sel",
-    snippetsBodyPlaceholder: "SELECT *\nFROM table\nLIMIT 100;",
+    snippetsBodyPlaceholder: "SELECT *\nFROM {table}\nLIMIT 100;",
+    snippetsBodyHint:
+      "Encierra una palabra entre llaves para convertirla en marcador, p. ej. {table}. Al insertar el fragmento, el cursor selecciona el primer marcador.",
     snippetsRestoreDefaults: "Restaurar valores por defecto",
     snippetsAddTitle: "Agregar fragmento",
     snippetsEditTitle: "Editar fragmento",
