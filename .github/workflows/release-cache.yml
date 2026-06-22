@@ -1,0 +1,89 @@
+name: Release Cache Warm
+
+# Tag-triggered workflows (tauri-build.yml) can only restore caches from the
+# default branch — never from another tag. So a v1.2.4 release cannot reuse the
+# cache built by v1.2.3 directly. This workflow runs on main and writes the
+# release-profile build cache, keyed by major version, so every v<major>.x.x
+# release restores a single shared, warm cache.
+on:
+  # Re-warm on every merge to main so the release cache always reflects the
+  # latest workspace state (and never goes stale enough for GitHub's 7-day
+  # eviction to drop it).
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-cache-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    strategy:
+      fail-fast: false
+      # Mirror tauri-build.yml exactly: same runners + targets, so the cached
+      # artifacts match what the release build consumes.
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: macos-15-intel
+            target: x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - platform: windows-2022
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute cache major version
+        id: cache_ver
+        shell: bash
+        run: |
+          # Cache key tracks the major version of the in-development version on
+          # main, so it lines up with the tags cut from this branch.
+          MAJOR=$(node -p "require('./package.json').version.split('.')[0]")
+          echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      # tauri::generate_context! reads the frontend dist at compile time, so a
+      # dist must exist for `cargo build -p dbx` to compile.
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './ -> target'
+          shared-key: release-v${{ steps.cache_ver.outputs.major }}-${{ matrix.target }}
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install system dependencies (Linux)
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev xdg-utils
+
+      # Compile the same crate the release builds (dbx = src-tauri), pulling in
+      # tauri/wry/dbx-core/duckdb and every other heavy dependency. We skip
+      # tauri-action packaging; only the cached target/ artifacts matter here.
+      - name: Warm release build cache
+        run: cargo build --release --target ${{ matrix.target }} -p dbx

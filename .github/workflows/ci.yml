@@ -8,7 +8,9 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PR runs, but let main runs finish so their post-step
+  # actually saves the shared Rust cache.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   frontend:
@@ -64,10 +66,17 @@ jobs:
           components: clippy
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2
         with:
           workspaces: './ -> target'
           shared-key: ci-x86_64-unknown-linux-gnu
+          # Cache compiled deps even when clippy/tests fail.
+          cache-on-failure: true
+          # Only write the cache from main. PR-branch caches are isolated to
+          # the PR (GitHub scoping) yet still consume the 10 GB repo budget,
+          # evicting main's cache. Restricting saves to main gives every PR a
+          # single, stable cache to restore from.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Cargo fmt check
         run: cargo fmt --check
