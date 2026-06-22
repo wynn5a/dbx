@@ -23,6 +23,7 @@ export default {
     changePasswordDescription: "Ingresa tu contraseña actual y elige una nueva",
   },
   toolbar: {
+    cancelExecution: "Cancelar ejecución",
     newConnection: "Nueva conexión",
     newQuery: "Nueva consulta",
     execute: "Ejecutar",
@@ -655,6 +656,24 @@ export default {
     mcpDescription:
       "Además del asistente de IA integrado, puedes usar Claude Code, Cursor y otros agentes de programación para consultar tus bases de datos mediante MCP.",
     mcpLearnMore: "Más información",
+  },
+  processes: {
+    title: "Procesos en ejecución",
+    description:
+      "Consultas del lado del servidor iniciadas por DBX en esta conexión. Selecciona una para cancelar o terminar.",
+    loading: "Cargando procesos…",
+    noProcesses: "No se encontraron procesos en ejecución.",
+    colPid: "PID",
+    colQuery: "Consulta",
+    colState: "Estado",
+    colDuration: "Duración",
+    thisQuery: "esta consulta",
+    sqlServerCancelNote: "SQL Server no permite cancelar solo la consulta; ambas acciones terminan la sesión.",
+    terminate: "Terminar conexión",
+    cancelQuery: "Cancelar consulta",
+    killed: "Proceso {pid} señalizado",
+    notRunning: "El proceso {pid} ya no se está ejecutando",
+    killFailed: "No se pudo finalizar el proceso",
   },
   common: {
     language: "Idioma",

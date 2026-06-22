@@ -13,6 +13,7 @@ import {
   Save,
   FolderOpen,
   Layers,
+  OctagonX,
 } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -25,7 +26,7 @@ import { useSchemaOptions } from "@/composables/useSchemaOptions";
 import { connectionIconType } from "@/lib/connectionPresentation";
 import { formatDatabaseLabel, isDefaultDatabase } from "@/lib/defaultDatabase";
 import { connectionDisplayName } from "@/lib/tabPresentation";
-import { isSingleDatabase } from "@/lib/databaseCapabilities";
+import { isSingleDatabase, supportsProcessManagement } from "@/lib/databaseCapabilities";
 import { hexToRgba } from "@/lib/color";
 import type { QueryTab, ConnectionConfig } from "@/types/database";
 
@@ -44,6 +45,7 @@ const emit = defineEmits<{
   formatSql: [];
   saveSql: [];
   openSql: [];
+  manageProcesses: [];
   changeConnection: [connectionId: string];
   changeDatabase: [database: string];
   changeSchema: [schema: string | undefined];
@@ -220,6 +222,19 @@ function connectionById(connectionId: string): ConnectionConfig | undefined {
           </Button>
         </TooltipTrigger>
         <TooltipContent>{{ t("toolbar.openSql") }}</TooltipContent>
+      </Tooltip>
+      <Tooltip v-if="activeConnection && supportsProcessManagement(activeConnection.db_type)">
+        <TooltipTrigger as-child>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            class="text-[var(--ds-red)] hover:bg-[color-mix(in_srgb,var(--ds-red)_14%,transparent)]"
+            @click="emit('manageProcesses')"
+          >
+            <OctagonX class="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{{ t("toolbar.cancelExecution") }}</TooltipContent>
       </Tooltip>
     </div>
     <span class="flex-1 min-w-0" />

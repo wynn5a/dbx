@@ -411,6 +411,8 @@ pub fn run() {
             commands::query::execute_query,
             commands::query::execute_multi,
             commands::query::cancel_query,
+            commands::query::list_processes,
+            commands::query::kill_process,
             commands::query::close_query_session,
             commands::query::close_client_connection_session,
             commands::query::execute_batch,

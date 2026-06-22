@@ -72,6 +72,7 @@ const AiAssistant = defineAsyncComponent(() => import("@/components/editor/AiAss
 const QueryHistory = defineAsyncComponent(() => import("@/components/editor/QueryHistory.vue"));
 const DriverStorePage = defineAsyncComponent(() => import("@/components/config/DriverStoreDialog.vue"));
 const UpdateDialog = defineAsyncComponent(() => import("@/components/layout/UpdateDialog.vue"));
+const KillProcessDialog = defineAsyncComponent(() => import("@/components/layout/KillProcessDialog.vue"));
 const LoginPage = defineAsyncComponent(() => import("@/components/auth/LoginPage.vue"));
 
 type AiAssistantHandle = {
@@ -137,6 +138,7 @@ const formatSqlRequest = ref<{ id: number; tabId: string } | null>(null);
 const activeOutputView = ref<"result" | "summary" | "explain" | "chart">("result");
 const newQueryContextSource = ref<"tab" | "sidebar">("tab");
 const showSaveSqlDialog = ref(false);
+const showProcessDialog = ref(false);
 const saveSqlName = ref("");
 const saveSqlFolderId = ref("");
 const ROOT_SAVED_SQL_FOLDER = "__root__";
@@ -1065,6 +1067,7 @@ onUnmounted(() => {
                   @format-sql="formatActiveSql"
                   @save-sql="void openSaveSqlDialog()"
                   @open-sql="openSqlFile"
+                  @manage-processes="showProcessDialog = true"
                   @change-connection="changeActiveConnection"
                   @change-database="changeActiveDatabase"
                   @change-schema="changeActiveSchema"
@@ -1222,6 +1225,14 @@ onUnmounted(() => {
           @open-latest-release="openLatestRelease"
           @download-and-install="downloadAndInstallUpdate"
           @restart="restartApp"
+        />
+        <KillProcessDialog
+          v-if="showProcessDialog && activeConnection && activeTab"
+          v-model:open="showProcessDialog"
+          :connection-id="activeConnection.id"
+          :db-type="activeConnection.db_type"
+          :database="activeTab.database"
+          :current-sql="executableSql"
         />
         <Teleport to="body">
           <Transition name="ds-toast">

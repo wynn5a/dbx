@@ -979,8 +979,14 @@ pub async fn connect(url: &str, fallback_timeout: Duration) -> Result<Pool, Stri
     let tz = iana_time_zone::get_timezone().unwrap_or_else(|_| "UTC".to_string());
 
     super::with_connection_timeout("PostgreSQL", timeout, async {
-        let pg_config = tokio_postgres::Config::from_str(&postgres_url.url)
+        let mut pg_config = tokio_postgres::Config::from_str(&postgres_url.url)
             .map_err(|e| format!("Invalid PostgreSQL connection URL: {e}"))?;
+
+        // Tag DBX connections so process listing can filter to DBX-originated
+        // backends (see crate::process). Respect a user-supplied application_name.
+        if pg_config.get_application_name().is_none() {
+            pg_config.application_name(super::CONNECTION_APP_NAME);
+        }
 
         let mgr_config = ManagerConfig { recycling_method: RecyclingMethod::Verified };
         let tls_config = postgres_tls_config(

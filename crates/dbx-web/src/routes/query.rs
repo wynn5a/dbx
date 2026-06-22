@@ -31,6 +31,22 @@ pub struct CancelRequest {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ListProcessesRequest {
+    pub connection_id: String,
+    pub database: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KillProcessRequest {
+    pub connection_id: String,
+    pub database: String,
+    pub pid: String,
+    pub mode: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CloseSessionRequest {
     pub connection_id: String,
     pub database: String,
@@ -355,6 +371,31 @@ pub async fn cancel_query(
 ) -> Json<serde_json::Value> {
     let cancelled = state.app.running_queries.cancel(&req.execution_id);
     Json(serde_json::json!({ "cancelled": cancelled }))
+}
+
+pub async fn list_processes(
+    State(state): State<Arc<WebState>>,
+    Json(req): Json<ListProcessesRequest>,
+) -> Result<Json<Vec<dbx_core::process::DbProcess>>, AppError> {
+    let processes =
+        dbx_core::process::list_processes(&state.app, &req.connection_id, &req.database).await.map_err(AppError)?;
+    Ok(Json(processes))
+}
+
+pub async fn kill_process(
+    State(state): State<Arc<WebState>>,
+    Json(req): Json<KillProcessRequest>,
+) -> Result<Json<bool>, AppError> {
+    let killed = dbx_core::process::kill_process(
+        &state.app,
+        &req.connection_id,
+        &req.database,
+        &req.pid,
+        dbx_core::process::KillMode::parse(&req.mode),
+    )
+    .await
+    .map_err(AppError)?;
+    Ok(Json(killed))
 }
 
 pub async fn close_query_session(

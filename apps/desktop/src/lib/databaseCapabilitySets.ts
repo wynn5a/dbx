@@ -203,6 +203,9 @@ export const SINGLE_DATABASE_TYPES = new Set<DatabaseType>([
 
 export const FETCH_FIRST_TYPES = new Set<DatabaseType>(["oracle", "dameng"]);
 
+/** Engines whose running server-side processes DBX can list and cancel/kill. */
+export const PROCESS_MANAGEMENT_TYPES = new Set<DatabaseType>(["postgres", "mysql", "sqlserver"]);
+
 export const TREE_SCHEMA_TYPES = new Set<DatabaseType>([
   "postgres",
   "redshift",

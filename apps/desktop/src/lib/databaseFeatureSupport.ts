@@ -9,6 +9,7 @@ import {
   FETCH_FIRST_TYPES,
   FIELD_LINEAGE_SUPPORTED_TYPES,
   PG_LIKE_STRUCTURE_TYPES,
+  PROCESS_MANAGEMENT_TYPES,
   SCHEMA_AWARE_TYPES,
   SINGLE_DATABASE_TYPES,
   SQL_FILE_UNSUPPORTED_TYPES,
@@ -50,6 +51,10 @@ export function databaseObjectTreeNodeSchema(
 
 export function isSingleDatabase(dbType?: DatabaseType): boolean {
   return !!dbType && SINGLE_DATABASE_TYPES.has(dbType);
+}
+
+export function supportsProcessManagement(dbType?: DatabaseType): boolean {
+  return !!dbType && PROCESS_MANAGEMENT_TYPES.has(dbType);
 }
 
 export function usesFetchFirst(dbType?: DatabaseType): boolean {

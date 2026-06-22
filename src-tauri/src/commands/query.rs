@@ -148,6 +148,27 @@ pub async fn cancel_query(state: State<'_, Arc<AppState>>, execution_id: String)
 }
 
 #[tauri::command]
+pub async fn list_processes(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    database: String,
+) -> Result<Vec<dbx_core::process::DbProcess>, String> {
+    dbx_core::process::list_processes(&state, &connection_id, &database).await
+}
+
+#[tauri::command]
+pub async fn kill_process(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    database: String,
+    pid: String,
+    mode: String,
+) -> Result<bool, String> {
+    dbx_core::process::kill_process(&state, &connection_id, &database, &pid, dbx_core::process::KillMode::parse(&mode))
+        .await
+}
+
+#[tauri::command]
 pub async fn close_query_session(
     state: State<'_, Arc<AppState>>,
     connection_id: String,

@@ -255,6 +255,17 @@ export interface QueryResult {
   has_more?: boolean;
 }
 
+/** A running server-side database process (see crate::process / KillProcessDialog). */
+export interface DbProcess {
+  /** Backend identifier: Postgres pid, MySQL connection id, SQL Server spid. */
+  pid: string;
+  state?: string | null;
+  /** The SQL text currently executing, when the server exposes it. */
+  query?: string | null;
+  /** Seconds the statement has been running, when available. */
+  durationSecs?: number | null;
+}
+
 export interface SqlTextSpan {
   start_line: number;
   start_column: number;

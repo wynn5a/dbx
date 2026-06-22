@@ -26,6 +26,11 @@ pub use file_validator::validate_file_path;
 pub const CONNECTION_TIMEOUT_SECS: u64 = 5;
 pub const TCP_PROBE_TIMEOUT_SECS: u64 = 3;
 
+/// Application name advertised by DBX-originated SQL connections (Postgres
+/// `application_name`, SQL Server program name), set in each driver's `connect()`.
+/// `crate::process` filters server-side process listings to this tag.
+pub const CONNECTION_APP_NAME: &str = "dbx";
+
 pub fn connection_timeout() -> Duration {
     Duration::from_secs(CONNECTION_TIMEOUT_SECS)
 }

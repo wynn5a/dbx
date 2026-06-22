@@ -224,6 +224,8 @@ async fn main() {
         .route("/data-compare/prepare-missing-target", post(routes::data_compare::prepare_data_compare_missing_target))
         .route("/data-compare/build-sync-plan", post(routes::data_compare::build_data_compare_sync_plan))
         .route("/query/cancel", post(routes::query::cancel_query))
+        .route("/query/list-processes", post(routes::query::list_processes))
+        .route("/query/kill-process", post(routes::query::kill_process))
         .route("/query/close-session", post(routes::query::close_query_session))
         .route("/query/close-client-session", post(routes::query::close_client_connection_session))
         .route("/export/query-result-json", post(routes::text_export::export_query_result_json))

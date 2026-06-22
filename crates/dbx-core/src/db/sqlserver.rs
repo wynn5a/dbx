@@ -86,6 +86,9 @@ async fn try_connect(
         config.port(port);
     }
     config.authentication(AuthMethod::sql_server(user, pass));
+    // Tag DBX connections so process listing can filter to DBX-originated sessions
+    // (see crate::process). Surfaces as program_name in sys.dm_exec_sessions.
+    config.application_name(super::CONNECTION_APP_NAME);
     if let Some(db) = database {
         config.database(db);
     }

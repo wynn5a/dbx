@@ -12,6 +12,7 @@ import type {
   ForeignKeyInfo,
   TriggerInfo,
   QueryResult,
+  DbProcess,
   SqlReferenceAnalysis,
   DatabaseType,
   InstalledPlugin,
@@ -584,6 +585,19 @@ export async function refreshConnections(): Promise<void> {
 
 export async function cancelQuery(executionId: string): Promise<boolean> {
   return invoke("cancel_query", { executionId });
+}
+
+export async function listProcesses(connectionId: string, database: string): Promise<DbProcess[]> {
+  return invoke("list_processes", { connectionId, database });
+}
+
+export async function killProcess(
+  connectionId: string,
+  database: string,
+  pid: string,
+  mode: "cancel" | "terminate",
+): Promise<boolean> {
+  return invoke("kill_process", { connectionId, database, pid, mode });
 }
 
 export async function closeQuerySession(
