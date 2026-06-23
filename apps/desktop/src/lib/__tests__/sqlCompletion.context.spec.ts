@@ -1,5 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { buildSqlCompletionItems, getSqlCompletionContext } from "@/lib/sqlCompletion";
+import { buildSqlCompletionItems, getSqlCompletionContext, shouldAutoOpenSqlCompletion } from "@/lib/sqlCompletion";
+
+describe("shouldAutoOpenSqlCompletion after numeric literals", () => {
+  it("does not auto-open after a completed numeric value in a comparison", () => {
+    const sql = "select * from dashboards t where t.id = 1000";
+    expect(shouldAutoOpenSqlCompletion(sql, sql.length)).toBe(false);
+  });
+
+  it("does not auto-open after a decimal value", () => {
+    const sql = "select * from t where t.price = 19.95";
+    expect(shouldAutoOpenSqlCompletion(sql, sql.length)).toBe(false);
+  });
+
+  it("does not auto-open after a numeric value inside an IN list", () => {
+    const sql = "select * from t where t.id in (1, 2, 3";
+    // previous char is a digit, not a bracket, so the value-literal guard applies
+    expect(shouldAutoOpenSqlCompletion(sql, sql.length)).toBe(false);
+  });
+
+  it("still auto-opens for an identifier whose tail is a digit", () => {
+    const sql = "select * from addr2";
+    expect(shouldAutoOpenSqlCompletion(sql, sql.length)).toBe(true);
+  });
+
+  it("still auto-opens after a qualifier dot", () => {
+    const sql = "select t. from orders t";
+    expect(shouldAutoOpenSqlCompletion(sql, "select t.".length)).toBe(true);
+  });
+});
 
 describe("sqlCompletion quoted schema qualifiers", () => {
   it("parses quoted PostgreSQL schema names before a dot", () => {

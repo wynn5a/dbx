@@ -82,6 +82,7 @@ import type {
   SqlCompletionForeignKey,
   SqlCompletionItem,
   SqlCompletionObject,
+  SqlCompletionReferencedTable,
 } from "@/lib/sqlCompletion";
 import type { DatabaseType, ForeignKeyInfo, SqlTextSpan } from "@/types/database";
 
@@ -878,6 +879,12 @@ function unregisterTableReferenceDropListener() {
 
 let completionEpoch = 0;
 let completionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+// Background metadata prefetch (tables/columns/objects) is debounced separately
+// from the explicit async-completion flow above. The local cache serves the
+// immediate popup while typing; this network refresh only needs to run once the
+// user pauses, so a burst of keystrokes collapses to a single backend sweep.
+const COMPLETION_METADATA_REFRESH_DELAY = 150;
+let completionMetadataRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 type QueryCompletionItem = SqlCompletionItem | ElasticsearchCompletionItem;
 
@@ -1208,10 +1215,41 @@ function retriggerCompletionAfterMetadata(epoch: number) {
   codeMirrorStartCompletion?.(currentView);
 }
 
+// A referenced table whose name is the token the cursor is currently sitting on
+// (e.g. `FROM ord|`) is half-typed, not a real table — fetching its columns hits
+// the backend for a name that doesn't exist (`SHOW COLUMNS ... ord`) on every
+// keystroke. Skip it; the real columns load once the name is complete and the
+// cursor moves into a column position.
+function isReferencedTableBeingTyped(
+  completionContext: ReturnType<typeof getSqlCompletionContext>,
+  refTable: SqlCompletionReferencedTable,
+): boolean {
+  return (
+    completionContext.suggestTables &&
+    !refTable.alias &&
+    (!refTable.columns || refTable.columns.length === 0) &&
+    completionContext.prefix.length > 0 &&
+    refTable.name.toLowerCase() === completionContext.prefix.toLowerCase()
+  );
+}
+
 function scheduleCompletionMetadataRefresh(
   completionContext: ReturnType<typeof getSqlCompletionContext>,
   epoch: number,
 ) {
+  if (!props.connectionId || props.database == null) return;
+  if (completionMetadataRefreshTimer) {
+    clearTimeout(completionMetadataRefreshTimer);
+    completionMetadataRefreshTimer = null;
+  }
+  completionMetadataRefreshTimer = setTimeout(() => {
+    completionMetadataRefreshTimer = null;
+    if (epoch !== completionEpoch) return;
+    runCompletionMetadataRefresh(completionContext, epoch);
+  }, COMPLETION_METADATA_REFRESH_DELAY);
+}
+
+function runCompletionMetadataRefresh(completionContext: ReturnType<typeof getSqlCompletionContext>, epoch: number) {
   if (!props.connectionId || props.database == null) return;
   const connectionId = props.connectionId;
   const database = props.database;
@@ -1266,6 +1304,7 @@ function scheduleCompletionMetadataRefresh(
   }
   for (const refTable of completionContext.referencedTables) {
     if (refTable.columns && refTable.columns.length > 0) continue;
+    if (isReferencedTableBeingTyped(completionContext, refTable)) continue;
     const cacheKey = refTable.schema ? `${refTable.schema}.${refTable.name}` : refTable.name;
     if (cachedColumnsByTable.has(cacheKey)) continue;
     void connectionStore
@@ -2116,6 +2155,10 @@ function pauseQueryEditorBackgroundWork() {
   semanticDiagnosticRunId++;
   if (semanticDiagnosticTimer) clearTimeout(semanticDiagnosticTimer);
   semanticDiagnosticTimer = null;
+  if (completionDebounceTimer) clearTimeout(completionDebounceTimer);
+  completionDebounceTimer = null;
+  if (completionMetadataRefreshTimer) clearTimeout(completionMetadataRefreshTimer);
+  completionMetadataRefreshTimer = null;
   completionEpoch++;
   unregisterTableReferenceDropListener();
 }

@@ -1109,7 +1109,35 @@ export function shouldAutoOpenSqlCompletion(sql: string, cursor: number): boolea
   ) {
     return true;
   }
+  // A completed numeric literal (e.g. `where t.id = 1000|`) is a value, not a
+  // prefix worth completing — don't pop the function/keyword menu after it.
+  // Closing quotes already fail the [\w$.@] check below; digits are the only
+  // value terminator that would otherwise read as an identifier prefix.
+  if (cursorAfterNumericLiteral(sql, cursor)) return false;
   return /[\w$.@]/.test(previousChar);
+}
+
+// True when the run of characters immediately before the cursor is a standalone
+// numeric literal (the `1000` in `id = 1000|`) rather than the digit tail of an
+// identifier (the `2` in `addr2|`). The preceding char must not be an identifier
+// character, otherwise the digits belong to a name worth completing.
+function cursorAfterNumericLiteral(sql: string, cursor: number): boolean {
+  let index = cursor;
+  let sawDigit = false;
+  while (index > 0) {
+    const ch = sql[index - 1];
+    if (ch >= "0" && ch <= "9") {
+      sawDigit = true;
+      index -= 1;
+    } else if (ch === ".") {
+      index -= 1;
+    } else {
+      break;
+    }
+  }
+  if (!sawDigit) return false;
+  const before = sql[index - 1];
+  return before === undefined || !/[A-Za-z_$]/.test(before);
 }
 
 export function isSqlLikeCompletionStatement(sql: string, cursor: number): boolean {
