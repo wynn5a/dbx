@@ -112,6 +112,20 @@ where
         .map_err(|_| format!("{label} connection timed out ({}s)", timeout.as_secs()))?
 }
 
+/// Bound a metadata/completion query (column lists, table lists, etc.) so a
+/// stalled server or an exhausted pool can never hold a connection — and thus
+/// the whole (small) pool — indefinitely. On timeout the inner future is
+/// dropped, which releases the pool permit / discards the in-flight connection,
+/// instead of wedging the connection until the process restarts.
+pub async fn with_metadata_timeout<T, F>(label: &str, timeout: Duration, future: F) -> Result<T, String>
+where
+    F: Future<Output = Result<T, String>>,
+{
+    tokio::time::timeout(timeout, future)
+        .await
+        .map_err(|_| format!("{label} timed out after {}s", timeout.as_secs()))?
+}
+
 pub async fn probe_tcp_endpoint(label: &str, host: &str, port: u16, timeout: Duration) -> Result<(), String> {
     tokio::time::timeout(timeout, tokio::net::TcpStream::connect((host, port)))
         .await
@@ -127,5 +141,31 @@ mod tests {
     #[test]
     fn binary_values_are_displayed_as_prefixed_hex() {
         assert_eq!(binary_value_to_json(&[0x00, 0x01, 0xab, 0xff]), serde_json::json!("0x0001abff"));
+    }
+
+    #[tokio::test]
+    async fn with_metadata_timeout_returns_ok_when_future_completes_in_time() {
+        let result: Result<u32, String> = with_metadata_timeout("test", Duration::from_secs(30), async { Ok(7) }).await;
+        assert_eq!(result, Ok(7));
+    }
+
+    #[tokio::test]
+    async fn with_metadata_timeout_propagates_inner_error() {
+        let result: Result<u32, String> =
+            with_metadata_timeout("test", Duration::from_secs(30), async { Err("boom".to_string()) }).await;
+        assert_eq!(result, Err("boom".to_string()));
+    }
+
+    #[tokio::test]
+    async fn with_metadata_timeout_errors_when_future_stalls() {
+        // The 50ms timeout fires well before the 10s sleep, so the stalled future
+        // is dropped and we get a timeout error (releasing the pool connection in
+        // the real call path) rather than hanging forever.
+        let stalled = async {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            Ok::<u32, String>(1)
+        };
+        let result = with_metadata_timeout("Loading columns", Duration::from_millis(50), stalled).await;
+        assert!(matches!(&result, Err(message) if message == "Loading columns timed out after 0s"), "got {result:?}");
     }
 }

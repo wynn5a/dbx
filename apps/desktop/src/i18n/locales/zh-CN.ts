@@ -468,6 +468,8 @@ export default {
     exportJson: "导出 JSON",
     exportMarkdown: "导出 Markdown",
     exportSql: "导出 SQL INSERT",
+    copyResultCsv: "复制结果为 CSV",
+    copyResultJson: "复制结果为 JSON",
     exportSelectedRowsCsv: "导出选中行为 CSV",
     exportSelectedRowsXlsx: "导出选中行为 XLSX",
     exportSelectedRowsJson: "导出选中行为 JSON",

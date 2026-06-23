@@ -290,7 +290,22 @@ pub fn run() {
                 s
             });
             let desktop_settings = tauri::async_runtime::block_on(storage.load_desktop_settings()).unwrap_or_default();
-            app.handle().plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Debug).build())?;
+            // Ensure the log dir exists before the plugin opens its file target.
+            // The plugin writes to app_log_dir(); if the parent dir is missing,
+            // every record fails to open with ENOENT ("No such file or directory").
+            if let Ok(log_dir) = app.path().app_log_dir() {
+                let _ = std::fs::create_dir_all(&log_dir);
+            }
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Debug)
+                    // Keep noisy third-party crates out of the log targets. The SQL
+                    // editor parses on nearly every keystroke and sqlparser emits a
+                    // DEBUG line per token — pure noise that also amplifies any
+                    // log-target write error into a flood.
+                    .level_for("sqlparser", log::LevelFilter::Info)
+                    .build(),
+            )?;
             apply_debug_log_level(desktop_settings.debug_logging_enabled);
             eprintln!("[STARTUP] storage ready in {:?}", t.elapsed());
 

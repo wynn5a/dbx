@@ -1285,24 +1285,40 @@ pub async fn get_columns_core(
     let connections = state.connections.read().await;
     let pool = connections.get(&pool_key).ok_or("Pool not found")?;
 
-    match pool {
-        PoolKind::Mysql(p, _) if db_config.as_ref().is_some_and(is_doris_family_config) => {
-            db::mysql::get_columns_show(p, database, table).await.map(deduplicate_column_infos)
+    // Bound the column fetch. Completion fires many of these in bursts against a
+    // small pool; an unbounded query that stalls would hold its pool connection
+    // (and the read lock above) forever, wedging the whole connection until the
+    // process restarts. Use the connection's query timeout, falling back to a
+    // sane default and never "unlimited" for metadata.
+    let metadata_timeout = std::time::Duration::from_secs(
+        db_config
+            .as_ref()
+            .map(|config| config.effective_query_timeout_secs())
+            .filter(|secs| *secs > 0)
+            .unwrap_or_else(crate::models::connection::default_query_timeout_secs),
+    );
+    let timeout_label = format!("Loading columns for {database}.{table}");
+    let fetch = async {
+        match pool {
+            PoolKind::Mysql(p, _) if db_config.as_ref().is_some_and(is_doris_family_config) => {
+                db::mysql::get_columns_show(p, database, table).await.map(deduplicate_column_infos)
+            }
+            PoolKind::Mysql(p, mode) => {
+                dispatch_mysql!(p, mode, db::mysql::get_columns, db::ob_oracle::get_columns, database, table)
+                    .map(deduplicate_column_infos)
+            }
+            PoolKind::Postgres(p) => db::postgres::get_columns(p, schema, table).await.map(deduplicate_column_infos),
+            PoolKind::Sqlite(p) => db::sqlite::get_columns(p, schema, table).await.map(deduplicate_column_infos),
+            PoolKind::Rqlite(client) => {
+                db::rqlite_driver::get_columns(client, schema, table).await.map(deduplicate_column_infos)
+            }
+            PoolKind::Elasticsearch(client) => {
+                db::elasticsearch_driver::get_columns(client, table).await.map(deduplicate_column_infos)
+            }
+            _ => Ok(vec![]),
         }
-        PoolKind::Mysql(p, mode) => {
-            dispatch_mysql!(p, mode, db::mysql::get_columns, db::ob_oracle::get_columns, database, table)
-                .map(deduplicate_column_infos)
-        }
-        PoolKind::Postgres(p) => db::postgres::get_columns(p, schema, table).await.map(deduplicate_column_infos),
-        PoolKind::Sqlite(p) => db::sqlite::get_columns(p, schema, table).await.map(deduplicate_column_infos),
-        PoolKind::Rqlite(client) => {
-            db::rqlite_driver::get_columns(client, schema, table).await.map(deduplicate_column_infos)
-        }
-        PoolKind::Elasticsearch(client) => {
-            db::elasticsearch_driver::get_columns(client, table).await.map(deduplicate_column_infos)
-        }
-        _ => Ok(vec![]),
-    }
+    };
+    db::with_metadata_timeout(&timeout_label, metadata_timeout, fetch).await
 }
 
 fn deduplicate_column_infos(columns: Vec<db::ColumnInfo>) -> Vec<db::ColumnInfo> {

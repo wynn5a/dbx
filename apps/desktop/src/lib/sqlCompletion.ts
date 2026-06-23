@@ -1160,6 +1160,31 @@ function currentSqlLikeLineBlockSpan(sql: string, cursor: number): { start: numb
   return { start, end };
 }
 
+// A line that starts a brand-new top-level SQL statement. Used to bound the
+// current statement when the previous one was not terminated with a semicolon
+// (e.g. two `select` statements on consecutive lines) so completion does not
+// bleed referenced tables/columns across statements.
+const STATEMENT_START_KEYWORD = /^(?:select|with|insert|update|delete|create|alter|drop|truncate|merge|replace)\b/i;
+// Set operators (UNION/INTERSECT/EXCEPT) chain selects into ONE statement, so a
+// `select` following one of these is a continuation, not a new statement.
+const SET_OPERATOR_TAIL = /(?:\bunion\b|\bintersect\b|\bexcept\b|\bminus\b)(?:\s+(?:all|distinct))?\s*$/i;
+
+/** Paren nesting depth of `text`, ignoring parens inside string literals. */
+function parenDepthOutsideQuotes(text: string): number {
+  let depth = 0;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "'" && !inDoubleQuote) inSingleQuote = !inSingleQuote;
+    else if (ch === '"' && !inSingleQuote) inDoubleQuote = !inDoubleQuote;
+    else if (inSingleQuote || inDoubleQuote) continue;
+    else if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+  }
+  return depth;
+}
+
 function currentLineBlockEnd(sql: string, cursor: number, start: number): number | null {
   let lineStart = sql.lastIndexOf("\n", cursor - 1) + 1;
   while (lineStart < sql.length) {
@@ -1167,8 +1192,19 @@ function currentLineBlockEnd(sql: string, cursor: number, start: number): number
     const boundedLineEnd = lineEnd >= 0 ? lineEnd : sql.length;
     const line = sql.slice(lineStart, boundedLineEnd);
     const trimmed = line.trimStart();
-    if (lineStart > start && (!trimmed || /^(get|post|put|delete|patch|head)\s+\//i.test(trimmed))) {
-      return lineStart;
+    if (lineStart > start) {
+      if (!trimmed || /^(get|post|put|delete|patch|head)\s+\//i.test(trimmed)) {
+        return lineStart;
+      }
+      // A new top-level statement keyword at the start of a line ends the
+      // current block — but only at paren depth 0 (not inside a subquery) and
+      // not when it continues a UNION/INTERSECT/EXCEPT chain.
+      if (STATEMENT_START_KEYWORD.test(trimmed)) {
+        const preceding = sql.slice(start, lineStart);
+        if (parenDepthOutsideQuotes(preceding) === 0 && !SET_OPERATOR_TAIL.test(preceding)) {
+          return lineStart;
+        }
+      }
     }
     if (lineEnd < 0) break;
     lineStart = lineEnd + 1;

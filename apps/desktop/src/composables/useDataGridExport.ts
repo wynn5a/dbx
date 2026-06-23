@@ -750,6 +750,20 @@ export function useDataGridExport(options: UseDataGridExportOptions) {
     await copyText(sql.value);
   }
 
+  async function copyResultCsv(rowIds?: number[]) {
+    await runExclusiveExport(async () => {
+      const result = await resultToExport(rowIds);
+      await copyText(formatSelectionAsCsv({ columns: result.columns, rows: result.rows }));
+    });
+  }
+
+  async function copyResultJson(rowIds?: number[]) {
+    await runExclusiveExport(async () => {
+      const result = await resultToExport(rowIds);
+      await copyText(formatSelectionAsJson({ columns: result.columns, rows: result.rows }));
+    });
+  }
+
   function sqlInsertExportData(result: { columns: string[]; rows: CellValue[][] }): {
     columns: string[];
     columnTypes?: Array<string | undefined>;
@@ -793,6 +807,8 @@ export function useDataGridExport(options: UseDataGridExportOptions) {
     exportXlsx,
     exportSql,
     copySql,
+    copyResultCsv,
+    copyResultJson,
   };
 }
 

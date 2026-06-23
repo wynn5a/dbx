@@ -438,6 +438,8 @@ export default {
     exportJson: "Exportar JSON",
     exportMarkdown: "Exportar Markdown",
     exportSql: "Exportar SQL INSERT",
+    copyResultCsv: "Copiar resultado como CSV",
+    copyResultJson: "Copiar resultado como JSON",
     exportSelectedRowsCsv: "Exportar filas seleccionadas como CSV",
     exportSelectedRowsXlsx: "Exportar filas seleccionadas como XLSX",
     exportSelectedRowsJson: "Exportar filas seleccionadas como JSON",

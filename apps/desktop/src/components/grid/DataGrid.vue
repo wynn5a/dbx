@@ -4088,6 +4088,8 @@ const {
   exportXlsx,
   exportSql,
   copySql,
+  copyResultCsv,
+  copyResultJson,
 } = useDataGridExport({
   columns: visibleColumns,
   displayItems: visibleDisplayItems,
@@ -4127,6 +4129,8 @@ const exportMenuItems = computed(() => [
   { value: "json", label: t("grid.exportJson") },
   { value: "markdown", label: t("grid.exportMarkdown") },
   { value: "sql", label: t("grid.exportSql") },
+  { value: "copy-csv", label: t("grid.copyResultCsv"), separatorBefore: true },
+  { value: "copy-json", label: t("grid.copyResultJson") },
   ...(isMultiRow.value
     ? [
         { value: "selected-csv", label: t("grid.exportSelectedRowsCsv"), separatorBefore: true },
@@ -4149,6 +4153,8 @@ function selectExportMenuItem(value: string) {
     json: exportJson,
     markdown: exportMarkdown,
     sql: exportSql,
+    "copy-csv": copyResultCsv,
+    "copy-json": copyResultJson,
     "selected-csv": exportSelectedRowsCsv,
     "selected-xlsx": exportSelectedRowsXlsx,
     "selected-json": exportSelectedRowsJson,

@@ -1032,11 +1032,11 @@ async function provideSqlCompletions(
 
     const localResult = buildLocalSqlCompletionResult(completionContext, fullDoc, position);
     if (localResult) {
-      scheduleCompletionMetadataRefresh(completionContext);
+      scheduleCompletionMetadataRefresh(completionContext, epoch);
       if (!explicit) return localResult;
     }
     if (!explicit) {
-      scheduleCompletionMetadataRefresh(completionContext);
+      scheduleCompletionMetadataRefresh(completionContext, epoch);
       return null;
     }
 
@@ -1195,7 +1195,23 @@ function buildLocalSqlCompletionResult(
   );
 }
 
-function scheduleCompletionMetadataRefresh(completionContext: ReturnType<typeof getSqlCompletionContext>) {
+// Re-open the completion popup once background metadata (columns/tables/objects)
+// has loaded. This is what makes autocompletion work while typing fast: the final
+// keystroke in a burst returns null while data is still being fetched, and without
+// a re-trigger the popup would only appear on the *next* keystroke — which never
+// comes once the user stops. The epoch guard ensures we only fire when no newer
+// completion request has started since (i.e. the user paused at this position).
+function retriggerCompletionAfterMetadata(epoch: number) {
+  if (epoch !== completionEpoch) return;
+  const currentView = view.value;
+  if (!currentView || !currentView.hasFocus) return;
+  codeMirrorStartCompletion?.(currentView);
+}
+
+function scheduleCompletionMetadataRefresh(
+  completionContext: ReturnType<typeof getSqlCompletionContext>,
+  epoch: number,
+) {
   if (!props.connectionId || props.database == null) return;
   const connectionId = props.connectionId;
   const database = props.database;
@@ -1214,7 +1230,9 @@ function scheduleCompletionMetadataRefresh(completionContext: ReturnType<typeof 
         schema,
       )
       .then((tables) => {
+        const previousCount = cachedTables.length;
         cachedTables = mergeCompletionTables(cachedTables, tables);
+        if (cachedTables.length > previousCount) retriggerCompletionAfterMetadata(epoch);
       })
       .catch(() => {});
   }
@@ -1226,7 +1244,9 @@ function scheduleCompletionMetadataRefresh(completionContext: ReturnType<typeof 
     void connectionStore
       .refreshCompletionObjects(connectionId, database, completionContext.prefix, MAX_COMPLETION_TABLES, props.schema)
       .then((objects) => {
+        const previousCount = cachedCompletionObjects.length;
         cachedCompletionObjects = mergeCompletionObjects(cachedCompletionObjects, objects);
+        if (cachedCompletionObjects.length > previousCount) retriggerCompletionAfterMetadata(epoch);
       })
       .catch(() => {});
   }
@@ -1240,6 +1260,7 @@ function scheduleCompletionMetadataRefresh(completionContext: ReturnType<typeof 
       .then((columns) => {
         const insertSchema = completionContext.insertSchema ?? props.schema;
         cachedColumnsByTable.set(insertSchema ? `${insertSchema}.${insertTable}` : insertTable, columns);
+        if (columns.length > 0) retriggerCompletionAfterMetadata(epoch);
       })
       .catch(() => {});
   }
@@ -1250,7 +1271,10 @@ function scheduleCompletionMetadataRefresh(completionContext: ReturnType<typeof 
     void connectionStore
       .refreshCompletionColumns(connectionId, database, refTable.name, refTable.schema ?? props.schema)
       .then((columns) => {
-        if (columns.length > 0) cachedColumnsByTable.set(cacheKey, columns);
+        if (columns.length > 0) {
+          cachedColumnsByTable.set(cacheKey, columns);
+          retriggerCompletionAfterMetadata(epoch);
+        }
       })
       .catch(() => {});
   }
@@ -1355,11 +1379,16 @@ async function performAsyncCompletionWithResult(
     }
   }
 
-  // If qualifier didn't match any table names, try it as a schema name
+  // If qualifier didn't match any table names, try it as a schema name.
+  // Skip this when the qualifier is a known table/alias reference (e.g. `t` in
+  // `from version_Automation t where t.`): treating the alias as a schema and
+  // looking it up can make the backend return the full table list, which would
+  // wrongly surface tables instead of the alias's columns.
   let qualifierIsSchema = false;
   if (
     completionContext.qualifier &&
     tables.length === 0 &&
+    !isReferencedTableQualifier(completionContext) &&
     (completionContext.suggestTables || completionContext.exclusiveColumnSuggestions)
   ) {
     const schemaTables = await connectionStore.listCompletionTables(

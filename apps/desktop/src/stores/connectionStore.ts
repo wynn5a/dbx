@@ -263,13 +263,58 @@ export const useConnectionStore = defineStore("connection", () => {
     return raceWithTimeout(promise, timeoutMs, connectionAttemptTimeoutMessage(timeoutMs));
   }
 
+  // Dedupes concurrent transparent reconnects: when a burst of metadata queries
+  // all fail on the same stale pool, they share one reconnect instead of each
+  // tearing down and rebuilding the pool.
+  const metadataReconnectInFlight = new Map<string, Promise<void>>();
+
+  // Rebuild a connection's pool in place (connect_db discards the old pool and
+  // opens fresh sockets) without going through ensureConnected — which would
+  // short-circuit, since the connection is still marked connected at this point.
+  function reconnectForMetadata(connectionId: string): Promise<void> {
+    const existing = metadataReconnectInFlight.get(connectionId);
+    if (existing) return existing;
+    const config = getConfig(connectionId);
+    if (!config) return Promise.reject(new Error("Connection config not found"));
+    const attempt = (async () => {
+      await beforeConnectHandler?.(config);
+      const id = await withConnectionAttemptTimeout(api.connectDb(config), config);
+      connectedIds.value.add(id);
+      clearConnectionError(connectionId);
+      if (id !== connectionId) clearConnectionError(id);
+    })();
+    const tracked = attempt.finally(() => {
+      metadataReconnectInFlight.delete(connectionId);
+    });
+    metadataReconnectInFlight.set(connectionId, tracked);
+    return tracked;
+  }
+
   // Bound the metadata/catalog queries that run after a connection is verified
   // (listDatabases, listSchemas, listTables, …). These are not covered by the
   // connect timeout, so a pooler that accepts the socket but never answers the
   // first query would otherwise spin the sidebar forever.
-  function withMetadataLoadTimeout<T>(connectionId: string, promise: Promise<T>): Promise<T> {
+  //
+  // On a transient connection error (a stale socket after the machine/VPN was
+  // idle), transparently rebuild the pool and retry the read once before
+  // surfacing the failure — this is why `factory` is a thunk rather than a
+  // started promise. Only a genuine connection error retries: our own load
+  // timeout does not, since that signals a stalled pooler (not a dead socket)
+  // and retrying would just double the wait. If the reconnect or the retry also
+  // fails, the error propagates and the caller marks the connection disconnected
+  // as before — so we only avoid the slow on-demand reconnect for errors that a
+  // fresh pool actually recovers from.
+  async function withMetadataLoadTimeout<T>(connectionId: string, factory: () => Promise<T>): Promise<T> {
     const timeoutMs = metadataLoadTimeoutMs(getConfig(connectionId));
-    return raceWithTimeout(promise, timeoutMs, metadataLoadTimeoutMessage(timeoutMs));
+    const timeoutMessage = metadataLoadTimeoutMessage(timeoutMs);
+    try {
+      return await raceWithTimeout(factory(), timeoutMs, timeoutMessage);
+    } catch (error) {
+      const isOwnTimeout = error instanceof Error && error.message === timeoutMessage;
+      if (isOwnTimeout || !shouldMarkDisconnected(error) || !getConfig(connectionId)) throw error;
+      await reconnectForMetadata(connectionId);
+      return await raceWithTimeout(factory(), timeoutMs, timeoutMessage);
+    }
   }
 
   function normalizeConnection(config: ConnectionConfig): ConnectionConfig {
@@ -934,8 +979,7 @@ export const useConnectionStore = defineStore("connection", () => {
             return;
           }
         }
-        const [databases, schemas] = await withMetadataLoadTimeout(
-          connectionId,
+        const [databases, schemas] = await withMetadataLoadTimeout(connectionId, () =>
           Promise.all([api.listDatabases(connectionId), api.listSchemas(connectionId, "main")]),
         );
         const children = withSavedSqlRoot(
@@ -955,7 +999,7 @@ export const useConnectionStore = defineStore("connection", () => {
             return;
           }
         }
-        const schemas = await withMetadataLoadTimeout(connectionId, api.listSchemas(connectionId, effectiveDb));
+        const schemas = await withMetadataLoadTimeout(connectionId, () => api.listSchemas(connectionId, effectiveDb));
         const visibleSchemas = filterDatabaseNamesForConnection(schemas, config);
         const schemaNodes: TreeNode[] = sortSidebarNames(visibleSchemas).map((s) => ({
           id: `${connectionId}:${s}:${s}`,
@@ -978,7 +1022,7 @@ export const useConnectionStore = defineStore("connection", () => {
             return;
           }
         }
-        const databases = await withMetadataLoadTimeout(connectionId, api.listDatabases(connectionId));
+        const databases = await withMetadataLoadTimeout(connectionId, () => api.listDatabases(connectionId));
         const visibleNames = filterDatabaseNamesForConnection(
           databases.map((database) => database.name),
           config,
@@ -1012,7 +1056,7 @@ export const useConnectionStore = defineStore("connection", () => {
     node.isLoading = true;
     try {
       await ensureConnected(connectionId);
-      const dbs = await withMetadataLoadTimeout(connectionId, api.redisListDatabases(connectionId));
+      const dbs = await withMetadataLoadTimeout(connectionId, () => api.redisListDatabases(connectionId));
       const config = getConfig(connectionId);
       const visibleNames = filterVisibleDatabaseNames(
         dbs.map((db) => String(db.db)),
@@ -1104,7 +1148,7 @@ export const useConnectionStore = defineStore("connection", () => {
     node.isLoading = true;
     try {
       await ensureConnected(connectionId);
-      const dbs = await withMetadataLoadTimeout(connectionId, api.mongoListDatabases(connectionId));
+      const dbs = await withMetadataLoadTimeout(connectionId, () => api.mongoListDatabases(connectionId));
       const config = getConfig(connectionId);
       const visibleDbs = filterDatabaseNamesForConnection(dbs, config);
       setChildren(
@@ -1139,7 +1183,9 @@ export const useConnectionStore = defineStore("connection", () => {
 
     node.isLoading = true;
     try {
-      const collections = await withMetadataLoadTimeout(connectionId, api.mongoListCollections(connectionId, database));
+      const collections = await withMetadataLoadTimeout(connectionId, () =>
+        api.mongoListCollections(connectionId, database),
+      );
       setChildren(
         node,
         sortSidebarNames(collections).map((col) => ({
@@ -1178,7 +1224,7 @@ export const useConnectionStore = defineStore("connection", () => {
       }
 
       const schemas = sortSidebarNames(
-        await withMetadataLoadTimeout(connectionId, api.listSchemas(connectionId, database)),
+        await withMetadataLoadTimeout(connectionId, () => api.listSchemas(connectionId, database)),
       );
       const children = schemas.map((s) => ({
         id: `${connectionId}:${database}:${s}`,
@@ -1224,9 +1270,11 @@ export const useConnectionStore = defineStore("connection", () => {
       }
 
       const config = getConfig(connectionId);
-      const schemas = await withMetadataLoadTimeout(connectionId, api.listSchemas(connectionId, database));
+      const schemas = await withMetadataLoadTimeout(connectionId, () => api.listSchemas(connectionId, database));
       const defaultSchemaObjects = simpleObjectDisplay
-        ? await withMetadataLoadTimeout(connectionId, api.listObjects(connectionId, database, SQLSERVER_DEFAULT_SCHEMA))
+        ? await withMetadataLoadTimeout(connectionId, () =>
+            api.listObjects(connectionId, database, SQLSERVER_DEFAULT_SCHEMA),
+          )
         : [];
       const children = buildSqlServerDatabaseTreeNodes(connectionId, database, schemas, defaultSchemaObjects, {
         lazyObjectTypes: simpleObjectDisplay ? undefined : supportedSidebarObjectTypes(config),
@@ -1272,8 +1320,7 @@ export const useConnectionStore = defineStore("connection", () => {
       let children: TreeNode[];
       if (simpleObjectDisplay) {
         try {
-          const [objects, tables] = await withMetadataLoadTimeout(
-            connectionId,
+          const [objects, tables] = await withMetadataLoadTimeout(connectionId, () =>
             Promise.all([
               api.listObjects(connectionId, database, querySchema),
               api.listTables(connectionId, database, querySchema),
@@ -1287,8 +1334,7 @@ export const useConnectionStore = defineStore("connection", () => {
             objects: mergeTableInfosIntoObjects(objects, tables, effectiveSchema),
           });
         } catch {
-          const tables = await withMetadataLoadTimeout(
-            connectionId,
+          const tables = await withMetadataLoadTimeout(connectionId, () =>
             api.listTables(connectionId, database, querySchema),
           );
           children = buildTableTreeNodes({ nodeId, connectionId, database, schema: effectiveSchema, tables });
@@ -1335,19 +1381,22 @@ export const useConnectionStore = defineStore("connection", () => {
         }
       }
 
+      // Capture the guard-narrowed identifiers into locals so the retry thunks
+      // below stay typed as `string` (a closure over the mutable node props
+      // would widen them back to `string | undefined`).
+      const nodeConnectionId = node.connectionId;
+      const nodeDatabase = node.database;
       const wantsOnlyTablesOrViews = objectTypes.every((objectType) => objectType === "TABLE" || objectType === "VIEW");
       const objects = wantsOnlyTablesOrViews
         ? mergeTableInfosIntoObjects(
             [],
-            await withMetadataLoadTimeout(
-              node.connectionId,
-              api.listTables(node.connectionId, node.database, querySchema),
+            await withMetadataLoadTimeout(nodeConnectionId, () =>
+              api.listTables(nodeConnectionId, nodeDatabase, querySchema),
             ),
             effectiveSchema,
           )
-        : await withMetadataLoadTimeout(
-            node.connectionId,
-            api.listObjects(node.connectionId, node.database, querySchema, objectTypes),
+        : await withMetadataLoadTimeout(nodeConnectionId, () =>
+            api.listObjects(nodeConnectionId, nodeDatabase, querySchema, objectTypes),
           );
       const grouped = buildGroupedObjectTreeNodes({
         nodeId: parentNodeId,
@@ -1455,8 +1504,7 @@ export const useConnectionStore = defineStore("connection", () => {
     node.isLoading = true;
     try {
       const querySchema = metadataQuerySchema(connectionId, database, schema);
-      const columns = await withMetadataLoadTimeout(
-        connectionId,
+      const columns = await withMetadataLoadTimeout(connectionId, () =>
         api.getColumns(connectionId, database, querySchema, table),
       );
       setChildren(
@@ -1493,8 +1541,7 @@ export const useConnectionStore = defineStore("connection", () => {
     node.isLoading = true;
     try {
       const querySchema = metadataQuerySchema(connectionId, database, schema);
-      const indexes = await withMetadataLoadTimeout(
-        connectionId,
+      const indexes = await withMetadataLoadTimeout(connectionId, () =>
         api.listIndexes(connectionId, database, querySchema, table),
       );
       setChildren(
@@ -1537,8 +1584,7 @@ export const useConnectionStore = defineStore("connection", () => {
     node.isLoading = true;
     try {
       const querySchema = metadataQuerySchema(connectionId, database, schema);
-      const fkeys = await withMetadataLoadTimeout(
-        connectionId,
+      const fkeys = await withMetadataLoadTimeout(connectionId, () =>
         api.listForeignKeys(connectionId, database, querySchema, table),
       );
       setChildren(
@@ -1575,8 +1621,7 @@ export const useConnectionStore = defineStore("connection", () => {
     node.isLoading = true;
     try {
       const querySchema = metadataQuerySchema(connectionId, database, schema);
-      const triggers = await withMetadataLoadTimeout(
-        connectionId,
+      const triggers = await withMetadataLoadTimeout(connectionId, () =>
         api.listTriggers(connectionId, database, querySchema, table),
       );
       setChildren(

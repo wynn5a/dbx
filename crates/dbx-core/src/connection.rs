@@ -56,6 +56,32 @@ pub enum PoolKind {
     ExternalDriver { driver_id: String, config: Arc<ConnectionConfig>, session: Arc<PluginDriverSession> },
 }
 
+/// A set of mutexes keyed by string, created on demand. Two tasks locking the
+/// same key are serialized; tasks locking different keys run concurrently.
+///
+/// Used to serialize pool creation per connection/database so a burst of
+/// concurrent requests (e.g. SQL completion firing many metadata lookups right
+/// after a pool was evicted) does not each independently open a fresh pool —
+/// which would multiply server-side connections and can exhaust the server's
+/// connection limit, wedging the connection until the app restarts.
+#[derive(Default)]
+pub struct KeyedMutex {
+    locks: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+}
+
+impl KeyedMutex {
+    /// Acquire the lock for `key`, creating it if needed. The returned guard
+    /// holds the lock until dropped. The inner map is only held for the brief
+    /// clone of the per-key `Arc`, never across the `.await`.
+    pub async fn lock(&self, key: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let mutex = {
+            let mut map = self.locks.lock().expect("KeyedMutex map poisoned");
+            map.entry(key.to_string()).or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))).clone()
+        };
+        mutex.lock_owned().await
+    }
+}
+
 pub struct AppState {
     pub connections: RwLock<HashMap<String, PoolKind>>,
     pub configs: RwLock<HashMap<String, ConnectionConfig>>,
@@ -65,6 +91,8 @@ pub struct AppState {
     pub storage: Storage,
     pub plugins: PluginRegistry,
     pub agent_manager: crate::agent_manager::AgentManager,
+    /// Serializes pool creation per pool key (see `KeyedMutex`).
+    pool_creation_locks: KeyedMutex,
 }
 
 pub fn metadata_connection_config(config: &ConnectionConfig) -> ConnectionConfig {
@@ -244,6 +272,7 @@ impl AppState {
                 agent_dir,
                 app_version,
             ),
+            pool_creation_locks: KeyedMutex::default(),
         }
     }
 
@@ -316,6 +345,19 @@ impl AppState {
             return Ok(pool_key);
         } else {
             drop(conns);
+        }
+
+        // Serialize creation per pool key. Without this, a burst of concurrent
+        // callers that all miss the check above (first connect, or right after a
+        // health-check eviction) would each run the full connect path and open
+        // their own pool — multiplying server-side connections and potentially
+        // exhausting the server's limit. Hold the guard across create + insert.
+        let _creation_guard = self.pool_creation_locks.lock(&pool_key).await;
+
+        // Re-check under the creation lock: another task may have finished
+        // creating this pool while we waited.
+        if self.connections.read().await.contains_key(&pool_key) {
+            return Ok(pool_key);
         }
 
         let configs = self.configs.read().await;
@@ -1197,6 +1239,7 @@ mod tests {
     use crate::query;
     use crate::schema;
     use crate::storage::Storage;
+    use std::sync::Arc;
 
     fn mysql_config(database: Option<&str>) -> ConnectionConfig {
         ConnectionConfig {
@@ -1524,6 +1567,104 @@ mod tests {
         let conns = state.connections.read().await;
         assert!(conns.contains_key("conn"), "shared base pool must survive a tab close");
         assert!(!conns.contains_key("conn:session:tab-123"), "only the closed tab's session pool is removed");
+        drop(conns);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn sqlite_config(id: &str, path: &str) -> ConnectionConfig {
+        let mut config = mysql_config(None);
+        config.id = id.to_string();
+        config.db_type = DatabaseType::Sqlite;
+        config.host = path.to_string();
+        config.database = None;
+        config
+    }
+
+    #[tokio::test]
+    async fn keyed_mutex_serializes_same_key() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let locks = Arc::new(super::KeyedMutex::default());
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = Vec::new();
+        for _ in 0..16 {
+            let locks = locks.clone();
+            let active = active.clone();
+            let max_active = max_active.clone();
+            handles.push(tokio::spawn(async move {
+                let _guard = locks.lock("same").await;
+                let now = active.fetch_add(1, Ordering::SeqCst) + 1;
+                max_active.fetch_max(now, Ordering::SeqCst);
+                tokio::time::sleep(std::time::Duration::from_millis(3)).await;
+                active.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        assert_eq!(max_active.load(Ordering::SeqCst), 1, "the same key must never be held concurrently");
+    }
+
+    #[tokio::test]
+    async fn keyed_mutex_allows_distinct_keys_to_run_concurrently() {
+        // Two tasks holding *different* keys must be able to hold their locks at
+        // the same time. They each grab their key, then meet at a barrier that
+        // only completes if both hold simultaneously. A wrong impl that
+        // serialized across keys would never satisfy the barrier, so we bound the
+        // whole thing with a timeout instead of hanging the suite.
+        let locks = Arc::new(super::KeyedMutex::default());
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+
+        let run = {
+            let locks = locks.clone();
+            let barrier = barrier.clone();
+            async move {
+                let task = |key: &'static str| {
+                    let locks = locks.clone();
+                    let barrier = barrier.clone();
+                    async move {
+                        let _guard = locks.lock(key).await;
+                        barrier.wait().await;
+                    }
+                };
+                tokio::join!(task("a"), task("b"));
+            }
+        };
+
+        tokio::time::timeout(std::time::Duration::from_secs(5), run)
+            .await
+            .expect("distinct keys must be able to run concurrently");
+    }
+
+    #[tokio::test]
+    async fn get_or_create_pool_serializes_concurrent_callers_for_the_same_connection() {
+        // A burst of concurrent callers (as SQL completion produces) must resolve
+        // to a single shared pool, not one pool per caller. Exercises the
+        // double-checked creation lock end to end and guards against a deadlock
+        // between the creation lock and the connections lock.
+        let (state, dir) = test_app_state().await;
+        let db_path = dir.join("concurrent.db");
+        std::fs::File::create(&db_path).unwrap();
+        state.configs.write().await.insert("conn".to_string(), sqlite_config("conn", &db_path.to_string_lossy()));
+
+        let state = Arc::new(state);
+        let mut handles = Vec::new();
+        for _ in 0..12 {
+            let state = state.clone();
+            handles.push(tokio::spawn(async move { state.get_or_create_pool("conn", None).await }));
+        }
+        let mut keys = Vec::new();
+        for handle in handles {
+            keys.push(handle.await.unwrap().expect("pool creation should succeed"));
+        }
+
+        assert!(keys.iter().all(|key| *key == keys[0]), "all callers must resolve to the same pool key");
+        let conns = state.connections.read().await;
+        let pool_count = conns.keys().filter(|key| key.as_str() == "conn" || key.starts_with("conn:")).count();
+        assert_eq!(pool_count, 1, "concurrent creation must register exactly one pool");
         drop(conns);
 
         let _ = std::fs::remove_dir_all(dir);
