@@ -420,6 +420,51 @@
   .tchildren.open { display:block; }
   .tindent { padding-left:22px; }
   .tindent2 { padding-left:40px; }
+
+  /* ---- connection list — layered custom colors ---- */
+  .conn { width:100%; display:flex; flex-direction:column; gap:3px; user-select:none; }
+  .conn-grp { --c: var(--accent); }
+  .conn-row {
+    position:relative; display:flex; align-items:center; gap:9px;
+    padding:8px 11px 8px 15px; border-radius:8px; cursor:pointer;
+    color:var(--text-1); overflow:hidden;
+    transition: background-color var(--speed) var(--ease);
+  }
+  .conn-row::before { /* layer 1 — colored spine */
+    content:''; position:absolute; left:5px; top:7px; bottom:7px; width:2.5px;
+    border-radius:99px; background:var(--c);
+  }
+  .conn-row::after { /* layer 2 — tint that fades to nothing */
+    content:''; position:absolute; inset:0; pointer-events:none;
+    background:linear-gradient(90deg, color-mix(in srgb, var(--c) 13%, transparent), transparent 58%);
+  }
+  .conn-row:hover { background:var(--bg-hover); }
+  .conn-row > * { position:relative; z-index:1; }
+  .conn-row .ccaret { width:14px; height:14px; display:grid; place-items:center; color:var(--text-4);
+    flex-shrink:0; transition:transform var(--speed) var(--ease); }
+  .conn-grp.open > .conn-row .ccaret { transform:rotate(90deg); }
+  .conn-row .cic { display:flex; flex-shrink:0; }
+  .conn-row .cname { flex:1; font-weight:600; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .conn-row .clive { width:7px; height:7px; border-radius:99px; flex-shrink:0;
+    background:var(--green); box-shadow:0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent); }
+  .conn-kids { /* layer 3 — faint tinted guide rail */
+    display:none; flex-direction:column; gap:1px; margin:2px 0 4px 15px; padding-left:13px;
+    border-left:1px solid color-mix(in srgb, var(--c) 24%, transparent); }
+  .conn-grp.open > .conn-kids { display:flex; }
+  .conn-child { display:flex; align-items:center; gap:8px; padding:5.5px 9px; border-radius:6px;
+    color:var(--text-2); font-size:12.5px; cursor:pointer;
+    transition:background-color var(--speed) var(--ease), color var(--speed) var(--ease); }
+  .conn-child:hover { background:var(--bg-hover); color:var(--text-1); }
+  .conn-child.active { background:var(--accent-soft); color:var(--text-1); }
+  .conn-child svg { flex-shrink:0; }
+  .conn-child .cname { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .conn-child .cbadge { font-size:10px; color:var(--text-3); padding:1.5px 7px; border-radius:5px;
+    background:var(--bg-active); }
+  /* swatch picker */
+  .cswatches { display:flex; gap:8px; align-items:center; }
+  .cswatch { width:20px; height:20px; border-radius:99px; border:1px solid var(--border-strong);
+    cursor:pointer; position:relative; }
+  .cswatch.on { box-shadow:0 0 0 2px var(--bg-canvas), 0 0 0 3.5px var(--cs); }
 </style>
 </head>
 <body class="ds">
@@ -909,6 +954,73 @@
       </div>
     </div>
 
+    <div class="spec wide">
+      <h3>Connection list</h3>
+      <p>Connections carry a user-chosen color so prod, staging and local stay glanceably distinct. The hue is <b style="color:var(--text-2);font-weight:500;">layered, not flooded</b>: a 2.5px rounded <b style="color:var(--text-2);font-weight:500;">spine</b> on the left edge, a tint that <b style="color:var(--text-2);font-weight:500;">fades to nothing</b> across the first half of the row, the engine icon in the same hue, and a matching guide rail down the expanded children. The row stays a neutral surface — hover and the accent-soft selection still read cleanly on top. Picking a color sets one <code class="mono">--c</code> variable.</p>
+      <div class="demo" style="padding:12px; align-items:stretch; gap:14px;">
+        <div class="conn" style="flex:1;">
+
+          <div class="conn-grp open" style="--c: var(--red);">
+            <div class="conn-row">
+              <span class="ccaret"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+              <span class="cic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--c)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span>
+              <span class="cname">Production · us-east-1</span>
+              <span class="clive" title="Live"></span>
+            </div>
+            <div class="conn-kids">
+              <div class="conn-child active"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/></svg><span class="cname">app_main</span><span class="cbadge">Default</span></div>
+              <div class="conn-child"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-4)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/></svg><span class="cname">analytics</span></div>
+            </div>
+          </div>
+
+          <div class="conn-grp" style="--c: var(--purple);">
+            <div class="conn-row">
+              <span class="ccaret"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+              <span class="cic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--c)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span>
+              <span class="cname">Staging</span>
+              <span class="clive"></span>
+            </div>
+            <div class="conn-kids">
+              <div class="conn-child"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-4)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/></svg><span class="cname">app_staging</span></div>
+            </div>
+          </div>
+
+          <div class="conn-grp" style="--c: var(--blue);">
+            <div class="conn-row">
+              <span class="ccaret"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+              <span class="cic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--c)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></span>
+              <span class="cname">Local · postgres</span>
+            </div>
+          </div>
+
+          <div class="conn-grp" style="--c: var(--amber);">
+            <div class="conn-row">
+              <span class="ccaret"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></span>
+              <span class="cic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--c)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7v10c0 1.7 3.6 3 8 3s8-1.3 8-3V7"/><ellipse cx="12" cy="7" rx="8" ry="3"/></svg></span>
+              <span class="cname">Cache · redis</span>
+              <span class="clive"></span>
+            </div>
+          </div>
+
+        </div>
+
+        <div style="width:1px;background:var(--border-soft);"></div>
+
+        <div style="display:flex;flex-direction:column;gap:11px;width:172px;flex-shrink:0;">
+          <div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:0.05em;">Connection color</div>
+          <div class="cswatches">
+            <span class="cswatch on" style="--cs:var(--red);background:var(--red);"></span>
+            <span class="cswatch" style="--cs:var(--amber);background:var(--amber);"></span>
+            <span class="cswatch" style="--cs:var(--green);background:var(--green);"></span>
+            <span class="cswatch" style="--cs:var(--blue);background:var(--blue);"></span>
+            <span class="cswatch" style="--cs:var(--purple);background:var(--purple);"></span>
+            <span class="cswatch" style="--cs:var(--teal);background:var(--teal);"></span>
+          </div>
+          <p style="margin:0;font-size:11px;line-height:1.5;color:var(--text-3);">Six semantic hues only — no free picker — so colors stay legible on the dark base and consistent across the app.</p>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script>
@@ -941,6 +1053,22 @@
         if (!kids || !kids.classList.contains('tchildren')) return;
         row.classList.toggle('open');
         kids.classList.toggle('open');
+      });
+    });
+
+    // connection list: toggle expand
+    document.querySelectorAll('.conn-grp > .conn-row').forEach(function (row) {
+      row.addEventListener('click', function () { row.parentElement.classList.toggle('open'); });
+    });
+
+    // connection list: swatch picker recolors the first group
+    var swatches = document.querySelectorAll('.cswatch');
+    var firstGrp = document.querySelector('.conn-grp');
+    swatches.forEach(function (sw) {
+      sw.addEventListener('click', function () {
+        swatches.forEach(function (s) { s.classList.remove('on'); });
+        sw.classList.add('on');
+        if (firstGrp) firstGrp.style.setProperty('--c', getComputedStyle(sw).backgroundColor);
       });
     });
   </script>
