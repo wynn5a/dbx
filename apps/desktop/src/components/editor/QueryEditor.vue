@@ -1238,10 +1238,7 @@ function scheduleCompletionMetadataRefresh(
   epoch: number,
 ) {
   if (!props.connectionId || props.database == null) return;
-  if (completionMetadataRefreshTimer) {
-    clearTimeout(completionMetadataRefreshTimer);
-    completionMetadataRefreshTimer = null;
-  }
+  if (completionMetadataRefreshTimer) clearTimeout(completionMetadataRefreshTimer);
   completionMetadataRefreshTimer = setTimeout(() => {
     completionMetadataRefreshTimer = null;
     if (epoch !== completionEpoch) return;
