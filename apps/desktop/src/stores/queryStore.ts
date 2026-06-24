@@ -495,6 +495,12 @@ export const useQueryStore = defineStore("query", () => {
     closeTabsWhere((tab) => tab.connectionId === connectionId && tab.database === database);
   }
 
+  function closeSavedSqlTabs(savedSqlIds: string[]) {
+    if (savedSqlIds.length === 0) return;
+    const ids = new Set(savedSqlIds);
+    closeTabsWhere((tab) => !!tab.savedSqlId && ids.has(tab.savedSqlId));
+  }
+
   function releaseTabsWhere(predicate: (tab: QueryTab) => boolean) {
     closeTabsWhere((tab) => predicate(tab) && tab.mode !== "query");
     tabs.value
@@ -1741,6 +1747,7 @@ export const useQueryStore = defineStore("query", () => {
     closeAllTabs,
     closeConnectionTabs,
     closeDatabaseTabs,
+    closeSavedSqlTabs,
     releaseConnectionTabs,
     releaseDatabaseTabs,
     updateSql,

@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import { uuid } from "@/lib/utils";
 import * as api from "@/lib/api";
+import { useQueryStore } from "@/stores/queryStore";
 import type { SavedSqlFile, SavedSqlFolder, SavedSqlLibrary } from "@/types/database";
 
 const LEGACY_STORAGE_KEY = "dbx-saved-sql-library";
@@ -104,10 +105,13 @@ export const useSavedSqlStore = defineStore("savedSql", () => {
   }
 
   async function deleteFolder(id: string) {
+    const removedFileIds = files.value.filter((file) => file.folderId === id).map((file) => file.id);
     await api.deleteSavedSqlFolder(id);
     folders.value = folders.value.filter((folder) => folder.id !== id);
     files.value = files.value.filter((file) => file.folderId !== id);
     bumpVersion();
+    // Close any open editor tabs backed by the files this folder cascaded-deleted.
+    useQueryStore().closeSavedSqlTabs(removedFileIds);
   }
 
   async function saveFile(input: {
@@ -160,6 +164,8 @@ export const useSavedSqlStore = defineStore("savedSql", () => {
     await api.deleteSavedSqlFile(id);
     files.value = files.value.filter((file) => file.id !== id);
     bumpVersion();
+    // Close the open editor tab backed by this saved file, if any.
+    useQueryStore().closeSavedSqlTabs([id]);
   }
 
   return {
