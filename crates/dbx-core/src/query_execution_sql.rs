@@ -45,6 +45,13 @@ pub fn build_explain_sql(options: ExplainSqlOptions) -> ExplainSqlBuildResult {
         format!("EXPLAIN (FORMAT JSON) {source}")
     } else if options.database_type == Some(DatabaseType::Dameng) {
         format!("EXPLAIN {source}")
+    } else if options.database_type == Some(DatabaseType::SqlServer) {
+        // SQL Server has no EXPLAIN. `SET SHOWPLAN_ALL ON` returns the estimated
+        // plan as a flat NodeId/Parent rowset (without executing the query) and
+        // must be the only statement in its batch. The native SQL Server driver
+        // recognises this wrapper (see db::sqlserver::is_showplan_explain_batch)
+        // and runs ON -> query -> OFF across three batches on one connection.
+        format!("SET SHOWPLAN_ALL ON;\n{source};\nSET SHOWPLAN_ALL OFF;")
     } else {
         format!("EXPLAIN FORMAT=JSON {source}")
     };
@@ -71,7 +78,10 @@ pub fn build_dropped_file_preview_sql(options: DroppedFilePreviewSqlOptions) -> 
 }
 
 pub fn supports_explain_plan(database_type: Option<DatabaseType>) -> bool {
-    matches!(database_type, Some(DatabaseType::Mysql | DatabaseType::Postgres | DatabaseType::Dameng))
+    matches!(
+        database_type,
+        Some(DatabaseType::Mysql | DatabaseType::Postgres | DatabaseType::Dameng | DatabaseType::SqlServer)
+    )
 }
 
 /// Databases that accept SQL query execution via the `execute_query` /
@@ -331,6 +341,23 @@ mod tests {
             ExplainSqlBuildResult {
                 ok: true,
                 sql: Some("EXPLAIN SELECT * FROM t1 WHERE id = 1".to_string()),
+                reason: None,
+            }
+        );
+    }
+
+    #[test]
+    fn builds_sqlserver_showplan_all_explain_sql() {
+        let result = build_explain_sql(ExplainSqlOptions {
+            database_type: Some(DatabaseType::SqlServer),
+            sql: " SELECT * FROM dbo.t WHERE id = 1; ".to_string(),
+        });
+
+        assert_eq!(
+            result,
+            ExplainSqlBuildResult {
+                ok: true,
+                sql: Some("SET SHOWPLAN_ALL ON;\nSELECT * FROM dbo.t WHERE id = 1;\nSET SHOWPLAN_ALL OFF;".to_string()),
                 reason: None,
             }
         );

@@ -1433,7 +1433,7 @@ export const useQueryStore = defineStore("query", () => {
       });
       const current = tabs.value.find((t) => t.id === id);
       if (current?.explainExecutionId === executionId) {
-        current.explainPlan = parseExplainResult(databaseType as "mysql" | "postgres", result);
+        current.explainPlan = parseExplainResult(databaseType as "mysql" | "postgres" | "sqlserver", result);
         current.explainError = undefined;
       }
     } catch (e: any) {

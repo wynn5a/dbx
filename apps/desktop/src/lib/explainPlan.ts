@@ -15,7 +15,7 @@ export interface ExplainPlanNode {
 }
 
 export interface ParsedExplainPlan {
-  databaseType: "mysql" | "postgres" | "dameng";
+  databaseType: "mysql" | "postgres" | "dameng" | "sqlserver";
   raw: unknown;
   nodes: ExplainPlanNode[];
 }
@@ -24,8 +24,10 @@ export type BuildExplainSqlResult =
   | { ok: true; sql: string }
   | { ok: false; reason: "unsupported" | "empty" | "unsafe" };
 
-const SUPPORTED_EXPLAIN_TYPES = new Set<DatabaseType>(["mysql", "postgres", "dameng"]);
-export function supportsExplainPlan(databaseType?: DatabaseType): databaseType is "mysql" | "postgres" | "dameng" {
+const SUPPORTED_EXPLAIN_TYPES = new Set<DatabaseType>(["mysql", "postgres", "dameng", "sqlserver"]);
+export function supportsExplainPlan(
+  databaseType?: DatabaseType,
+): databaseType is "mysql" | "postgres" | "dameng" | "sqlserver" {
   return !!databaseType && SUPPORTED_EXPLAIN_TYPES.has(databaseType);
 }
 
@@ -34,11 +36,14 @@ export function buildExplainSql(databaseType: DatabaseType | undefined, sql: str
 }
 
 export function parseExplainResult(
-  databaseType: "mysql" | "postgres" | "dameng",
+  databaseType: "mysql" | "postgres" | "dameng" | "sqlserver",
   result: QueryResult,
 ): ParsedExplainPlan {
   if (databaseType === "dameng") {
     return parseDamengExplain(result);
+  }
+  if (databaseType === "sqlserver") {
+    return parseSqlServerExplain(result);
   }
   const raw = parseExplainCell(result.rows[0]?.[0]);
   const nodes = databaseType === "postgres" ? parsePostgresExplain(raw) : parseMysqlExplain(raw);
@@ -461,6 +466,140 @@ function buildDamengTree(rows: DamengExplainRow[]): ExplainPlanNode[] {
   sortChildren(nodes);
 
   return nodes;
+}
+
+// ── SQL Server SHOWPLAN_ALL parser ────────────────────────────────────
+
+interface SqlServerPlanRow {
+  stmtText: string;
+  stmtId: string;
+  nodeId: string;
+  parent: string;
+  physicalOp: string;
+  logicalOp: string;
+  argument: string;
+  estimateRows: string;
+  avgRowSize: string;
+  totalSubtreeCost: string;
+  type: string;
+  warnings: string;
+}
+
+/**
+ * Parse SQL Server's `SET SHOWPLAN_ALL ON` output. It returns a flat rowset
+ * (one statement row of Type 'SELECT'/etc. followed by 'PLAN_ROW' operator
+ * rows) whose hierarchy is encoded by NodeId/Parent within each StmtId.
+ */
+function parseSqlServerExplain(result: QueryResult): ParsedExplainPlan {
+  const idx = buildSqlServerColumnIndex(result.columns);
+  const cell = (row: unknown[], key: keyof typeof idx): string => {
+    const i = idx[key];
+    return i >= 0 ? String(row[i] ?? "") : "";
+  };
+  const rows: SqlServerPlanRow[] = result.rows.map((row: unknown[]) => ({
+    stmtText: cell(row, "stmtText"),
+    stmtId: cell(row, "stmtId"),
+    nodeId: cell(row, "nodeId"),
+    parent: cell(row, "parent"),
+    physicalOp: cell(row, "physicalOp"),
+    logicalOp: cell(row, "logicalOp"),
+    argument: cell(row, "argument"),
+    estimateRows: cell(row, "estimateRows"),
+    avgRowSize: cell(row, "avgRowSize"),
+    totalSubtreeCost: cell(row, "totalSubtreeCost"),
+    type: cell(row, "type"),
+    warnings: cell(row, "warnings"),
+  }));
+
+  return { databaseType: "sqlserver", raw: rows, nodes: buildSqlServerTree(rows) };
+}
+
+function buildSqlServerColumnIndex(columns: string[]): Record<string, number> {
+  const lower = columns.map((c) => c.toLowerCase());
+  const idx = (name: string) => lower.indexOf(name.toLowerCase());
+  return {
+    stmtText: idx("StmtText"),
+    stmtId: idx("StmtId"),
+    nodeId: idx("NodeId"),
+    parent: idx("Parent"),
+    physicalOp: idx("PhysicalOp"),
+    logicalOp: idx("LogicalOp"),
+    argument: idx("Argument"),
+    estimateRows: idx("EstimateRows"),
+    avgRowSize: idx("AvgRowSize"),
+    totalSubtreeCost: idx("TotalSubtreeCost"),
+    type: idx("Type"),
+    warnings: idx("Warnings"),
+  };
+}
+
+/** Pull the table/index name out of an `OBJECT:([db].[schema].[table].[index])` argument. */
+function parseSqlServerObject(argument: string): { relation?: string; index?: string } {
+  const match = argument.match(/OBJECT:\(([^)]*)\)/i);
+  if (!match) return {};
+  // Drop a trailing alias ("... AS [t]") so it doesn't shift the part order.
+  const body = match[1].replace(/\s+AS\s+\[[^\]]+\]\s*$/i, "");
+  const parts = [...body.matchAll(/\[([^\]]+)\]/g)].map((m) => m[1]);
+  if (parts.length >= 4) return { relation: parts[parts.length - 2], index: parts[parts.length - 1] };
+  if (parts.length >= 1) return { relation: parts[parts.length - 1] };
+  return {};
+}
+
+function buildSqlServerTree(rows: SqlServerPlanRow[]): ExplainPlanNode[] {
+  // Group rows by statement — NodeId is only unique within one StmtId.
+  const groups = new Map<string, SqlServerPlanRow[]>();
+  for (const row of rows) {
+    const list = groups.get(row.stmtId);
+    if (list) list.push(row);
+    else groups.set(row.stmtId, [row]);
+  }
+
+  const roots: ExplainPlanNode[] = [];
+  for (const [stmtId, groupRows] of groups) {
+    const nodeMap = new Map<string, ExplainPlanNode>();
+    const ids = new Set(groupRows.map((r) => r.nodeId));
+
+    for (const row of groupRows) {
+      const { relation, index } = parseSqlServerObject(row.argument);
+      const isPlanRow = row.type.toUpperCase() === "PLAN_ROW";
+      const nodeType = row.physicalOp || row.type || "Plan";
+
+      const details: string[] = [];
+      if (row.logicalOp && row.logicalOp !== row.physicalOp) details.push(`Logical: ${row.logicalOp}`);
+      const predicate = row.argument
+        .replace(/OBJECT:\([^)]*\)/i, "")
+        .replace(/^[\s,]+/, "")
+        .trim();
+      if (isPlanRow && predicate) details.push(predicate);
+      if (row.warnings) details.push(`Warning: ${row.warnings}`);
+
+      nodeMap.set(row.nodeId, {
+        id: `${stmtId}:${row.nodeId}`,
+        title: relation ? `${nodeType} on ${relation}` : nodeType,
+        nodeType,
+        relation,
+        index,
+        cost: row.totalSubtreeCost || undefined,
+        rows: row.estimateRows || undefined,
+        width: row.avgRowSize || undefined,
+        details,
+        children: [],
+      });
+    }
+
+    const groupRoots: ExplainPlanNode[] = [];
+    for (const row of groupRows) {
+      const node = nodeMap.get(row.nodeId);
+      if (!node) continue;
+      const parent =
+        row.parent && row.parent !== "0" && row.parent !== row.nodeId ? nodeMap.get(row.parent) : undefined;
+      if (parent && ids.has(row.parent)) parent.children.push(node);
+      else groupRoots.push(node);
+    }
+    roots.push(...groupRoots);
+  }
+
+  return roots;
 }
 
 // ── PostgreSQL JSON explain parser ────────────────────────────────────

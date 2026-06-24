@@ -14,6 +14,11 @@ pub type SqlServerClient = Client<Compat<TcpStream>>;
 const SIMPLE_QUERY_MODULE_KEYWORDS: &[&str] = &["FUNCTION", "PROC", "PROCEDURE", "TRIGGER", "VIEW"];
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(3);
 
+// Markers used to wrap an estimated-plan request. Kept in sync with
+// query_execution_sql::build_explain_sql, which constructs the wrapper.
+const SHOWPLAN_ON: &str = "SET SHOWPLAN_ALL ON";
+const SHOWPLAN_OFF: &str = "SET SHOWPLAN_ALL OFF";
+
 async fn check_conn_health(client: &mut SqlServerClient) -> Result<(), String> {
     match tokio::time::timeout(HEALTH_CHECK_TIMEOUT, client.query("SELECT 1", &[])).await {
         Ok(Ok(_)) => Ok(()),
@@ -953,6 +958,14 @@ pub async fn execute_query_with_max_rows(
     check_conn_health(client).await?;
     let start = Instant::now();
 
+    // SQL Server explain: `SET SHOWPLAN_ALL ON; <query>; SET SHOWPLAN_ALL OFF;`
+    // built by query_execution_sql::build_explain_sql. The SET statements must
+    // each be alone in their batch, so this runs them as three sequential
+    // batches on the same connection (see execute_showplan_explain).
+    if is_showplan_explain_batch(sql) {
+        return execute_showplan_explain(client, sql, max_rows, start).await;
+    }
+
     if starts_with_executable_sql_keyword(sql, &["SELECT", "EXEC", "WITH", "TABLE"]) {
         let query_sql = match spatial_safe_sqlserver_query(client, sql).await {
             Ok(Some(sql)) => sql,
@@ -1023,6 +1036,91 @@ pub async fn execute_batch_with_max_rows(
     }
 
     Ok(results)
+}
+
+/// True when `sql` is the `SET SHOWPLAN_ALL ON; ...` estimated-plan wrapper.
+fn is_showplan_explain_batch(sql: &str) -> bool {
+    let upper = sql.trim_start().to_ascii_uppercase();
+    upper.starts_with(SHOWPLAN_ON)
+}
+
+/// Pull the inner query out of a `SET SHOWPLAN_ALL ON; <query>; SET SHOWPLAN_ALL OFF;`
+/// wrapper. Returns `None` if the wrapper is malformed or the inner query is empty.
+fn extract_showplan_inner(batch: &str) -> Option<String> {
+    let trimmed = batch.trim();
+    if !trimmed.to_ascii_uppercase().starts_with(SHOWPLAN_ON) {
+        return None;
+    }
+    // Strip the leading "SET SHOWPLAN_ALL ON" (ASCII, so the byte length is a
+    // valid char boundary) and an optional trailing ';'.
+    let rest = trimmed[SHOWPLAN_ON.len()..].trim_start();
+    let rest = rest.strip_prefix(';').unwrap_or(rest).trim();
+
+    // Strip a trailing "SET SHOWPLAN_ALL OFF" (with optional surrounding ';').
+    let without_trailing_semi = rest.trim_end().trim_end_matches(';').trim_end();
+    let inner = if without_trailing_semi.to_ascii_uppercase().ends_with(SHOWPLAN_OFF) {
+        let cut = without_trailing_semi.len() - SHOWPLAN_OFF.len();
+        without_trailing_semi[..cut].trim_end().trim_end_matches(';').trim_end()
+    } else {
+        without_trailing_semi
+    };
+
+    if inner.is_empty() {
+        None
+    } else {
+        Some(inner.to_string())
+    }
+}
+
+/// Run a single statement as its own batch and drain its result stream. Used for
+/// the SHOWPLAN_ALL ON/OFF toggles, whose output we discard.
+async fn drain_simple_query(client: &mut SqlServerClient, stmt: &str) -> Result<(), String> {
+    let stream = sqlserver_driver_result(client.simple_query(stmt)).await?;
+    sqlserver_driver_result(collect_result_sets_limited(stream, Instant::now(), Some(0))).await?;
+    Ok(())
+}
+
+/// Execute a SQL Server estimated-plan request. `SET SHOWPLAN_ALL` must be the
+/// only statement in its batch, so this runs three sequential batches on the same
+/// connection: turn the option ON, run the query (which returns the plan rowset
+/// without executing), then ALWAYS turn it OFF — leaving it ON would make every
+/// subsequent query on this pooled connection return a plan instead of running.
+async fn execute_showplan_explain(
+    client: &mut SqlServerClient,
+    batch: &str,
+    max_rows: Option<usize>,
+    start: Instant,
+) -> Result<QueryResult, String> {
+    let inner = extract_showplan_inner(batch).ok_or_else(|| "Malformed SHOWPLAN explain batch".to_string())?;
+
+    drain_simple_query(client, SHOWPLAN_ON).await?;
+
+    let plan = collect_showplan_result(client, &inner, max_rows, start).await;
+
+    // Always restore normal execution, even if collecting the plan failed.
+    let restored = drain_simple_query(client, SHOWPLAN_OFF).await;
+    if let Err(err) = &restored {
+        log::warn!("[sqlserver][explain] failed to disable SHOWPLAN_ALL: {err}");
+    }
+
+    let plan = plan?;
+    // If we couldn't turn SHOWPLAN_ALL back off, the connection is poisoned —
+    // surface the error so the caller doesn't reuse a plan-only connection.
+    restored?;
+    Ok(plan)
+}
+
+async fn collect_showplan_result(
+    client: &mut SqlServerClient,
+    inner: &str,
+    max_rows: Option<usize>,
+    start: Instant,
+) -> Result<QueryResult, String> {
+    let stream = sqlserver_driver_result(client.simple_query(inner)).await?;
+    let sets = sqlserver_driver_result(collect_result_sets_limited(stream, start, max_rows)).await?;
+    sets.into_iter()
+        .find(|set| !set.columns.is_empty())
+        .ok_or_else(|| "No execution plan returned by SQL Server".to_string())
 }
 
 fn is_transaction_control(sql: &str) -> bool {
@@ -1102,13 +1200,27 @@ fn first_sql_tokens(sql: &str, limit: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_spatial_safe_sqlserver_query, is_sqlserver_spatial_column, requires_simple_query_batch,
-        sqlserver_cell_to_json, sqlserver_columns_sql, sqlserver_indexes_sql, sqlserver_list_objects_sql,
-        SqlServerDescribedColumn, SqlServerResultSet,
+        build_spatial_safe_sqlserver_query, extract_showplan_inner, is_showplan_explain_batch,
+        is_sqlserver_spatial_column, requires_simple_query_batch, sqlserver_cell_to_json, sqlserver_columns_sql,
+        sqlserver_indexes_sql, sqlserver_list_objects_sql, SqlServerDescribedColumn, SqlServerResultSet,
     };
     use chrono::NaiveDate;
     use std::time::Instant;
     use tiberius::{ColumnData, IntoSql};
+
+    #[test]
+    fn detects_and_unwraps_showplan_explain_batch() {
+        let batch = "SET SHOWPLAN_ALL ON;\nSELECT * FROM dbo.t WHERE id = 1;\nSET SHOWPLAN_ALL OFF;";
+        assert!(is_showplan_explain_batch(batch));
+        assert!(is_showplan_explain_batch("  set showplan_all on\nSELECT 1"));
+        assert!(!is_showplan_explain_batch("SELECT * FROM dbo.t"));
+
+        assert_eq!(extract_showplan_inner(batch).as_deref(), Some("SELECT * FROM dbo.t WHERE id = 1"));
+        // Tolerates missing trailing OFF and stray whitespace/semicolons.
+        assert_eq!(extract_showplan_inner("SET SHOWPLAN_ALL ON; SELECT 1 ;").as_deref(), Some("SELECT 1"));
+        assert_eq!(extract_showplan_inner("SELECT 1"), None);
+        assert_eq!(extract_showplan_inner("SET SHOWPLAN_ALL ON;\nSET SHOWPLAN_ALL OFF;"), None);
+    }
 
     #[test]
     fn sqlserver_endpoint_splits_named_instance_hosts() {
