@@ -61,7 +61,12 @@ import * as api from "@/lib/api";
 import { uuid } from "@/lib/utils";
 import { isMacOS } from "@/lib/platform";
 import { resolveDefaultDatabase } from "@/lib/defaultDatabase";
-import { canTreeNodeShowExpander, treeItemPaddingLeft, usesFullWidthTreeLabel } from "@/lib/sidebarTreeItemLayout";
+import {
+  canTreeNodeShowExpander,
+  treeItemPaddingLeft,
+  treeItemRailLeft,
+  usesFullWidthTreeLabel,
+} from "@/lib/sidebarTreeItemLayout";
 import { buildTableSelectSql } from "@/lib/tableSelectSql";
 import {
   clearActiveTableReferencePayload,
@@ -219,80 +224,84 @@ function hasNodeDatabaseContext(node: TreeNode): node is TreeNode & { connection
   return !!node.connectionId && hasTreeNodeDatabaseContext(node);
 }
 
-function getIconInfo(node: TreeNode): { icon: any; colorClass: string } | null {
+// Node icons are distinguished by shape, not color: per the design-system
+// "Connection list" spec only the connection's engine brand icon carries the
+// connection hue; every child/object icon is a neutral grey (colored via
+// nodeIconClass). This returns the per-type icon component only.
+function getNodeIcon(node: TreeNode): any {
   switch (node.type) {
     case "connection":
       return null;
     case "connection-group":
-      return { icon: node.isExpanded ? FolderOpen : FolderClosed, colorClass: "text-amber-500" };
+      return node.isExpanded ? FolderOpen : FolderClosed;
     case "database":
-      return { icon: Database, colorClass: "text-yellow-500" };
+      return Database;
     case "schema":
-      return { icon: FolderOpen, colorClass: "text-sky-400" };
+      return FolderOpen;
     case "table":
-      return { icon: Table, colorClass: "text-green-500" };
+      return Table;
     case "view":
-      return { icon: Eye, colorClass: "text-purple-500" };
+      return Eye;
     case "column":
-      return { icon: Columns3, colorClass: "text-muted-foreground" };
+      return Columns3;
     case "group-columns":
-      return { icon: ListTree, colorClass: "text-green-400" };
+      return ListTree;
     case "group-indexes":
-      return { icon: Key, colorClass: "text-amber-500" };
+      return Key;
     case "group-fkeys":
-      return { icon: Link, colorClass: "text-blue-400" };
+      return Link;
     case "group-triggers":
-      return { icon: Zap, colorClass: "text-orange-400" };
+      return Zap;
     case "object-browser":
-      return { icon: TableProperties, colorClass: "text-primary" };
+      return TableProperties;
     case "user-admin":
-      return { icon: UsersRound, colorClass: "text-primary" };
+      return UsersRound;
     case "saved-sql-root":
-      return { icon: FolderOpen, colorClass: "text-blue-500" };
+      return FolderOpen;
     case "saved-sql-folder":
-      return { icon: node.isExpanded ? FolderOpen : FolderClosed, colorClass: "text-blue-400" };
+      return node.isExpanded ? FolderOpen : FolderClosed;
     case "saved-sql-file":
-      return { icon: FileText, colorClass: "text-blue-300" };
+      return FileText;
     case "index":
-      return { icon: Key, colorClass: "text-amber-400" };
+      return Key;
     case "fkey":
-      return { icon: Link, colorClass: "text-blue-300" };
+      return Link;
     case "trigger":
-      return { icon: Zap, colorClass: "text-orange-300" };
+      return Zap;
     case "redis-db":
-      return { icon: Database, colorClass: "text-red-400" };
+      return Database;
     case "etcd-root":
-      return { icon: Database, colorClass: "text-sky-500" };
+      return Database;
     case "mongo-db":
-      return { icon: Database, colorClass: "text-yellow-500" };
+      return Database;
     case "mongo-collection":
-      return { icon: Table, colorClass: "text-green-400" };
+      return Table;
     case "procedure":
-      return { icon: ScrollText, colorClass: "text-blue-500" };
+      return ScrollText;
     case "function":
-      return { icon: Braces, colorClass: "text-amber-500" };
+      return Braces;
     case "sequence":
-      return { icon: ListTree, colorClass: "text-emerald-500" };
+      return ListTree;
     case "package":
-      return { icon: Package, colorClass: "text-cyan-500" };
+      return Package;
     case "package-body":
-      return { icon: FileCode, colorClass: "text-cyan-400" };
+      return FileCode;
     case "group-tables":
-      return { icon: Table, colorClass: "text-green-500" };
+      return Table;
     case "group-views":
-      return { icon: Eye, colorClass: "text-purple-500" };
+      return Eye;
     case "group-procedures":
-      return { icon: ScrollText, colorClass: "text-blue-500" };
+      return ScrollText;
     case "group-functions":
-      return { icon: Braces, colorClass: "text-amber-500" };
+      return Braces;
     case "group-sequences":
-      return { icon: ListTree, colorClass: "text-emerald-500" };
+      return ListTree;
     case "group-packages":
-      return { icon: Package, colorClass: "text-cyan-500" };
+      return Package;
     case "group-partitions":
-      return { icon: node.isExpanded ? FolderOpen : FolderClosed, colorClass: "text-green-400" };
+      return node.isExpanded ? FolderOpen : FolderClosed;
     default:
-      return { icon: Database, colorClass: "text-muted-foreground" };
+      return Database;
   }
 }
 
@@ -2576,9 +2585,14 @@ const canCloseDatabaseConnection = computed(
     connectionStore.connectedIds.has(props.node.connectionId),
 );
 const nodeIconClass = computed(() => {
-  const infoClass = getIconInfo(props.node)?.colorClass;
-  if (props.node.type !== "database") return infoClass;
-  return canCloseDatabaseConnection.value ? infoClass : "text-muted-foreground/65";
+  // Neutral grey at rest, accent when selected (design-system "Connection list":
+  // child icons are text-ramp neutral, active reads accent). Unconnected
+  // databases read one ramp step fainter.
+  if (isSelected.value || isMultiSelected.value) return "text-[var(--ds-accent)]";
+  if (props.node.type === "database" && !canCloseDatabaseConnection.value) {
+    return "text-[var(--ds-text-4)]";
+  }
+  return "text-[var(--ds-text-3)]";
 });
 const canConfigureVisibleDatabases = computed(() => {
   if (props.node.type !== "connection" || !props.node.connectionId) return false;
@@ -2604,17 +2618,14 @@ const isActiveConnectionScope = computed(
 const isSelected = computed(() => connectionStore.selectedTreeNodeId === props.node.id);
 const isMultiSelected = computed(() => connectionStore.selectedTreeNodeIds.includes(props.node.id));
 const rowStyle = computed(() => {
-  // The connection hue drives the whole layered look from the stylesheet: a
-  // rounded pill spine on the connection header, a header tint that fades right,
-  // and a faint guide rail down the connected subtree — never a flat flood.
+  // Connection hue drives the layered look from the stylesheet (see the
+  // "Connection list" design-system spec): a header tint that fades right and a
+  // faint guide rail down the connected subtree. The rail lines up under the
+  // connection's column whatever depth it sits at (top level or in a group).
   const style: Record<string, string> = { paddingLeft: paddingLeft.value };
   if (connectionColor.value) {
     style["--tree-conn-color"] = connectionColor.value;
-    // The descendant guide rail lines up under the connection for the whole
-    // subtree, whatever depth the connection sits at (top level or in a group).
-    // The header spine is pinned to the panel edge in CSS, so it needs no var.
-    const connColumn = Math.max(0, props.connectionDepth ?? props.depth) * 16;
-    style["--tree-conn-rail-left"] = `${connColumn + 14}px`;
+    style["--tree-conn-rail-left"] = treeItemRailLeft(props.connectionDepth ?? props.depth);
   }
   return style;
 });
@@ -3457,7 +3468,7 @@ function treeItemMenuItems(): ContextMenuItem[] {
         />
         <component
           v-else
-          :is="getIconInfo(node)?.icon || Database"
+          :is="getNodeIcon(node) || Database"
           class="w-3.5 h-3.5 shrink-0 transition-colors"
           :class="nodeIconClass"
         />
@@ -3981,7 +3992,7 @@ function treeItemMenuItems(): ContextMenuItem[] {
   top: 0;
   bottom: 0;
   width: 1px;
-  left: var(--tree-conn-rail-left, 14px);
+  left: var(--tree-conn-rail-left);
   z-index: 0;
   background: color-mix(in srgb, var(--tree-conn-color) 24%, transparent);
 }
@@ -3989,7 +4000,7 @@ function treeItemMenuItems(): ContextMenuItem[] {
 /* Descendant hover/selection fill is indented to sit just right of the guide
    rail (a rounded pill), so the rail stays visible instead of being covered. */
 .tree-conn:not(.tree-conn-head)::before {
-  left: calc(var(--tree-conn-rail-left, 14px) + 6px);
+  left: calc(var(--tree-conn-rail-left) + 6px);
 }
 
 /* Connection name: a medium header weight, but colored like a folder row —

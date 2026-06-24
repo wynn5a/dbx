@@ -18,8 +18,19 @@ const leafTypes: Set<TreeNodeType> = new Set([
 
 const fullWidthLabelTypes: Set<TreeNodeType> = new Set(["table", "view", "mongo-collection"]);
 
+const TREE_INDENT_STEP = 16;
+const TREE_BASE_PAD = 8;
+
 export function treeItemPaddingLeft(depth: number): string {
-  return `${depth * 16 + 8}px`;
+  return `${depth * TREE_INDENT_STEP + TREE_BASE_PAD}px`;
+}
+
+// Left offset for the connection-hue guide rail at a given connection depth.
+// Sits 6px past the base content pad so it lines up under the connection's
+// icon column. Shares the indent step with treeItemPaddingLeft so the rail
+// can never drift out from under its column if the indent is retuned.
+export function treeItemRailLeft(depth: number): string {
+  return `${Math.max(0, depth) * TREE_INDENT_STEP + TREE_BASE_PAD + 6}px`;
 }
 
 export function usesFullWidthTreeLabel(type: TreeNodeType, allowHorizontalScroll: boolean): boolean {
