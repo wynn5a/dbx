@@ -144,12 +144,14 @@ async function saveSelection() {
         {{ t("visibleDatabases.description", { connection: connectionName }) }}
       </p>
 
-      <div class="flex items-center gap-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)] px-2">
+      <div
+        class="flex items-center gap-2 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] px-2 transition-[border-color,box-shadow] duration-[var(--ds-dur-2)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)] focus-within:border-transparent focus-within:shadow-[0_0_0_2px_var(--ds-accent-line)]"
+      >
         <Search class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
         <Input
           v-model="searchText"
           :placeholder="t('visibleDatabases.searchPlaceholder')"
-          class="h-8 border-0 px-0 shadow-none focus-visible:ring-0"
+          class="h-8 border-0 bg-transparent px-0 shadow-none hover:border-0 focus-visible:ring-0"
           :disabled="isLoading || !!errorMessage"
         />
       </div>
@@ -157,14 +159,22 @@ async function saveSelection() {
       <div class="flex items-center justify-between text-xs text-[var(--ds-text-3)]">
         <span>{{ t("visibleDatabases.selectedCount", { selected: selectedCount, total: totalCount }) }}</span>
         <div class="flex items-center gap-2">
-          <button class="hover:text-foreground disabled:opacity-50" :disabled="isLoading" @click="selectAll">
+          <button
+            class="transition-colors duration-[var(--ds-dur-2)] ease-[var(--ds-ease)] hover:text-[var(--ds-text-1)] disabled:opacity-50"
+            :disabled="isLoading"
+            @click="selectAll"
+          >
             {{ t("visibleDatabases.selectAll") }}
           </button>
-          <button class="hover:text-foreground disabled:opacity-50" :disabled="isLoading" @click="clearSelection">
+          <button
+            class="transition-colors duration-[var(--ds-dur-2)] ease-[var(--ds-ease)] hover:text-[var(--ds-text-1)] disabled:opacity-50"
+            :disabled="isLoading"
+            @click="clearSelection"
+          >
             {{ t("visibleDatabases.clear") }}
           </button>
           <button
-            class="hover:text-foreground disabled:opacity-50"
+            class="transition-colors duration-[var(--ds-dur-2)] ease-[var(--ds-ease)] hover:text-[var(--ds-text-1)] disabled:opacity-50"
             :disabled="isLoading || !Array.isArray(connection?.visible_databases)"
             @click="showAllDatabases"
           >
@@ -180,7 +190,7 @@ async function saveSelection() {
         <input
           v-model="showSystemDatabases"
           type="checkbox"
-          class="h-3.5 w-3.5 accent-primary"
+          class="h-3.5 w-3.5 accent-[var(--ds-accent)]"
           :disabled="isLoading || !!errorMessage"
         />
         <span>{{ t("visibleDatabases.showSystemDatabases") }}</span>
@@ -202,10 +212,11 @@ async function saveSelection() {
             v-for="database in filteredDatabaseNames"
             :key="database"
             type="button"
-            class="flex h-8 w-full min-w-0 items-center gap-2 rounded-sm px-2 text-left text-sm hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground focus-visible:outline-none"
+            class="flex h-8 w-full min-w-0 items-center gap-2 rounded-sm px-2 text-left text-sm transition-colors duration-[var(--ds-dur-2)] ease-[var(--ds-ease)] hover:bg-[var(--ds-bg-hover)] hover:text-[var(--ds-text-1)] focus-visible:bg-[var(--ds-bg-hover)] focus-visible:text-[var(--ds-text-1)] focus-visible:outline-none"
+            :class="selectedNames.has(database) ? 'text-[var(--ds-text-1)]' : 'text-[var(--ds-text-2)]'"
             @click="toggleDatabase(database)"
           >
-            <CheckSquare v-if="selectedNames.has(database)" class="h-4 w-4 shrink-0 text-primary" />
+            <CheckSquare v-if="selectedNames.has(database)" class="h-4 w-4 shrink-0 text-[var(--ds-accent)]" />
             <Square v-else class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
             <span class="truncate">{{ database }}</span>
           </button>

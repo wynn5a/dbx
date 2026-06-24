@@ -971,6 +971,31 @@ async function provideElasticsearchCompletions(
   return buildCompletionResult(items, completionContext.from, getElasticsearchCompletionResultValidFor());
 }
 
+// Build a completion result from context alone (keywords/snippets/literals),
+// with no table/column/object metadata — used when there is no active database
+// or the cursor position needs nothing from the backend.
+function buildContextOnlyCompletionResult(
+  completionContext: ReturnType<typeof getSqlCompletionContext>,
+  fullDoc: string,
+  position: number,
+) {
+  const items = buildSqlCompletionItemsFromContext(completionContext, {
+    tables: [],
+    objects: [],
+    columnsByTable: new Map(),
+    schemas: [],
+    translations: completionTranslations.value,
+    snippets: settingsStore.editorSettings.snippets,
+    dialect: props.dialect,
+    databaseType: props.databaseType,
+  });
+  return buildCompletionResult(
+    items,
+    position - completionContext.prefix.length,
+    getSqlCompletionResultValidFor(fullDoc, position),
+  );
+}
+
 async function provideSqlCompletions(
   currentState: import("@codemirror/state").EditorState,
   position: number,
@@ -993,21 +1018,7 @@ async function provideSqlCompletions(
     const completionContext = getSqlCompletionContext(fullDoc, position);
 
     if (!hasDatabase) {
-      const items = buildSqlCompletionItemsFromContext(completionContext, {
-        tables: [],
-        objects: [],
-        columnsByTable: new Map(),
-        schemas: [],
-        translations: completionTranslations.value,
-        snippets: settingsStore.editorSettings.snippets,
-        dialect: props.dialect,
-        databaseType: props.databaseType,
-      });
-      return buildCompletionResult(
-        items,
-        position - completionContext.prefix.length,
-        getSqlCompletionResultValidFor(fullDoc, position),
-      );
+      return buildContextOnlyCompletionResult(completionContext, fullDoc, position);
     }
 
     const needsAsyncData =
@@ -1020,32 +1031,14 @@ async function provideSqlCompletions(
       completionContext.referencedTables.length > 0;
 
     if (!needsAsyncData) {
-      const items = buildSqlCompletionItemsFromContext(completionContext, {
-        tables: [],
-        objects: [],
-        columnsByTable: new Map(),
-        schemas: [],
-        translations: completionTranslations.value,
-        snippets: settingsStore.editorSettings.snippets,
-        dialect: props.dialect,
-        databaseType: props.databaseType,
-      });
-      return buildCompletionResult(
-        items,
-        position - completionContext.prefix.length,
-        getSqlCompletionResultValidFor(fullDoc, position),
-      );
+      return buildContextOnlyCompletionResult(completionContext, fullDoc, position);
     }
 
     const localResult = buildLocalSqlCompletionResult(completionContext, fullDoc, position);
-    if (localResult) {
+    if (localResult || !explicit) {
       scheduleCompletionMetadataRefresh(completionContext, epoch);
-      if (!explicit) return localResult;
     }
-    if (!explicit) {
-      scheduleCompletionMetadataRefresh(completionContext, epoch);
-      return null;
-    }
+    if (!explicit) return localResult;
 
     // Cancel any pending debounced completion
     if (completionDebounceTimer) {
@@ -1082,9 +1075,7 @@ function buildLocalSqlCompletionResult(
   position: number,
 ) {
   if (!props.connectionId || props.database == null) return null;
-  const shouldLoadTables =
-    completionContext.suggestTables ||
-    (!!completionContext.qualifier && !isReferencedTableQualifier(completionContext));
+  const shouldLoadTables = shouldLoadCompletionTables(completionContext);
   const tableLookupSchema =
     completionContext.qualifier && completionContext.suggestTables ? completionContext.qualifier : props.schema;
   const tableLookupFilter =
@@ -1101,10 +1092,7 @@ function buildLocalSqlCompletionResult(
       )
     : cachedTables;
 
-  const shouldLoadObjects =
-    completionContext.suggestRoutines ||
-    completionContext.exclusiveRoutineSuggestions ||
-    (!!completionContext.qualifier && !completionContext.exclusiveColumnSuggestions);
+  const shouldLoadObjects = shouldLoadCompletionObjects(completionContext);
   const completionObjects = shouldLoadObjects
     ? connectionStore.lookupLocalCompletionObjects(
         props.connectionId,
@@ -1252,10 +1240,7 @@ function runCompletionMetadataRefresh(completionContext: ReturnType<typeof getSq
   const database = props.database;
   const schema =
     completionContext.qualifier && completionContext.suggestTables ? completionContext.qualifier : props.schema;
-  if (
-    completionContext.suggestTables ||
-    (!!completionContext.qualifier && !isReferencedTableQualifier(completionContext))
-  ) {
+  if (shouldLoadCompletionTables(completionContext)) {
     void connectionStore
       .refreshCompletionTables(
         connectionId,
@@ -1271,11 +1256,7 @@ function runCompletionMetadataRefresh(completionContext: ReturnType<typeof getSq
       })
       .catch(() => {});
   }
-  if (
-    completionContext.suggestRoutines ||
-    completionContext.exclusiveRoutineSuggestions ||
-    (!!completionContext.qualifier && !completionContext.exclusiveColumnSuggestions)
-  ) {
+  if (shouldLoadCompletionObjects(completionContext)) {
     void connectionStore
       .refreshCompletionObjects(connectionId, database, completionContext.prefix, MAX_COMPLETION_TABLES, props.schema)
       .then((objects) => {
@@ -1316,19 +1297,23 @@ function runCompletionMetadataRefresh(completionContext: ReturnType<typeof getSq
   }
 }
 
+function mergeByKey<T>(existing: T[], incoming: T[], keyOf: (item: T) => string): T[] {
+  const merged = [...existing];
+  const seen = new Set(existing.map(keyOf));
+  for (const item of incoming) {
+    const key = keyOf(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(item);
+  }
+  return merged;
+}
+
 function mergeCompletionTables(
   existing: Array<{ name: string; schema?: string; type?: "table" | "view" }>,
   incoming: Array<{ name: string; schema?: string; type?: "table" | "view" }>,
 ) {
-  const merged = [...existing];
-  const seen = new Set(existing.map((table) => `${table.schema ?? ""}.${table.name}`.toLowerCase()));
-  for (const table of incoming) {
-    const key = `${table.schema ?? ""}.${table.name}`.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(table);
-  }
-  return merged;
+  return mergeByKey(existing, incoming, (table) => `${table.schema ?? ""}.${table.name}`.toLowerCase());
 }
 
 async function performAsyncCompletionWithResult(
@@ -1338,7 +1323,7 @@ async function performAsyncCompletionWithResult(
   position: number,
 ) {
   // Handle INSERT column list: fetch columns for the target table
-  let insertColumnsByTable = new Map<string, SqlCompletionColumn[]>();
+  const insertColumnsByTable = new Map<string, SqlCompletionColumn[]>();
   if (completionContext.insertTable) {
     try {
       const insertCols = await connectionStore.listCompletionColumns(
@@ -1360,9 +1345,7 @@ async function performAsyncCompletionWithResult(
     }
   }
 
-  const shouldLoadTables =
-    completionContext.suggestTables ||
-    (!!completionContext.qualifier && !isReferencedTableQualifier(completionContext));
+  const shouldLoadTables = shouldLoadCompletionTables(completionContext);
   let tables = shouldLoadTables
     ? await connectionStore.listCompletionTables(
         props.connectionId!,
@@ -1374,10 +1357,7 @@ async function performAsyncCompletionWithResult(
     : cachedTables;
   if (epoch !== completionEpoch) return null;
 
-  const shouldLoadObjects =
-    completionContext.suggestRoutines ||
-    completionContext.exclusiveRoutineSuggestions ||
-    (!!completionContext.qualifier && !completionContext.exclusiveColumnSuggestions);
+  const shouldLoadObjects = shouldLoadCompletionObjects(completionContext);
   let completionObjects = shouldLoadObjects
     ? await connectionStore.listCompletionObjects(
         props.connectionId!,
@@ -1520,7 +1500,7 @@ async function performAsyncCompletionWithResult(
   const columnsByTable = new Map<string, SqlCompletionColumn[]>();
   const foreignKeysByTable = new Map<string, SqlCompletionForeignKey[]>();
   if (insertColumnsByTable.size > 0) {
-    for (const [key, cols] of insertColumnsByTable.entries()) {
+    for (const [key, cols] of insertColumnsByTable) {
       columnsByTable.set(key, cols);
     }
   } else {
@@ -1586,27 +1566,133 @@ function isReferencedTableQualifier(completionContext: ReturnType<typeof getSqlC
   );
 }
 
-function mergeCompletionObjects(existing: SqlCompletionObject[], incoming: SqlCompletionObject[]) {
-  const merged = [...existing];
-  const seen = new Set(
-    existing.map((object) =>
-      `${object.type}:${object.schema ?? ""}:${object.name}:${object.parentName ?? ""}`.toLowerCase(),
-    ),
+function shouldLoadCompletionTables(completionContext: ReturnType<typeof getSqlCompletionContext>): boolean {
+  return (
+    completionContext.suggestTables || (!!completionContext.qualifier && !isReferencedTableQualifier(completionContext))
   );
-  for (const object of incoming) {
-    const key = `${object.type}:${object.schema ?? ""}:${object.name}:${object.parentName ?? ""}`.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(object);
-  }
-  return merged;
 }
 
-async function refreshCompletionCache() {
+function shouldLoadCompletionObjects(completionContext: ReturnType<typeof getSqlCompletionContext>): boolean {
+  return (
+    completionContext.suggestRoutines ||
+    completionContext.exclusiveRoutineSuggestions ||
+    (!!completionContext.qualifier && !completionContext.exclusiveColumnSuggestions)
+  );
+}
+
+function mergeCompletionObjects(existing: SqlCompletionObject[], incoming: SqlCompletionObject[]) {
+  return mergeByKey(existing, incoming, (object) =>
+    `${object.type}:${object.schema ?? ""}:${object.name}:${object.parentName ?? ""}`.toLowerCase(),
+  );
+}
+
+function refreshCompletionCache() {
   cachedTables = [];
   cachedCompletionObjects = [];
   cachedColumnsByTable.clear();
   cachedForeignKeysByTable.clear();
+}
+
+// Ctrl/Cmd + click navigation: resolve the clicked identifier to a table (emit
+// clickTable) or a column on a referenced table (emit clickColumn).
+async function resolveCtrlClickTarget(doc: string, pos: number, identifier: string) {
+  if (!props.connectionId || props.database == null) return;
+  try {
+    // Ensure table cache is populated
+    if (cachedTables.length === 0) {
+      cachedTables = await connectionStore.listCompletionTables(
+        props.connectionId,
+        props.database,
+        identifier,
+        MAX_COMPLETION_TABLES,
+        props.schema,
+      );
+    }
+
+    // 1. Check if it's a table name
+    const matchedTable = matchTable(identifier, cachedTables);
+    if (matchedTable) {
+      emit("clickTable", matchedTable.schema ? `${matchedTable.schema}.${matchedTable.name}` : matchedTable.name);
+      return;
+    }
+
+    // 2. Parse SQL at click position to get referenced tables, enriched with
+    // schema from cachedTables.
+    const context = getSqlCompletionContext(doc, pos);
+    const referencedTables = context.referencedTables.map((rt) => {
+      if (rt.schema) return rt;
+      const cached = cachedTables.find((ct) => ct.name.toLowerCase() === rt.name.toLowerCase());
+      return cached?.schema ? { ...rt, schema: cached.schema } : rt;
+    });
+    if (referencedTables.length === 0) return;
+
+    // Check if identifier has a qualifier (e.g., c.card_name)
+    const qualifierMatch = /^(.+)\.(.+)$/.exec(identifier);
+    const qualifier = qualifierMatch ? qualifierMatch[1] : null;
+    const colLower = (qualifierMatch ? qualifierMatch[2] : identifier).toLowerCase();
+
+    // 3. Fetch columns — if qualifier, only check matching table; otherwise check all
+    const tablesToCheck = qualifier
+      ? referencedTables.filter(
+          (rt) =>
+            rt.alias?.toLowerCase() === qualifier.toLowerCase() || rt.name.toLowerCase() === qualifier.toLowerCase(),
+        )
+      : referencedTables;
+    if (tablesToCheck.length === 0 && qualifier) return;
+
+    const matchedCols: Array<{ name: string; table: string; schema?: string }> = [];
+    for (const refTable of tablesToCheck) {
+      const cacheKey = refTable.schema ? `${refTable.schema}.${refTable.name}` : refTable.name;
+      // Use persistent column cache; fetch only if missing
+      let cols = cachedColumnsByTable.get(cacheKey);
+      if (!cols) {
+        try {
+          cols = await connectionStore.listCompletionColumns(
+            props.connectionId,
+            props.database,
+            refTable.name,
+            refTable.schema ?? props.schema,
+          );
+          cachedColumnsByTable.set(cacheKey, cols);
+        } catch {
+          continue;
+        }
+      }
+      for (const col of cols) {
+        if (col.name.toLowerCase() === colLower) {
+          matchedCols.push({ name: col.name, table: refTable.name, schema: col.schema || refTable.schema });
+        }
+      }
+    }
+
+    if (matchedCols.length > 0) emit("clickColumn", matchedCols);
+  } catch (e) {
+    console.error("[DBX] Ctrl+click error:", e);
+  }
+}
+
+function handleEditorMouseDown(event: MouseEvent): boolean {
+  // Click without modifier -> close column panel
+  if (!event.metaKey && !event.ctrlKey) {
+    if (event.button === 0) emit("closeColumnPanel");
+    return false;
+  }
+  // Only handle Ctrl/Cmd + left click
+  if (event.button !== 0) return false;
+
+  const currentView = view.value;
+  if (!currentView || !props.connectionId || props.database == null) return false;
+
+  const pos = currentView.posAtCoords({ x: event.clientX, y: event.clientY });
+  if (pos == null) return false;
+
+  const doc = currentView.state.doc.toString();
+  const identifier = extractIdentifierAt(doc, pos);
+  if (!identifier || isSqlKeyword(identifier)) return false;
+
+  event.preventDefault();
+  setTimeout(() => void resolveCtrlClickTarget(doc, pos, identifier), 0);
+  return true;
 }
 
 onMounted(async () => {
@@ -1880,137 +1966,7 @@ onMounted(async () => {
           scheduleFontSizeCommit(next);
           return true;
         },
-        mousedown: (event: MouseEvent) => {
-          // Click without modifier -> close column panel
-          if (!event.metaKey && !event.ctrlKey) {
-            if (event.button === 0) {
-              emit("closeColumnPanel");
-            }
-            return false;
-          }
-          // Only handle Ctrl/Cmd + left click
-          if (event.button !== 0) return false;
-
-          const currentView = view.value;
-          if (!currentView || !props.connectionId || props.database == null) {
-            return false;
-          }
-
-          // Use posAtCoords for accurate click position
-          const coords = { x: event.clientX, y: event.clientY };
-          const pos = currentView.posAtCoords(coords);
-          if (pos == null) {
-            return false;
-          }
-
-          const doc = currentView.state.doc.toString();
-          const identifier = extractIdentifierAt(doc, pos);
-          if (!identifier) {
-            return false;
-          }
-          if (isSqlKeyword(identifier)) {
-            return false;
-          }
-
-          // Prevent default, resolve async
-          event.preventDefault();
-          setTimeout(async () => {
-            try {
-              // Ensure table cache is populated
-              if (cachedTables.length === 0) {
-                cachedTables = await connectionStore.listCompletionTables(
-                  props.connectionId!,
-                  props.database!,
-                  identifier,
-                  MAX_COMPLETION_TABLES,
-                  props.schema,
-                );
-              }
-
-              // 1. Check if it's a table name
-              const matchedTable = matchTable(identifier, cachedTables);
-              if (matchedTable) {
-                emit(
-                  "clickTable",
-                  matchedTable.schema ? `${matchedTable.schema}.${matchedTable.name}` : matchedTable.name,
-                );
-                return;
-              }
-
-              // 2. Parse SQL at click position to get referenced tables
-              const context = getSqlCompletionContext(doc, pos);
-              let referencedTables = context.referencedTables;
-              // Enrich referenced tables with schema from cachedTables
-              referencedTables = referencedTables.map((rt) => {
-                const cached = cachedTables.find((ct) => ct.name.toLowerCase() === rt.name.toLowerCase());
-                if (cached && cached.schema && !rt.schema) {
-                  return { ...rt, schema: cached.schema };
-                }
-                return rt;
-              });
-
-              // Check if identifier has a qualifier (e.g., c.card_name)
-              const qualifierMatch = /^(.+)\.(.+)$/.exec(identifier);
-              const qualifier = qualifierMatch ? qualifierMatch[1] : null;
-              const colName = qualifierMatch ? qualifierMatch[2] : identifier;
-              const colLower = colName.toLowerCase();
-
-              if (referencedTables.length === 0) {
-                return;
-              }
-              // 3. Fetch columns — if qualifier, only check matching table; otherwise check all
-              const tablesToCheck = qualifier
-                ? referencedTables.filter(
-                    (rt) =>
-                      rt.alias?.toLowerCase() === qualifier.toLowerCase() ||
-                      rt.name.toLowerCase() === qualifier.toLowerCase(),
-                  )
-                : referencedTables;
-
-              if (tablesToCheck.length === 0 && qualifier) {
-                return;
-              }
-
-              const matchedCols: Array<{ name: string; table: string; schema?: string }> = [];
-
-              for (const refTable of tablesToCheck) {
-                const cacheKey = refTable.schema ? `${refTable.schema}.${refTable.name}` : refTable.name;
-
-                // Use persistent column cache; fetch only if missing
-                let cols = cachedColumnsByTable.get(cacheKey);
-                if (!cols) {
-                  try {
-                    cols = await connectionStore.listCompletionColumns(
-                      props.connectionId!,
-                      props.database!,
-                      refTable.name,
-                      refTable.schema ?? props.schema,
-                    );
-                    cachedColumnsByTable.set(cacheKey, cols);
-                  } catch {
-                    continue;
-                  }
-                }
-                for (const col of cols) {
-                  if (col.name.toLowerCase() === colLower) {
-                    matchedCols.push({
-                      name: col.name,
-                      table: refTable.name,
-                      schema: col.schema || refTable.schema,
-                    });
-                  }
-                }
-              }
-
-              if (matchedCols.length > 0) {
-                emit("clickColumn", matchedCols);
-              }
-            } catch (e) {
-              console.error("[DBX] Ctrl+click error:", e);
-            }
-          }, 0);
-          return true;
-        },
+        mousedown: handleEditorMouseDown,
       }),
     ],
   });
