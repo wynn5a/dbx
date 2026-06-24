@@ -227,82 +227,48 @@ function hasNodeDatabaseContext(node: TreeNode): node is TreeNode & { connection
 // Node icons are distinguished by shape, not color: per the design-system
 // "Connection list" spec only the connection's engine brand icon carries the
 // connection hue; every child/object icon is a neutral grey (colored via
-// nodeIconClass). This returns the per-type icon component only.
+// nodeIconClass). getNodeIcon returns the per-type icon component only.
+const nodeIconByType: Partial<Record<TreeNodeType, any>> = {
+  database: Database,
+  schema: FolderOpen,
+  table: Table,
+  view: Eye,
+  column: Columns3,
+  "group-columns": ListTree,
+  "group-indexes": Key,
+  "group-fkeys": Link,
+  "group-triggers": Zap,
+  "object-browser": TableProperties,
+  "user-admin": UsersRound,
+  "saved-sql-root": FolderOpen,
+  "saved-sql-file": FileText,
+  index: Key,
+  fkey: Link,
+  trigger: Zap,
+  "redis-db": Database,
+  "etcd-root": Database,
+  "mongo-db": Database,
+  "mongo-collection": Table,
+  procedure: ScrollText,
+  function: Braces,
+  sequence: ListTree,
+  package: Package,
+  "package-body": FileCode,
+  "group-tables": Table,
+  "group-views": Eye,
+  "group-procedures": ScrollText,
+  "group-functions": Braces,
+  "group-sequences": ListTree,
+  "group-packages": Package,
+};
+
+// Folder-like types whose icon swaps with expanded/collapsed state.
+const expandableFolderTypes: Set<TreeNodeType> = new Set(["connection-group", "saved-sql-folder", "group-partitions"]);
+
 function getNodeIcon(node: TreeNode): any {
-  switch (node.type) {
-    case "connection":
-      return null;
-    case "connection-group":
-      return node.isExpanded ? FolderOpen : FolderClosed;
-    case "database":
-      return Database;
-    case "schema":
-      return FolderOpen;
-    case "table":
-      return Table;
-    case "view":
-      return Eye;
-    case "column":
-      return Columns3;
-    case "group-columns":
-      return ListTree;
-    case "group-indexes":
-      return Key;
-    case "group-fkeys":
-      return Link;
-    case "group-triggers":
-      return Zap;
-    case "object-browser":
-      return TableProperties;
-    case "user-admin":
-      return UsersRound;
-    case "saved-sql-root":
-      return FolderOpen;
-    case "saved-sql-folder":
-      return node.isExpanded ? FolderOpen : FolderClosed;
-    case "saved-sql-file":
-      return FileText;
-    case "index":
-      return Key;
-    case "fkey":
-      return Link;
-    case "trigger":
-      return Zap;
-    case "redis-db":
-      return Database;
-    case "etcd-root":
-      return Database;
-    case "mongo-db":
-      return Database;
-    case "mongo-collection":
-      return Table;
-    case "procedure":
-      return ScrollText;
-    case "function":
-      return Braces;
-    case "sequence":
-      return ListTree;
-    case "package":
-      return Package;
-    case "package-body":
-      return FileCode;
-    case "group-tables":
-      return Table;
-    case "group-views":
-      return Eye;
-    case "group-procedures":
-      return ScrollText;
-    case "group-functions":
-      return Braces;
-    case "group-sequences":
-      return ListTree;
-    case "group-packages":
-      return Package;
-    case "group-partitions":
-      return node.isExpanded ? FolderOpen : FolderClosed;
-    default:
-      return Database;
-  }
+  if (node.type === "connection") return null;
+  if (expandableFolderTypes.has(node.type)) return node.isExpanded ? FolderOpen : FolderClosed;
+  return nodeIconByType[node.type] ?? Database;
 }
 
 const groupTypes: Set<TreeNodeType> = new Set([
@@ -2584,6 +2550,7 @@ const canCloseDatabaseConnection = computed(
     props.node.database != null &&
     connectionStore.connectedIds.has(props.node.connectionId),
 );
+const nodeIcon = computed(() => getNodeIcon(props.node) || Database);
 const nodeIconClass = computed(() => {
   // Neutral grey at rest, accent when selected (design-system "Connection list":
   // child icons are text-ramp neutral, active reads accent). Unconnected
@@ -3466,12 +3433,7 @@ function treeItemMenuItems(): ContextMenuItem[] {
           :db-type="connectionIconType(node.connectionId)"
           class="w-3.5 h-3.5 shrink-0"
         />
-        <component
-          v-else
-          :is="getNodeIcon(node) || Database"
-          class="w-3.5 h-3.5 shrink-0 transition-colors"
-          :class="nodeIconClass"
-        />
+        <component v-else :is="nodeIcon" class="w-3.5 h-3.5 shrink-0 transition-colors" :class="nodeIconClass" />
         <input
           v-if="isRenamingGroup"
           ref="renameInputRef"
