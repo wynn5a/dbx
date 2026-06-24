@@ -69,6 +69,7 @@ export default {
   },
   sidebar: {
     connections: "CONEXIONES",
+    sqlLibrary: "BIBLIOTECA SQL",
     noConnections: "Sin conexiones",
     import: "Importar conexiones",
     importDbx: "Importar configuración DBX",
@@ -104,6 +105,12 @@ export default {
     renameFile: "Renombrar SQL",
     deleteFile: "Eliminar SQL",
     deleteFileConfirm: "¿Eliminar “{name}”?",
+    add: "Añadir a la biblioteca SQL",
+    connection: "Conexión",
+    newFile: "Nuevo archivo SQL",
+    newFileDefault: "Nueva consulta",
+    empty: "Aún no hay SQL guardado",
+    selectConnectionFirst: "Selecciona una conexión primero",
   },
   connection: {
     title: "Nueva conexión",

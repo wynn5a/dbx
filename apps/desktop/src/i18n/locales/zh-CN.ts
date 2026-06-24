@@ -68,6 +68,7 @@ export default {
   },
   sidebar: {
     connections: "连接",
+    sqlLibrary: "SQL 库",
     noConnections: "暂无连接",
     import: "导入连接",
     importDbx: "导入 DBX 配置",
@@ -103,6 +104,12 @@ export default {
     renameFile: "重命名 SQL",
     deleteFile: "删除 SQL",
     deleteFileConfirm: "确定删除“{name}”吗？",
+    add: "添加到 SQL 库",
+    connection: "连接",
+    newFile: "新建 SQL 文件",
+    newFileDefault: "新建查询",
+    empty: "暂无已保存的 SQL",
+    selectConnectionFirst: "请先选择一个连接",
   },
   connection: {
     title: "新建连接",

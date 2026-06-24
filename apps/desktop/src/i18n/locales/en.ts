@@ -69,6 +69,7 @@ export default {
   },
   sidebar: {
     connections: "CONNECTIONS",
+    sqlLibrary: "SQL LIBRARY",
     noConnections: "No connections yet",
     import: "Import Connections",
     importDbx: "Import DBX Config",
@@ -104,6 +105,12 @@ export default {
     renameFile: "Rename SQL",
     deleteFile: "Delete SQL",
     deleteFileConfirm: "Delete “{name}”?",
+    add: "Add to SQL Library",
+    connection: "Connection",
+    newFile: "New SQL File",
+    newFileDefault: "New Query",
+    empty: "No saved SQL yet",
+    selectConnectionFirst: "Select a connection first",
   },
   connection: {
     title: "New Connection",

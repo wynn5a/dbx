@@ -7,8 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import LightDropdown from "@/components/ui/LightDropdown.vue";
 import ConnectionTree from "@/components/sidebar/ConnectionTree.vue";
+import SqlLibraryPanel from "@/components/sidebar/SqlLibraryPanel.vue";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useToast } from "@/composables/useToast";
+import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/safeStorage";
 
 defineProps<{
   sidebarWidth: number;
@@ -25,6 +27,36 @@ const { t } = useI18n();
 const connectionStore = useConnectionStore();
 const { toast } = useToast();
 const connectionTreeRef = ref<InstanceType<typeof ConnectionTree>>();
+const rootRef = ref<HTMLElement>();
+const libraryOpen = ref(safeLocalStorageGet("dbx-sql-library-open") !== "false");
+const libraryHeight = ref(Number(safeLocalStorageGet("dbx-sql-library-height")) || 220);
+
+function toggleLibrary() {
+  libraryOpen.value = !libraryOpen.value;
+  safeLocalStorageSet("dbx-sql-library-open", String(libraryOpen.value));
+}
+
+function startLibraryResize(e: MouseEvent) {
+  e.preventDefault();
+  const startY = e.clientY;
+  const startHeight = libraryHeight.value;
+  const rootHeight = rootRef.value?.clientHeight ?? window.innerHeight;
+  const maxHeight = Math.max(120, rootHeight - 160);
+
+  const onMouseMove = (ev: MouseEvent) => {
+    const delta = startY - ev.clientY;
+    libraryHeight.value = Math.max(120, Math.min(maxHeight, startHeight + delta));
+  };
+
+  const onMouseUp = () => {
+    document.removeEventListener("mousemove", onMouseMove);
+    document.removeEventListener("mouseup", onMouseUp);
+    safeLocalStorageSet("dbx-sql-library-height", String(libraryHeight.value));
+  };
+
+  document.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mouseup", onMouseUp);
+}
 const importSourceItems = computed(() => [
   { value: "dbx", label: t("sidebar.importDbx") },
   { value: "navicat", label: t("sidebar.importNavicat") },
@@ -52,6 +84,7 @@ defineExpose({ focusSearch });
 
 <template>
   <div
+    ref="rootRef"
     class="h-full shrink-0 relative select-none rounded-md border border-border/80 bg-background"
     :style="{ width: sidebarWidth + 'px' }"
   >
@@ -119,6 +152,12 @@ defineExpose({ focusSearch });
       <div class="flex-1 min-h-0">
         <ConnectionTree ref="connectionTreeRef" />
       </div>
+      <SqlLibraryPanel
+        :open="libraryOpen"
+        :body-height="libraryHeight"
+        @toggle="toggleLibrary"
+        @start-resize="startLibraryResize"
+      />
     </div>
     <div class="panel-resize-handle panel-resize-handle--right" @mousedown="emit('startResize', $event)" />
   </div>
