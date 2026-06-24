@@ -382,7 +382,7 @@ function fileMenuItems(file: SavedSqlFile): ContextMenuItem[] {
               class="size-3.5 shrink-0 text-[var(--ds-text-3)]"
             />
             <DatabaseIcon :db-type="group.iconType" class="size-3.5 shrink-0" />
-            <span class="min-w-0 flex-1 truncate font-medium text-[var(--ds-text-1)]">{{ group.name }}</span>
+            <span class="min-w-0 flex-1 truncate font-medium">{{ group.name }}</span>
             <span class="sql-row-actions shrink-0">
               <button
                 class="sql-row-action"
@@ -642,10 +642,14 @@ function fileMenuItems(file: SavedSqlFile): ContextMenuItem[] {
   color: var(--ds-text-2);
   cursor: default;
   user-select: none;
+  transition:
+    background-color var(--ds-speed) var(--ds-ease),
+    color var(--ds-speed) var(--ds-ease);
 }
 
 .sql-row:hover {
   background: var(--ds-bg-active);
+  color: var(--ds-text-1);
 }
 
 .sql-row-actions {

@@ -124,7 +124,6 @@ import {
   connectionUsesDatabaseObjectTreeMode,
   effectiveDatabaseTypeForConnection,
 } from "@/lib/jdbcDialect";
-import { hexToRgba } from "@/lib/color";
 import { focusSidebarRenameInput } from "@/lib/sidebarRenameFocus";
 import { hasTreeNodeDatabaseContext } from "@/lib/treeNodeContext";
 import { sidebarDisplayTableName } from "@/lib/sidebarTableNameDisplay";
@@ -179,6 +178,7 @@ const { addTask: addExportTask } = useExportTracker();
 const props = defineProps<{
   node: TreeNode;
   depth: number;
+  connectionDepth?: number;
   dragDisabled?: boolean;
   pendingRename?: boolean;
   highlighted?: boolean;
@@ -2604,15 +2604,19 @@ const isActiveConnectionScope = computed(
 const isSelected = computed(() => connectionStore.selectedTreeNodeId === props.node.id);
 const isMultiSelected = computed(() => connectionStore.selectedTreeNodeIds.includes(props.node.id));
 const rowStyle = computed(() => {
-  const color = connectionColor.value;
-  const backgroundColor = hexToRgba(color, isActiveConnectionScope.value ? 0.14 : 0.08);
-  return {
-    paddingLeft: paddingLeft.value,
-    "--tree-connection-row-bg": backgroundColor,
-    "--tree-connection-row-hover-bg": hexToRgba(color, isActiveConnectionScope.value ? 0.18 : 0.12),
-    "--tree-connection-active-bg": hexToRgba(color, 0.18),
-    "--tree-connection-active-focus-bg": hexToRgba(color, 0.22),
-  };
+  // The connection hue drives the whole layered look from the stylesheet: a
+  // rounded pill spine on the connection header, a header tint that fades right,
+  // and a faint guide rail down the connected subtree — never a flat flood.
+  const style: Record<string, string> = { paddingLeft: paddingLeft.value };
+  if (connectionColor.value) {
+    style["--tree-conn-color"] = connectionColor.value;
+    // The descendant guide rail lines up under the connection for the whole
+    // subtree, whatever depth the connection sits at (top level or in a group).
+    // The header spine is pinned to the panel edge in CSS, so it needs no var.
+    const connColumn = Math.max(0, props.connectionDepth ?? props.depth) * 16;
+    style["--tree-conn-rail-left"] = `${connColumn + 14}px`;
+  }
+  return style;
 });
 
 function togglePin() {
@@ -3407,11 +3411,10 @@ function treeItemMenuItems(): ContextMenuItem[] {
           {
             'ring-1 ring-[var(--ds-accent-line)] bg-[var(--ds-accent-soft)]': showDropInside,
             'opacity-50': isDragging,
-            'tree-item-connection-tint': connectionColor,
-            'rounded-none': connectionColor && !isSelected && !isMultiSelected,
-            'rounded-sm': !connectionColor && !isSelected && !isMultiSelected,
-            'tree-item-active rounded-none': connectionColor && (isSelected || isMultiSelected),
-            'tree-item-active rounded-md': !connectionColor && (isSelected || isMultiSelected),
+            'tree-conn': connectionColor,
+            'tree-conn-head': connectionColor && node.type === 'connection',
+            'tree-conn-active-scope': connectionColor && isActiveConnectionScope,
+            'tree-item-active': isSelected || isMultiSelected,
             'tree-item-highlight': highlighted,
           },
         ]"
@@ -3424,6 +3427,7 @@ function treeItemMenuItems(): ContextMenuItem[] {
         @mousemove="isDropTarget ? updateTarget($event, node.id, node.type) : undefined"
         @mouseleave="clearTarget(node.id)"
       >
+        <span v-if="connectionColor && node.type !== 'connection'" class="tree-conn-rail" aria-hidden="true" />
         <div
           v-if="showDropBefore"
           class="absolute right-2 top-0 h-0.5 bg-[var(--ds-accent)] rounded-full pointer-events-none"
@@ -3469,9 +3473,12 @@ function treeItemMenuItems(): ContextMenuItem[] {
         />
         <Tooltip v-else :disabled="!labelTooltipEnabled">
           <TooltipTrigger as-child>
-            <span ref="labelRef" :class="labelWidthClass" @pointerenter="labelTooltipEnabled = isLabelTruncated()">{{
-              visibleLabel(node)
-            }}</span>
+            <span
+              ref="labelRef"
+              :class="[labelWidthClass, { 'tree-conn-name': node.type === 'connection' }]"
+              @pointerenter="labelTooltipEnabled = isLabelTruncated()"
+              >{{ visibleLabel(node) }}</span
+            >
           </TooltipTrigger>
           <TooltipContent side="right" :side-offset="8">{{ displayLabel(node) }}</TooltipContent>
         </Tooltip>
@@ -3846,13 +3853,30 @@ function treeItemMenuItems(): ContextMenuItem[] {
    text up one ramp level; selection fills --ds-bg-active with text-1 / 500. */
 .tree-row {
   color: var(--ds-text-2);
-  transition:
-    background-color var(--ds-speed) var(--ds-ease),
-    color var(--ds-speed) var(--ds-ease);
+  transition: color var(--ds-speed) var(--ds-ease);
+}
+/* Row fill lives on an inset ::before, so hover / selection / connection tint
+   leave a small gap at the left and right ends instead of bleeding to the
+   panel edge. Content sits above it via the z-index below. */
+.tree-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 6px;
+  z-index: 0;
+  background-color: transparent;
+  border-radius: var(--ds-radius);
+  pointer-events: none;
+  transition: background-color var(--ds-speed) var(--ds-ease);
+}
+.tree-row > * {
+  position: relative;
+  z-index: 1;
 }
 .tree-row:hover {
-  background-color: var(--ds-bg-hover);
   color: var(--ds-text-1);
+}
+.tree-row:hover::before {
+  background-color: var(--ds-bg-hover);
 }
 .tree-row.tree-item-active {
   color: var(--ds-text-1);
@@ -3898,6 +3922,11 @@ function treeItemMenuItems(): ContextMenuItem[] {
     box-shadow: 0 0 0 5px color-mix(in srgb, var(--ds-green) 7%, transparent);
   }
 }
+@media (prefers-reduced-motion: reduce) {
+  .tree-row-status-dot {
+    animation: none;
+  }
+}
 
 .tree-row-pin {
   color: var(--ds-text-3);
@@ -3913,56 +3942,75 @@ function treeItemMenuItems(): ContextMenuItem[] {
   color: var(--ds-accent);
 }
 
-.tree-item-connection-tint {
+/* Connection color — layered, not flooded (design-system "Connection list").
+   The connection header carries a rounded pill spine + a tint that fades to
+   nothing across the first half of the row; its subtree gets a single faint
+   guide rail at the connection's column. Descendant rows otherwise stay a
+   neutral surface so hover and selection read cleanly on top. Driven entirely
+   by --tree-conn-color plus the spine/rail offsets set in rowStyle. */
+.tree-conn {
   isolation: isolate;
-  background-color: transparent !important;
 }
 
-.tree-item-connection-tint::before {
-  content: "";
+.tree-conn-rail {
   position: absolute;
-  inset: 0 -9999px;
-  z-index: 0;
-  background-color: var(--tree-connection-row-bg);
-  border-radius: inherit;
   pointer-events: none;
 }
 
-.tree-item-connection-tint > * {
-  position: relative;
-  z-index: 1;
+/* Header fill: hue tint fading to nothing by ~58%. Sits as a background-image
+   so the neutral hover/selection background-color shows through underneath. */
+.tree-conn-head::before {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--tree-conn-color) 16%, transparent),
+    transparent 58%
+  );
+}
+/* The query-active connection reads a touch stronger. */
+.tree-conn-head.tree-conn-active-scope::before {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--tree-conn-color) 24%, transparent),
+    transparent 62%
+  );
 }
 
-.tree-item-connection-tint:hover,
-.tree-item-connection-tint.tree-item-active,
-.tree-item-connection-tint.tree-item-active:focus {
-  background-color: transparent !important;
+/* Descendant rows: one faint hued guide rail at the connection's column,
+   running down the whole connected subtree (sits behind the row content). */
+.tree-conn:not(.tree-conn-head) .tree-conn-rail {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  left: var(--tree-conn-rail-left, 14px);
+  z-index: 0;
+  background: color-mix(in srgb, var(--tree-conn-color) 24%, transparent);
 }
 
-.tree-item-connection-tint:hover::before {
-  background-color: var(--tree-connection-row-hover-bg, var(--tree-connection-row-bg));
+/* Descendant hover/selection fill is indented to sit just right of the guide
+   rail (a rounded pill), so the rail stays visible instead of being covered. */
+.tree-conn:not(.tree-conn-head)::before {
+  left: calc(var(--tree-conn-rail-left, 14px) + 6px);
 }
 
-.tree-item-connection-tint.tree-item-active::before {
-  background-color: var(--tree-connection-active-bg, var(--tree-connection-row-bg));
-}
-
-.tree-item-connection-tint.tree-item-active:focus::before {
-  background-color: var(--tree-connection-active-focus-bg, var(--tree-connection-active-bg));
+/* Connection name: a medium header weight, but colored like a folder row —
+   text-2 at rest, stepping up to text-1 only on hover/selection (inherited
+   from .tree-row), rather than always sitting white at the top of the ramp. */
+.tree-conn-name {
+  font-weight: 500;
 }
 
 /* Unfocused selection: neutral active fill */
-.tree-item-active {
-  background-color: var(--tree-connection-active-bg, var(--ds-bg-active)) !important;
+.tree-row.tree-item-active::before {
+  background-color: var(--ds-bg-active);
 }
 
 /* Focused selection: accent-soft (data selection) */
-.tree-item-active:focus {
-  background-color: var(--tree-connection-active-focus-bg, var(--ds-accent-soft)) !important;
+.tree-row.tree-item-active:focus::before {
+  background-color: var(--ds-accent-soft);
 }
 
 /* Locate highlight: instant amber tint, then fade on removal */
-.tree-item-highlight {
+.tree-item-highlight::before {
   background-color: color-mix(in srgb, var(--ds-amber) 30%, transparent) !important;
   transition: background-color 0.8s ease-out 0.6s;
 }

@@ -9,20 +9,26 @@ export interface FlatTreeNode {
   depth: number;
   id: string;
   type: TreeNodeType;
+  // Depth of the owning connection row (the connection itself, or the connection
+  // an ancestor of this node), or -1 when the node sits above any connection
+  // (e.g. a connection group). Used to position the connection-hue guide rail at
+  // the connection's column for the whole connected subtree.
+  connectionDepth: number;
 }
 
-function walk(children: TreeNode[], depth: number, result: FlatTreeNode[]) {
+function walk(children: TreeNode[], depth: number, result: FlatTreeNode[], connectionDepth: number) {
   for (const node of children) {
-    result.push({ node, depth, id: node.id, type: node.type });
+    const nextConnectionDepth = node.type === "connection" ? depth : connectionDepth;
+    result.push({ node, depth, id: node.id, type: node.type, connectionDepth: nextConnectionDepth });
     if (node.isExpanded && node.children) {
-      walk(node.children, depth + 1, result);
+      walk(node.children, depth + 1, result, nextConnectionDepth);
     }
   }
 }
 
 export function flattenTree(nodes: TreeNode[]): FlatTreeNode[] {
   const result: FlatTreeNode[] = [];
-  walk(nodes, 0, result);
+  walk(nodes, 0, result, -1);
   return result;
 }
 

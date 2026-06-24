@@ -531,6 +531,7 @@ defineExpose({ focusSearch, createNewGroup });
         <TreeItem
           :node="item.node"
           :depth="item.depth"
+          :connection-depth="item.connectionDepth"
           :drag-disabled="isFiltering"
           :pending-rename="pendingRenameGroupId === item.node.id"
           :highlighted="highlightedNodeId === item.node.id"
@@ -552,6 +553,7 @@ defineExpose({ focusSearch, createNewGroup });
         :key="item.id"
         :node="item.node"
         :depth="item.depth"
+        :connection-depth="item.connectionDepth"
         :drag-disabled="isFiltering"
         :pending-rename="pendingRenameGroupId === item.node.id"
         :highlighted="highlightedNodeId === item.id"
