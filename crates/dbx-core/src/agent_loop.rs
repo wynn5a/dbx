@@ -36,6 +36,28 @@ const MAX_TOOL_RESULT_CONTEXT_CHARS: usize = 12_000;
 const TOOL_RESULT_HEAD_CHARS: usize = 8_000;
 const TOOL_RESULT_TAIL_CHARS: usize = 3_000;
 
+/// How the agent loop ended, so we can leave the user an explanatory note
+/// before the terminal `AgentEnd` event. `Completed` (the model answered) needs
+/// no note; the others would otherwise stop with no on-screen explanation.
+enum LoopOutcome {
+    Completed,
+    Cancelled,
+    Exhausted,
+}
+
+impl LoopOutcome {
+    /// A short note to stream to the user, or `None` for a clean completion.
+    fn note(&self, max_turns: u32) -> Option<String> {
+        match self {
+            LoopOutcome::Completed => None,
+            LoopOutcome::Cancelled => Some("\n\n_Agent run cancelled._".to_string()),
+            LoopOutcome::Exhausted => Some(format!(
+                "\n\n_Agent stopped after the {max_turns}-turn safety limit. Send another message to let it keep working._"
+            )),
+        }
+    }
+}
+
 /// Everything the tools need to reach the live connection.
 #[derive(Clone)]
 pub struct AgentLoopContext {
@@ -113,9 +135,13 @@ pub async fn run_agent_loop(
     let mut convo: Vec<AiMessage> = messages.to_vec();
     let mut final_text = String::new();
     let mut total_usage = TokenUsage::default();
+    // Default to Exhausted: only reached if the loop runs every turn without the
+    // model giving a tool-free final answer or the user cancelling.
+    let mut outcome = LoopOutcome::Exhausted;
 
     for turn in 0..MAX_AGENT_TURNS {
         if cancelled.notified().now_or_never().is_some() {
+            outcome = LoopOutcome::Cancelled;
             break;
         }
         on_event(AgentEvent::TurnStart { turn });
@@ -161,6 +187,7 @@ pub async fn run_agent_loop(
         // No tool calls => the model has answered; we're done.
         if tool_calls.is_empty() {
             final_text = turn_text;
+            outcome = LoopOutcome::Completed;
             break;
         }
 
@@ -204,6 +231,14 @@ pub async fn run_agent_loop(
                 tool_calls: Vec::new(),
             });
         }
+    }
+
+    // Leave the user an explanation when the loop stopped without a clean answer
+    // (turn-limit exhaustion or cancellation), so the conversation doesn't just
+    // end mid-work. The UI renders the streamed text, so emit it as a TextDelta.
+    if let Some(note) = outcome.note(MAX_AGENT_TURNS) {
+        on_event(AgentEvent::TextDelta { delta: note.clone() });
+        final_text.push_str(&note);
     }
 
     on_event(AgentEvent::AgentEnd { input_tokens: total_usage.input_tokens, output_tokens: total_usage.output_tokens });
@@ -403,6 +438,17 @@ mod tests {
         assert!(!runs_in_parallel(&DatabaseType::DuckDb, true));
         // A non-parallel tool (e.g. execute_query) is never parallelized anywhere.
         assert!(!runs_in_parallel(&DatabaseType::Postgres, false));
+    }
+
+    #[test]
+    fn loop_outcome_notes() {
+        // A clean completion adds nothing.
+        assert!(LoopOutcome::Completed.note(MAX_AGENT_TURNS).is_none());
+        // Cancellation and exhaustion both leave an explanatory note.
+        assert!(LoopOutcome::Cancelled.note(MAX_AGENT_TURNS).unwrap().contains("cancelled"));
+        let exhausted = LoopOutcome::Exhausted.note(MAX_AGENT_TURNS).unwrap();
+        assert!(exhausted.contains(&MAX_AGENT_TURNS.to_string()));
+        assert!(exhausted.contains("keep working"));
     }
 
     #[test]
