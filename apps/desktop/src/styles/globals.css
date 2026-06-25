@@ -429,7 +429,7 @@
    Unlayered so it wins over component utility classes. */
 .ds-tooltip {
   padding: 9px 13px;
-  border: 1px solid var(--ds-border-soft);
+  border: 1px solid var(--ds-border-strong);
   border-radius: 10px;
   background: var(--ds-bg-elevated);
   box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.18);
@@ -439,7 +439,9 @@
   line-height: 1.4;
 }
 .dark .ds-tooltip {
-  background: var(--ds-bg-base);
+  /* Keep the elevated surface (lighter than --ds-bg-base) so the card lifts off
+     dark backdrops like the SQL editor, where a dark drop-shadow is invisible. */
+  background: var(--ds-bg-elevated);
   box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.55);
 }
 /* group of shortcut keycaps inside a tooltip */

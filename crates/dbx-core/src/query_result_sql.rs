@@ -313,7 +313,13 @@ fn single_selectable_statement(original_sql: &str) -> Result<String, ()> {
         return Err(());
     }
     let upper = statement.trim_start_matches(';').trim_start().to_ascii_uppercase();
-    if !(upper.starts_with("SELECT") || upper.starts_with("WITH")) {
+    if upper.starts_with("WITH") {
+        // Only `WITH ... SELECT` is safe to paginate. CTE-backed DML
+        // (`WITH ... UPDATE/INSERT/DELETE/MERGE`) must run verbatim.
+        if !cte_resolves_to_select(&statement) {
+            return Err(());
+        }
+    } else if !upper.starts_with("SELECT") {
         return Err(());
     }
     if has_top_level_select_into(&statement) {
@@ -321,6 +327,24 @@ fn single_selectable_statement(original_sql: &str) -> Result<String, ()> {
     }
 
     Ok(statement)
+}
+
+/// Whether a `WITH ...` statement's main body is a `SELECT`.
+///
+/// CTE bodies live inside parentheses, which `top_level_sql_tokens` skips, so
+/// the first top-level statement keyword is the CTE's main statement. Only
+/// `WITH ... SELECT` may be paginated by appending `LIMIT`/`TOP`/`FETCH FIRST`;
+/// CTE-backed DML such as `WITH ... UPDATE` must execute as written, otherwise
+/// PostgreSQL fails with `syntax error at or near "LIMIT"`.
+fn cte_resolves_to_select(sql: &str) -> bool {
+    top_level_sql_tokens(sql)
+        .iter()
+        .find_map(|token| match token.text.as_str() {
+            "SELECT" => Some(true),
+            "INSERT" | "UPDATE" | "DELETE" | "MERGE" => Some(false),
+            _ => None,
+        })
+        .unwrap_or(false)
 }
 
 fn starts_with_cte(sql: &str) -> bool {
@@ -974,6 +998,61 @@ mod tests {
             result.sql.unwrap(),
             "SELECT * FROM (SELECT id, name FROM users) t([id], [name]) ORDER BY [name] ASC;"
         );
+    }
+
+    #[test]
+    fn rejects_cte_backed_update_for_pagination() {
+        let result = build_paginated_query_sql(PaginatedQuerySqlOptions {
+            original_sql: "WITH stale AS (SELECT id FROM users WHERE active = 0) UPDATE users SET active = 1 \
+                           WHERE id IN (SELECT id FROM stale)"
+                .to_string(),
+            database_type: Some(DatabaseType::Postgres),
+            limit: 100,
+            offset: 0,
+        });
+
+        assert_eq!(result, err("not_select"));
+    }
+
+    #[test]
+    fn cte_backed_update_pagination_plan_executes_original_sql() {
+        let sql = "WITH stale AS (SELECT id FROM users WHERE active = 0) UPDATE users SET active = 1 \
+                   WHERE id IN (SELECT id FROM stale)"
+            .to_string();
+        let plan = build_query_pagination_execution_plan(QueryPaginationExecutionPlanOptions {
+            sql: sql.clone(),
+            query_base_sql: sql.clone(),
+            database_type: Some(DatabaseType::Postgres),
+            pagination: QueryPagination { limit: 100, offset: 0, session_id: None },
+            use_agent_cursor: false,
+        });
+
+        assert_eq!(plan.sql_to_execute, sql);
+        assert!(plan.page_sql.is_none());
+        assert!(plan.count_sql.is_none());
+        assert_eq!(plan.page_limit, None);
+        assert_eq!(plan.page_offset, None);
+    }
+
+    #[test]
+    fn cte_backed_select_pagination_plan_appends_limit() {
+        let sql =
+            "WITH active_users AS (SELECT id, name FROM users WHERE active = 1) SELECT * FROM active_users".to_string();
+        let plan = build_query_pagination_execution_plan(QueryPaginationExecutionPlanOptions {
+            sql: sql.clone(),
+            query_base_sql: sql.clone(),
+            database_type: Some(DatabaseType::Postgres),
+            pagination: QueryPagination { limit: 100, offset: 200, session_id: None },
+            use_agent_cursor: false,
+        });
+
+        assert_eq!(
+            plan.sql_to_execute,
+            "WITH active_users AS (SELECT id, name FROM users WHERE active = 1) SELECT * FROM active_users \
+             LIMIT 100 OFFSET 200;"
+        );
+        assert_eq!(plan.page_limit, Some(100));
+        assert_eq!(plan.page_offset, Some(200));
     }
 
     #[test]
