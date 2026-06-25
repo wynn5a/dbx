@@ -8,6 +8,7 @@ use crate::sql_dialect::{is_schema_aware, quote_table_identifier};
 pub enum DatabaseObjectType {
     Table,
     View,
+    MaterializedView,
     Procedure,
     Function,
 }
@@ -307,7 +308,10 @@ pub fn supports_object_rename(database_type: Option<DatabaseType>, object_type: 
         return matches!(object_type, DatabaseObjectType::Table | DatabaseObjectType::View);
     }
     if is_postgres_like_rename(database_type) || is_oracle_like_rename(database_type) {
-        return matches!(object_type, DatabaseObjectType::Table | DatabaseObjectType::View);
+        return matches!(
+            object_type,
+            DatabaseObjectType::Table | DatabaseObjectType::View | DatabaseObjectType::MaterializedView
+        );
     }
     false
 }
@@ -431,6 +435,7 @@ fn object_type_keyword(object_type: DatabaseObjectType) -> &'static str {
     match object_type {
         DatabaseObjectType::Table => "TABLE",
         DatabaseObjectType::View => "VIEW",
+        DatabaseObjectType::MaterializedView => "MATERIALIZED VIEW",
         DatabaseObjectType::Procedure => "PROCEDURE",
         DatabaseObjectType::Function => "FUNCTION",
     }
@@ -559,6 +564,34 @@ mod tests {
             }),
             "DELETE FROM \"events\";"
         );
+    }
+
+    #[test]
+    fn builds_postgres_materialized_view_drop_and_rename_sql() {
+        assert_eq!(
+            build_drop_object_sql(DropObjectSqlOptions {
+                database_type: Some(DatabaseType::Postgres),
+                object_type: DatabaseObjectType::MaterializedView,
+                schema: Some("archive".to_string()),
+                name: "active_users".to_string(),
+            }),
+            "DROP MATERIALIZED VIEW \"archive\".\"active_users\";"
+        );
+        assert!(supports_object_rename(Some(DatabaseType::Postgres), DatabaseObjectType::MaterializedView));
+        assert_eq!(
+            build_rename_object_sql(RenameObjectSqlOptions {
+                database_type: Some(DatabaseType::Postgres),
+                object_type: DatabaseObjectType::MaterializedView,
+                schema: Some("archive".to_string()),
+                old_name: "active_users".to_string(),
+                new_name: "enabled_users".to_string(),
+            })
+            .unwrap(),
+            "ALTER MATERIALIZED VIEW \"archive\".\"active_users\" RENAME TO \"enabled_users\";"
+        );
+        // MySQL/SQLite have no materialized views; renaming must not be offered.
+        assert!(!supports_object_rename(Some(DatabaseType::Mysql), DatabaseObjectType::MaterializedView));
+        assert!(!supports_object_rename(Some(DatabaseType::Sqlite), DatabaseObjectType::MaterializedView));
     }
 
     #[test]

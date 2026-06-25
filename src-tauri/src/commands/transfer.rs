@@ -107,21 +107,21 @@ pub async fn start_transfer(
             let mut last_rows_transferred = 0_u64;
             let mut last_total_rows = None;
 
-            match dbx_core::transfer::transfer_table(
-                &state,
-                &request,
+            let job = dbx_core::transfer::TableTransferJob {
+                state: &state,
+                request: &request,
                 table,
-                i,
-                &source_db_type,
-                &target_db_type,
-                &source_pool_key,
-                &target_pool_key,
-                |progress| {
-                    last_rows_transferred = progress.rows_transferred;
-                    last_total_rows = progress.total_rows;
-                    emit_progress(&app, progress);
-                },
-            )
+                table_index: i,
+                source_db_type: &source_db_type,
+                target_db_type: &target_db_type,
+                source_pool_key: &source_pool_key,
+                target_pool_key: &target_pool_key,
+            };
+            match dbx_core::transfer::transfer_table(&job, |progress| {
+                last_rows_transferred = progress.rows_transferred;
+                last_total_rows = progress.total_rows;
+                emit_progress(&app, progress);
+            })
             .await
             {
                 Ok(rows) => {

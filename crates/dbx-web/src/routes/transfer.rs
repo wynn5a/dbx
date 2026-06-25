@@ -93,23 +93,23 @@ pub async fn start_transfer(
             let tx_clone = tx.clone();
             let mut last_rows_transferred = 0_u64;
             let mut last_total_rows = None;
-            let result = transfer::transfer_table(
-                &app,
-                &req,
+            let job = transfer::TableTransferJob {
+                state: &app,
+                request: &req,
                 table,
-                i,
-                &source_db_type,
-                &target_db_type,
-                &source_pool_key,
-                &target_pool_key,
-                |progress| {
-                    last_rows_transferred = progress.rows_transferred;
-                    last_total_rows = progress.total_rows;
-                    if let Ok(json) = serde_json::to_string(&progress) {
-                        let _ = tx_clone.send(json);
-                    }
-                },
-            )
+                table_index: i,
+                source_db_type: &source_db_type,
+                target_db_type: &target_db_type,
+                source_pool_key: &source_pool_key,
+                target_pool_key: &target_pool_key,
+            };
+            let result = transfer::transfer_table(&job, |progress| {
+                last_rows_transferred = progress.rows_transferred;
+                last_total_rows = progress.total_rows;
+                if let Ok(json) = serde_json::to_string(&progress) {
+                    let _ = tx_clone.send(json);
+                }
+            })
             .await;
 
             match result {

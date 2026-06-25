@@ -3,8 +3,8 @@ use dbx_core::db::postgres;
 use dbx_core::models::connection::{ConnectionConfig, DatabaseType};
 use dbx_core::storage::Storage;
 use dbx_core::transfer::{
-    get_db_type, transfer_postgres_schema_dependencies, transfer_postgres_schema_objects, transfer_table, TransferMode,
-    TransferRequest,
+    get_db_type, transfer_postgres_schema_dependencies, transfer_postgres_schema_objects, transfer_table,
+    TableTransferJob, TransferMode, TransferRequest,
 };
 use serde_json::json;
 
@@ -193,19 +193,17 @@ async fn live_postgres_transfer_preserves_data_and_schema_objects() {
     let source_db_type = get_db_type(&state, source_connection_id).await.unwrap();
     let target_db_type = get_db_type(&state, target_connection_id).await.unwrap();
     for (index, table) in request.tables.iter().enumerate() {
-        transfer_table(
-            &state,
-            &request,
+        let job = TableTransferJob {
+            state: &state,
+            request: &request,
             table,
-            index,
-            &source_db_type,
-            &target_db_type,
-            &source_pool_key,
-            &target_pool_key,
-            |_| {},
-        )
-        .await
-        .unwrap();
+            table_index: index,
+            source_db_type: &source_db_type,
+            target_db_type: &target_db_type,
+            source_pool_key: &source_pool_key,
+            target_pool_key: &target_pool_key,
+        };
+        transfer_table(&job, |_| {}).await.unwrap();
     }
 
     transfer_postgres_schema_objects(&state, &request, &source_pool_key, &target_pool_key, |_| {}).await.unwrap();

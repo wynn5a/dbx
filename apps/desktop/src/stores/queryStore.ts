@@ -495,6 +495,29 @@ export const useQueryStore = defineStore("query", () => {
     closeTabsWhere((tab) => tab.connectionId === connectionId && tab.database === database);
   }
 
+  // Closes any tab tied to a dropped object (data, structure, or source/edit tabs)
+  // so stale tabs don't linger after the object no longer exists.
+  function closeObjectTabs(connectionId: string, database: string, schema: string | undefined, name: string) {
+    const targetName = name.trim().toLowerCase();
+    if (!targetName) return;
+    const targetSchema = (schema || "").trim().toLowerCase();
+    const schemaMatches = (tabSchema?: string | null) => {
+      const value = (tabSchema || "").trim().toLowerCase();
+      return !targetSchema || !value || value === targetSchema;
+    };
+    closeTabsWhere((tab) => {
+      if (tab.connectionId !== connectionId || tab.database !== database) return false;
+      if (tab.objectSource && tab.objectSource.name.trim().toLowerCase() === targetName) {
+        return schemaMatches(tab.objectSource.schema);
+      }
+      const metaName = tab.tableMeta?.tableName || tab.structureTableName || "";
+      if (metaName.trim().toLowerCase() === targetName) {
+        return schemaMatches(tab.tableMeta?.schema ?? tab.schema);
+      }
+      return false;
+    });
+  }
+
   function closeSavedSqlTabs(savedSqlIds: string[]) {
     if (savedSqlIds.length === 0) return;
     const ids = new Set(savedSqlIds);
@@ -1747,6 +1770,7 @@ export const useQueryStore = defineStore("query", () => {
     closeAllTabs,
     closeConnectionTabs,
     closeDatabaseTabs,
+    closeObjectTabs,
     closeSavedSqlTabs,
     releaseConnectionTabs,
     releaseDatabaseTabs,

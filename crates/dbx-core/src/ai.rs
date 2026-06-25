@@ -1230,20 +1230,27 @@ impl StreamingToolCallAccumulator {
     }
 }
 
+/// Inputs for one streaming, tool-enabled model turn. Borrowing these eight
+/// values as a single request keeps the public entry point and the
+/// provider-specific streamers from threading them all positionally.
+pub struct ToolStreamRequest<'a> {
+    pub config: &'a AiConfig,
+    pub system_prompt: &'a str,
+    pub messages: &'a [AiMessage],
+    pub session_id: &'a str,
+    pub tools: &'a [ToolDefinition],
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f32>,
+    pub cancelled: &'a Notify,
+}
+
 /// Stream a turn that may call tools. Text/reasoning deltas are delivered via
 /// `on_chunk`; the parsed tool calls and token usage are returned at the end.
-#[allow(clippy::too_many_arguments)]
 pub async fn stream_with_tools(
-    config: &AiConfig,
-    system_prompt: &str,
-    messages: &[AiMessage],
-    session_id: &str,
-    tools: &[ToolDefinition],
-    max_tokens: Option<u32>,
-    temperature: Option<f32>,
-    cancelled: &Notify,
+    request: &ToolStreamRequest<'_>,
     on_chunk: impl Fn(AiStreamChunk),
 ) -> Result<(Vec<ToolCall>, TokenUsage), String> {
+    let config = request.config;
     validate_config(config)?;
     let stream_timeout = if config.enable_thinking { 600 } else { 120 };
     let client = build_ai_http_client(config, stream_timeout)?;
@@ -1254,36 +1261,8 @@ pub async fn stream_with_tools(
     };
 
     let usage = match config.provider {
-        AiProvider::Claude => {
-            stream_claude_with_tools(
-                &client,
-                config,
-                system_prompt,
-                messages,
-                session_id,
-                tools,
-                max_tokens,
-                temperature,
-                cancelled,
-                &emit,
-            )
-            .await?
-        }
-        _ => {
-            stream_openai_with_tools(
-                &client,
-                config,
-                system_prompt,
-                messages,
-                session_id,
-                tools,
-                max_tokens,
-                temperature,
-                cancelled,
-                &emit,
-            )
-            .await?
-        }
+        AiProvider::Claude => stream_claude_with_tools(&client, request, &emit).await?,
+        _ => stream_openai_with_tools(&client, request, &emit).await?,
     };
 
     let tool_calls = accumulator.into_inner().expect("accumulator mutex poisoned").finalize();
@@ -1324,27 +1303,20 @@ fn openai_messages_with_tools(system_prompt: &str, messages: &[AiMessage]) -> Ve
     out
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn stream_openai_with_tools(
     client: &reqwest::Client,
-    config: &AiConfig,
-    system_prompt: &str,
-    messages: &[AiMessage],
-    session_id: &str,
-    tools: &[ToolDefinition],
-    max_tokens: Option<u32>,
-    temperature: Option<f32>,
-    cancelled: &Notify,
+    request: &ToolStreamRequest<'_>,
     emit: &impl Fn(StreamToolEvent),
 ) -> Result<TokenUsage, String> {
+    let config = request.config;
     let headers = maybe_bearer_headers(config)?;
-    let tool_defs: Vec<Value> = tools.iter().map(|t| t.to_openai_tool()).collect();
+    let tool_defs: Vec<Value> = request.tools.iter().map(|t| t.to_openai_tool()).collect();
 
     let mut body = json!({
         "model": config.model,
-        "messages": openai_messages_with_tools(system_prompt, messages),
-        "max_tokens": max_tokens.unwrap_or(2048),
-        "temperature": temperature.unwrap_or(0.2),
+        "messages": openai_messages_with_tools(request.system_prompt, request.messages),
+        "max_tokens": request.max_tokens.unwrap_or(2048),
+        "temperature": request.temperature.unwrap_or(0.2),
         "stream": true,
         "stream_options": { "include_usage": true },
     });
@@ -1370,7 +1342,7 @@ async fn stream_openai_with_tools(
     }
 
     let mut usage = TokenUsage::default();
-    read_sse_stream(res, cancelled, |line| {
+    read_sse_stream(res, request.cancelled, |line| {
         let Some(data) = stream_data_payload(line) else {
             return ControlFlow::Continue(());
         };
@@ -1378,7 +1350,7 @@ async fn stream_openai_with_tools(
             return ControlFlow::Break(());
         }
         if let Ok(event) = serde_json::from_str::<Value>(data) {
-            parse_openai_tool_event(&event, session_id, emit, &mut usage);
+            parse_openai_tool_event(&event, request.session_id, emit, &mut usage);
         }
         ControlFlow::Continue(())
     })
@@ -1479,27 +1451,20 @@ fn claude_messages_with_tools(messages: &[AiMessage]) -> Vec<Value> {
     out
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn stream_claude_with_tools(
     client: &reqwest::Client,
-    config: &AiConfig,
-    system_prompt: &str,
-    messages: &[AiMessage],
-    session_id: &str,
-    tools: &[ToolDefinition],
-    max_tokens: Option<u32>,
-    temperature: Option<f32>,
-    cancelled: &Notify,
+    request: &ToolStreamRequest<'_>,
     emit: &impl Fn(StreamToolEvent),
 ) -> Result<TokenUsage, String> {
-    let tool_defs: Vec<Value> = tools.iter().map(|t| t.to_anthropic_tool()).collect();
+    let config = request.config;
+    let tool_defs: Vec<Value> = request.tools.iter().map(|t| t.to_anthropic_tool()).collect();
 
     let mut body = json!({
         "model": config.model,
-        "max_tokens": max_tokens.unwrap_or(2048),
-        "temperature": temperature.unwrap_or(0.2),
-        "system": claude_system_blocks(system_prompt),
-        "messages": claude_messages_with_tools(messages),
+        "max_tokens": request.max_tokens.unwrap_or(2048),
+        "temperature": request.temperature.unwrap_or(0.2),
+        "system": claude_system_blocks(request.system_prompt),
+        "messages": claude_messages_with_tools(request.messages),
         "stream": true,
     });
     if !tool_defs.is_empty() {
@@ -1520,12 +1485,12 @@ async fn stream_claude_with_tools(
     }
 
     let mut usage = TokenUsage::default();
-    read_sse_stream(res, cancelled, |line| {
+    read_sse_stream(res, request.cancelled, |line| {
         let Some(data) = stream_data_payload(line) else {
             return ControlFlow::Continue(());
         };
         if let Ok(event) = serde_json::from_str::<Value>(data) {
-            parse_claude_tool_event(&event, session_id, emit, &mut usage);
+            parse_claude_tool_event(&event, request.session_id, emit, &mut usage);
         }
         ControlFlow::Continue(())
     })

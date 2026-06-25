@@ -1100,9 +1100,10 @@ function dropObjectSqlOptions(): DropObjectSqlOptions | null {
 
 function dropObjectSqlOptionsForNode(node: TreeNode): DropObjectSqlOptions | null {
   if (node.type !== "view" && node.type !== "procedure" && node.type !== "function") return null;
+  const viewObjectType = node.materialized ? "MATERIALIZED_VIEW" : "VIEW";
   return {
     databaseType: databaseTypeForNode(node),
-    objectType: node.type === "view" ? "VIEW" : node.type === "procedure" ? "PROCEDURE" : "FUNCTION",
+    objectType: node.type === "view" ? viewObjectType : node.type === "procedure" ? "PROCEDURE" : "FUNCTION",
     schema: node.schema,
     name: node.label,
   };
@@ -1394,7 +1395,7 @@ function requestDropSelectedNode(): boolean {
 
 function nodeRenameObjectType(): RenameableObjectType | null {
   if (props.node.type === "table") return "TABLE";
-  if (props.node.type === "view") return "VIEW";
+  if (props.node.type === "view") return props.node.materialized ? "MATERIALIZED_VIEW" : "VIEW";
   if (props.node.type === "procedure") return "PROCEDURE";
   if (props.node.type === "function") return "FUNCTION";
   return null;
@@ -1515,6 +1516,7 @@ async function confirmDropObject() {
           ? "contextMenu.dropProcedureSuccess"
           : "contextMenu.dropFunctionSuccess";
     toast(t(msgKey, { name: node.label }), 3000);
+    queryStore.closeObjectTabs(node.connectionId, node.database, node.schema, node.label);
     if (node.type === "view") {
       connectionStore.removeTreeNode(node.id);
     } else {
@@ -1551,6 +1553,9 @@ async function confirmBatchDrop() {
       const sql = await dropSqlForTreeNode(target);
       if (!sql) continue;
       await api.executeQuery(target.connectionId, target.database, sql, target.schema);
+      if (target.type !== "table") {
+        queryStore.closeObjectTabs(target.connectionId, target.database, target.schema, target.label);
+      }
       connectionStore.removeTreeNode(target.id);
     }
     toast(t("contextMenu.batchDropSuccess", { count: targets.length }), 3000);

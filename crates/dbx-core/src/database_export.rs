@@ -510,10 +510,12 @@ pub async fn export_database_sql_core(
                     }
 
                     let sql = crate::transfer::pagination_sql(
-                        &col_names,
-                        table_name,
-                        &request.schema,
-                        &db_type,
+                        &crate::transfer::PageSource {
+                            columns: &col_names,
+                            table: table_name,
+                            schema: &request.schema,
+                            db_type: &db_type,
+                        },
                         offset,
                         batch_size,
                     );

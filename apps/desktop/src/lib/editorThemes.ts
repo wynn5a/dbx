@@ -69,7 +69,7 @@ function createCustomTheme(
     ? { background: "#0b0c0e", foreground: "#f7f8f8" }
     : { background: "#f6f6f7", foreground: "#17181a" };
 
-  const c = { ...defaultColors, ...customThemeColors, ...(colors || {}) };
+  const c = { ...defaultColors, ...customThemeColors, ...colors };
 
   // 映射用户自定义属性名到 CodeMirror 内部属性名
   if (colors) {

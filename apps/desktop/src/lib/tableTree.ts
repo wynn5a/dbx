@@ -34,6 +34,7 @@ export function buildTableTreeNodes({
         includeSchemaInId: false,
         name,
         objectType,
+        materialized: isMaterializedViewType(table.table_type),
         comment: table.comment,
         parentSchema: table.parent_schema,
         parentName: table.parent_name,
@@ -61,6 +62,7 @@ function makeTableTreeEntry({
   includeSchemaInId,
   name,
   objectType,
+  materialized,
   comment,
   parentSchema,
   parentName,
@@ -72,6 +74,7 @@ function makeTableTreeEntry({
   includeSchemaInId?: boolean;
   name: string;
   objectType: DatabaseObjectTreeKind;
+  materialized?: boolean;
   comment?: string | null;
   parentSchema?: string | null;
   parentName?: string | null;
@@ -87,6 +90,7 @@ function makeTableTreeEntry({
     connectionId,
     database,
     schema,
+    materialized: objectType === "VIEW" && materialized ? true : undefined,
     isExpanded: false,
     children: [],
   };
@@ -244,7 +248,9 @@ export function mergeTableInfosIntoObjects(
     seen.add(key);
     merged.push({
       name,
-      object_type: objectType,
+      // Preserve the materialized-view distinction (normalized away in `objectType`/keys above)
+      // so the tree builders can flag the node and DROP/RENAME target it as MATERIALIZED VIEW.
+      object_type: objectType === "VIEW" && isMaterializedViewType(table.table_type) ? "MATERIALIZED VIEW" : objectType,
       schema: tableSchema,
       comment: table.comment,
       created_at: undefined,
@@ -345,6 +351,7 @@ function buildObjectTreeEntries({
         schema: childSchema,
         name,
         objectType,
+        materialized: isMaterializedViewType(obj.object_type),
         comment: obj.comment,
         parentSchema: obj.parent_schema,
         parentName: obj.parent_name,
@@ -412,6 +419,7 @@ export function buildSimpleObjectTreeNodes({
         connectionId,
         database,
         schema: childSchema,
+        materialized: objectType === "VIEW" && isMaterializedViewType(obj.object_type) ? true : undefined,
         isExpanded: false,
         children: undefined,
       });
@@ -436,6 +444,11 @@ function simpleObjectNodeType(objectType: DatabaseObjectTreeKind): TreeNodeType 
 
 function normalizeObjectType(type: string): DatabaseObjectTreeKind {
   return normalizeSidebarObjectKind(type);
+}
+
+/** Materialized views normalize to the VIEW kind but must be dropped/renamed as MATERIALIZED VIEW. */
+export function isMaterializedViewType(rawObjectType: string | null | undefined): boolean {
+  return !!rawObjectType && /materiali/i.test(rawObjectType);
 }
 
 const groupDefs: Array<{

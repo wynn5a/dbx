@@ -8,7 +8,7 @@ pub use crate::database_export::ExportStatus;
 use crate::database_export::{build_export_insert_statements, is_export_cancelled, BuildExportInsertStatementsOptions};
 use crate::transfer::{
     count_sql_with_where, execute_on_pool, execute_on_pool_with_max_rows, keyset_pagination_sql,
-    pagination_sql_with_filter_order,
+    pagination_sql_with_filter_order, PageSource,
 };
 use crate::xlsx_export::{build_xlsx_workbook, XlsxWorksheetData};
 
@@ -134,10 +134,12 @@ fn table_page_sql(
         )
     } else {
         pagination_sql_with_filter_order(
-            col_names,
-            &request.table_name,
-            request.schema.as_deref().unwrap_or(""),
-            db_type,
+            &PageSource {
+                columns: col_names,
+                table: &request.table_name,
+                schema: request.schema.as_deref().unwrap_or(""),
+                db_type,
+            },
             offset,
             batch_size,
             request.where_input.as_deref(),

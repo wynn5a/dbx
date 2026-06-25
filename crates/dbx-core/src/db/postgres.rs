@@ -1379,7 +1379,7 @@ fn list_objects_sql(include_timestamps: bool) -> &'static str {
         return "SELECT c.relname AS object_name, \
        CASE c.relkind \
          WHEN 'v' THEN 'VIEW' \
-         WHEN 'm' THEN 'VIEW' \
+         WHEN 'm' THEN 'MATERIALIZED VIEW' \
          WHEN 'S' THEN 'SEQUENCE' \
          ELSE 'TABLE' \
        END AS object_type, \
@@ -1421,7 +1421,7 @@ fn list_objects_sql(include_timestamps: bool) -> &'static str {
     "SELECT c.relname AS object_name, \
        CASE c.relkind \
          WHEN 'v' THEN 'VIEW' \
-         WHEN 'm' THEN 'VIEW' \
+         WHEN 'm' THEN 'MATERIALIZED VIEW' \
          WHEN 'S' THEN 'SEQUENCE' \
          ELSE 'TABLE' \
        END AS object_type, \
@@ -2467,6 +2467,9 @@ mod tests {
         assert!(sql.contains("'FUNCTION'"));
         assert!(sql.contains("'SEQUENCE'"));
         assert!(sql.contains("'S'"));
+        // Materialized views (relkind 'm') are surfaced distinctly so DROP/RENAME can target them correctly.
+        assert!(sql.contains("'MATERIALIZED VIEW'"));
+        assert!(list_objects_sql(false).contains("'MATERIALIZED VIEW'"));
     }
 
     #[test]

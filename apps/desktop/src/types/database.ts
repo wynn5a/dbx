@@ -179,7 +179,15 @@ export interface TableInfo {
   parent_name?: string | null;
 }
 
-export type DatabaseObjectType = "TABLE" | "VIEW" | "PROCEDURE" | "FUNCTION" | "SEQUENCE" | "PACKAGE" | "PACKAGE_BODY";
+export type DatabaseObjectType =
+  | "TABLE"
+  | "VIEW"
+  | "MATERIALIZED_VIEW"
+  | "PROCEDURE"
+  | "FUNCTION"
+  | "SEQUENCE"
+  | "PACKAGE"
+  | "PACKAGE_BODY";
 
 export interface ObjectInfo {
   name: string;
@@ -356,6 +364,8 @@ export interface TreeNode {
   schema?: string;
   tableName?: string;
   comment?: string | null;
+  /** Set on `view` nodes that are actually materialized views, so DROP/RENAME emit `MATERIALIZED VIEW`. */
+  materialized?: boolean;
   objectCount?: number;
   loadedKeyCount?: number;
   totalKeyCount?: number;

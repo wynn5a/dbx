@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useConnectionStore } from "@/stores/connectionStore";
 import DatabaseIcon from "@/components/icons/DatabaseIcon.vue";
 import * as api from "@/lib/api";
@@ -749,28 +750,18 @@ onUnmounted(stopDrag);
           <Input v-model="tableSearch" class="h-8 pl-7 text-xs" :placeholder="t('diagram.searchTables')" />
         </div>
 
-        <div class="flex h-8 shrink-0 items-center overflow-hidden rounded-md border bg-background">
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-8 rounded-none px-2 text-xs"
-            :class="diagramMode === 'table' ? 'bg-accent' : ''"
-            @click="diagramMode = 'table'"
-          >
-            <Table2 class="mr-1 h-3.5 w-3.5" />
-            {{ t("diagram.tableMode") }}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-8 rounded-none border-l px-2 text-xs"
-            :class="diagramMode === 'engineering' ? 'bg-accent' : ''"
-            @click="diagramMode = 'engineering'"
-          >
-            <Network class="mr-1 h-3.5 w-3.5" />
-            {{ t("diagram.engineeringMode") }}
-          </Button>
-        </div>
+        <Tabs v-model="diagramMode" class="shrink-0">
+          <TabsList class="h-8">
+            <TabsTrigger value="table" class="px-2.5 text-xs">
+              <Table2 class="h-3.5 w-3.5" />
+              {{ t("diagram.tableMode") }}
+            </TabsTrigger>
+            <TabsTrigger value="engineering" class="px-2.5 text-xs">
+              <Network class="h-3.5 w-3.5" />
+              {{ t("diagram.engineeringMode") }}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         <Button
           v-if="focusTableName && tables.length > 0"
@@ -874,14 +865,14 @@ onUnmounted(stopDrag);
                       orient="auto"
                       markerUnits="strokeWidth"
                     >
-                      <path d="M 0 0 L 8 4 L 0 8 z" class="fill-primary/70" />
+                      <path d="M 0 0 L 8 4 L 0 8 z" class="fill-[var(--ds-accent)]" />
                     </marker>
                   </defs>
                   <path
                     v-for="relationship in visibleRelationships"
                     :key="relationship.id"
                     :d="relationshipPath(relationship)"
-                    class="fill-none stroke-primary/55"
+                    class="fill-none stroke-[var(--ds-accent-line)]"
                     stroke-width="1.6"
                     marker-end="url(#diagram-arrow)"
                   >
@@ -892,10 +883,10 @@ onUnmounted(stopDrag);
                 <div
                   v-for="table in visibleTables"
                   :key="table.name"
-                  class="absolute overflow-hidden rounded-md border bg-background shadow-sm"
+                  class="absolute overflow-hidden rounded-md border bg-[var(--ds-bg-panel)] shadow-[var(--ds-shadow-card)]"
                   :class="
                     table.name === focusTableName
-                      ? 'border-primary ring-1 ring-primary/30'
+                      ? 'border-[var(--ds-accent)] ring-1 ring-[var(--ds-accent-line)]'
                       : 'border-[var(--ds-border)]'
                   "
                   :style="{
@@ -904,11 +895,13 @@ onUnmounted(stopDrag);
                   }"
                 >
                   <div
-                    class="flex h-11 cursor-grab items-center gap-2 border-b border-[var(--ds-border)] bg-[var(--ds-bg-canvas)]/40 px-3 active:cursor-grabbing"
+                    class="flex h-11 cursor-grab items-center gap-2 border-b border-[var(--ds-border)] bg-[var(--ds-bg-elevated)] px-3 active:cursor-grabbing"
                     @mousedown="startDrag(table.name, $event)"
                   >
                     <Table2 class="h-4 w-4 shrink-0 text-[var(--ds-text-3)]" />
-                    <span class="min-w-0 flex-1 truncate text-sm font-medium">{{ table.name }}</span>
+                    <span class="min-w-0 flex-1 truncate text-sm font-medium text-[var(--ds-text-1)]">{{
+                      table.name
+                    }}</span>
                     <Badge variant="outline" class="h-5 px-1.5 text-[10px]">{{ table.columns.length }}</Badge>
                   </div>
                   <div>
@@ -917,10 +910,15 @@ onUnmounted(stopDrag);
                       :key="column.name"
                       class="flex h-6 items-center gap-1.5 border-b border-[var(--ds-border-soft)] px-3 text-xs last:border-b-0"
                     >
-                      <KeyRound v-if="column.is_primary_key" class="h-3 w-3 shrink-0 text-amber-500" />
-                      <Link2 v-else-if="isForeignKeyColumn(table, column.name)" class="h-3 w-3 shrink-0 text-primary" />
+                      <KeyRound v-if="column.is_primary_key" class="h-3 w-3 shrink-0 text-[var(--ds-amber)]" />
+                      <Link2
+                        v-else-if="isForeignKeyColumn(table, column.name)"
+                        class="h-3 w-3 shrink-0 text-[var(--ds-accent)]"
+                      />
                       <span v-else class="h-3 w-3 shrink-0" />
-                      <span class="min-w-0 flex-1 truncate font-mono">{{ column.name }}</span>
+                      <span class="min-w-0 flex-1 truncate font-[family-name:var(--ds-mono)] text-[var(--ds-text-2)]">{{
+                        column.name
+                      }}</span>
                       <span class="max-w-24 truncate text-[10px] text-[var(--ds-text-3)]">{{ column.data_type }}</span>
                     </div>
                     <div v-if="hiddenColumnCount(table) > 0" class="h-6 px-3 text-xs leading-6 text-[var(--ds-text-3)]">
@@ -932,7 +930,7 @@ onUnmounted(stopDrag);
 
               <template v-else>
                 <svg class="absolute inset-0 h-full w-full overflow-visible pointer-events-none">
-                  <g class="stroke-foreground/70">
+                  <g class="stroke-[var(--ds-border-strong)]">
                     <line
                       v-for="attribute in engineeringDiagram.attributes"
                       :key="attribute.id"
@@ -958,7 +956,7 @@ onUnmounted(stopDrag);
                         stroke-width="1.4"
                       />
                       <text
-                        class="fill-foreground text-[13px] font-semibold"
+                        class="fill-[var(--ds-text-2)] text-[13px] font-semibold"
                         :x="
                           engineeringCardinalityPoint(
                             engineeringRelationshipCenter(relationship),
@@ -975,7 +973,7 @@ onUnmounted(stopDrag);
                         {{ relationship.sourceCardinality }}
                       </text>
                       <text
-                        class="fill-foreground text-[13px] font-semibold"
+                        class="fill-[var(--ds-text-2)] text-[13px] font-semibold"
                         :x="
                           engineeringCardinalityPoint(
                             engineeringRelationshipCenter(relationship),
@@ -998,7 +996,7 @@ onUnmounted(stopDrag);
                 <div
                   v-for="attribute in engineeringDiagram.attributes"
                   :key="attribute.id"
-                  class="absolute flex items-center justify-center rounded-full border border-green-600/55 bg-green-100/80 px-3 text-center text-xs text-green-950 shadow-sm dark:bg-green-950/35 dark:text-green-100"
+                  class="absolute flex items-center justify-center rounded-full border border-[color-mix(in_srgb,var(--ds-green)_55%,transparent)] bg-[color-mix(in_srgb,var(--ds-green)_16%,transparent)] px-3 text-center text-xs text-[var(--ds-green)] shadow-[var(--ds-shadow-card)]"
                   :class="attribute.primaryKey ? 'font-semibold underline underline-offset-2' : ''"
                   :title="`${attribute.tableName}.${attribute.columnName}: ${attribute.dataType}`"
                   :style="{
@@ -1013,7 +1011,7 @@ onUnmounted(stopDrag);
                 <div
                   v-for="relationship in engineeringDiagram.relationships"
                   :key="relationship.id"
-                  class="absolute flex items-center justify-center text-center text-xs font-medium text-red-950 dark:text-red-100"
+                  class="absolute flex items-center justify-center text-center text-xs font-medium text-[var(--ds-red)]"
                   :style="{
                     width: `${relationship.width}px`,
                     height: `${relationship.height}px`,
@@ -1022,7 +1020,7 @@ onUnmounted(stopDrag);
                   :title="`${relationship.sourceTable} -> ${relationship.targetTable}`"
                 >
                   <div
-                    class="absolute inset-0 border border-red-500/70 bg-red-100/80 dark:bg-red-950/35"
+                    class="absolute inset-0 border border-[color-mix(in_srgb,var(--ds-red)_60%,transparent)] bg-[color-mix(in_srgb,var(--ds-red)_16%,transparent)]"
                     style="clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%)"
                   />
                   <span class="relative max-w-[70px] truncate">{{ relationship.label }}</span>
@@ -1031,8 +1029,8 @@ onUnmounted(stopDrag);
                 <div
                   v-for="entity in engineeringDiagram.entities"
                   :key="entity.id"
-                  class="absolute flex items-center justify-center border border-blue-500/70 bg-blue-100/80 px-3 text-center text-sm font-semibold text-blue-950 shadow-sm dark:bg-blue-950/35 dark:text-blue-100"
-                  :class="entity.name === focusTableName ? 'ring-2 ring-primary/40' : ''"
+                  class="absolute flex items-center justify-center border border-[color-mix(in_srgb,var(--ds-blue)_60%,transparent)] bg-[color-mix(in_srgb,var(--ds-blue)_16%,transparent)] px-3 text-center text-sm font-semibold text-[var(--ds-blue)] shadow-[var(--ds-shadow-card)]"
+                  :class="entity.name === focusTableName ? 'ring-2 ring-[var(--ds-accent-line)]' : ''"
                   :style="{
                     width: `${entity.width}px`,
                     height: `${entity.height}px`,

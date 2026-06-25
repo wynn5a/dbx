@@ -1223,66 +1223,59 @@ fn max_transfer_write_rows(db_type: &DatabaseType, mode: &TransferMode) -> usize
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn generate_transfer_write_sql(
-    mode: &TransferMode,
-    columns: &[String],
-    column_types: &[Option<String>],
-    rows: &[Vec<serde_json::Value>],
-    table: &str,
-    schema: &str,
-    db_type: &DatabaseType,
-    pk_columns: &[String],
-) -> String {
-    match mode {
-        TransferMode::Upsert => generate_upsert_typed(columns, column_types, rows, table, schema, db_type, pk_columns),
-        _ => generate_insert_typed(columns, column_types, rows, table, schema, db_type),
+/// The fixed destination and shape for a transfer write: which table/columns to
+/// write, in which dialect, and how (insert vs upsert). The row payload is
+/// passed separately to the generators since it varies per batch.
+struct TransferWriteTarget<'a> {
+    mode: &'a TransferMode,
+    columns: &'a [String],
+    column_types: &'a [Option<String>],
+    table: &'a str,
+    schema: &'a str,
+    db_type: &'a DatabaseType,
+    pk_columns: &'a [String],
+}
+
+fn generate_transfer_write_sql(target: &TransferWriteTarget<'_>, rows: &[Vec<serde_json::Value>]) -> String {
+    match target.mode {
+        TransferMode::Upsert => generate_upsert_typed(
+            target.columns,
+            target.column_types,
+            rows,
+            target.table,
+            target.schema,
+            target.db_type,
+            target.pk_columns,
+        ),
+        _ => generate_insert_typed(
+            target.columns,
+            target.column_types,
+            rows,
+            target.table,
+            target.schema,
+            target.db_type,
+        ),
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn generate_transfer_write_sql_batches(
-    mode: &TransferMode,
-    columns: &[String],
-    column_types: &[Option<String>],
+    target: &TransferWriteTarget<'_>,
     rows: &[Vec<serde_json::Value>],
-    table: &str,
-    schema: &str,
-    db_type: &DatabaseType,
-    pk_columns: &[String],
 ) -> Vec<String> {
     if rows.is_empty() {
         return Vec::new();
     }
 
-    let max_rows = max_transfer_write_rows(db_type, mode);
+    let max_rows = max_transfer_write_rows(target.db_type, target.mode);
     let mut statements = Vec::new();
     let mut start = 0;
 
     while start < rows.len() {
         let mut end = start + 1;
-        let mut accepted = generate_transfer_write_sql(
-            mode,
-            columns,
-            column_types,
-            &rows[start..end],
-            table,
-            schema,
-            db_type,
-            pk_columns,
-        );
+        let mut accepted = generate_transfer_write_sql(target, &rows[start..end]);
 
         while end < rows.len() && end - start < max_rows {
-            let candidate = generate_transfer_write_sql(
-                mode,
-                columns,
-                column_types,
-                &rows[start..=end],
-                table,
-                schema,
-                db_type,
-                pk_columns,
-            );
+            let candidate = generate_transfer_write_sql(target, &rows[start..=end]);
             if candidate.len() > MAX_TRANSFER_WRITE_SQL_BYTES && !accepted.is_empty() {
                 break;
             }
@@ -1299,18 +1292,28 @@ fn generate_transfer_write_sql_batches(
     statements
 }
 
-pub fn pagination_sql(
-    columns: &[String],
-    table: &str,
-    schema: &str,
-    db_type: &DatabaseType,
-    offset: u64,
-    limit: usize,
-) -> String {
-    let full_table = qualified_table(table, schema, db_type);
-    let col_list = columns.iter().map(|c| quote_identifier(c, db_type)).collect::<Vec<_>>().join(", ");
+/// A column projection over a qualified table in a specific SQL dialect — the
+/// shared "what to page over" inputs of the pagination query builders below.
+pub struct PageSource<'a> {
+    pub columns: &'a [String],
+    pub table: &'a str,
+    pub schema: &'a str,
+    pub db_type: &'a DatabaseType,
+}
 
-    match db_type {
+impl PageSource<'_> {
+    /// `(col_list, qualified_table)` for the shared `SELECT {col_list} FROM {table}` head.
+    fn select_head(&self) -> (String, String) {
+        let full_table = qualified_table(self.table, self.schema, self.db_type);
+        let col_list = self.columns.iter().map(|c| quote_identifier(c, self.db_type)).collect::<Vec<_>>().join(", ");
+        (col_list, full_table)
+    }
+}
+
+pub fn pagination_sql(source: &PageSource<'_>, offset: u64, limit: usize) -> String {
+    let (col_list, full_table) = source.select_head();
+
+    match source.db_type {
         DatabaseType::SqlServer | DatabaseType::Oracle => {
             format!(
                 "SELECT {col_list} FROM {full_table} ORDER BY (SELECT NULL) OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY"
@@ -1323,19 +1326,15 @@ pub fn pagination_sql(
 }
 
 pub fn pagination_sql_with_order(
-    columns: &[String],
-    table: &str,
-    schema: &str,
-    db_type: &DatabaseType,
+    source: &PageSource<'_>,
     offset: u64,
     limit: usize,
     order_by_columns: &[String],
 ) -> String {
-    let full_table = qualified_table(table, schema, db_type);
-    let col_list = columns.iter().map(|c| quote_identifier(c, db_type)).collect::<Vec<_>>().join(", ");
-    let order_expression = postgres_order_by_expression(order_by_columns, db_type);
+    let (col_list, full_table) = source.select_head();
+    let order_expression = postgres_order_by_expression(order_by_columns, source.db_type);
 
-    match db_type {
+    match source.db_type {
         DatabaseType::SqlServer | DatabaseType::Oracle => {
             let order_by = order_expression.unwrap_or_else(|| "(SELECT NULL)".to_string());
             format!(
@@ -1349,29 +1348,24 @@ pub fn pagination_sql_with_order(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn pagination_sql_with_filter_order(
-    columns: &[String],
-    table: &str,
-    schema: &str,
-    db_type: &DatabaseType,
+    source: &PageSource<'_>,
     offset: u64,
     limit: usize,
     where_input: Option<&str>,
     order_by: Option<&str>,
     default_order_columns: &[String],
 ) -> String {
-    let full_table = qualified_table(table, schema, db_type);
-    let col_list = columns.iter().map(|c| quote_identifier(c, db_type)).collect::<Vec<_>>().join(", ");
+    let (col_list, full_table) = source.select_head();
     let predicate = crate::sql_dialect::normalize_where_input(where_input);
     let where_clause = if predicate.is_empty() { String::new() } else { format!(" WHERE ({predicate})") };
     let order_expression = order_by
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .or_else(|| postgres_order_by_expression(default_order_columns, db_type));
+        .or_else(|| postgres_order_by_expression(default_order_columns, source.db_type));
 
-    match db_type {
+    match source.db_type {
         DatabaseType::SqlServer | DatabaseType::Oracle => {
             let order_by = order_expression.unwrap_or_else(|| "(SELECT NULL)".to_string());
             format!(
@@ -2269,21 +2263,36 @@ pub async fn clear_cancelled(transfer_id: &str) {
     CANCELLED.write().await.remove(transfer_id);
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn transfer_mongodb_table<F>(
-    state: &AppState,
-    request: &TransferRequest,
-    table: &str,
-    table_index: usize,
-    source_db_type: &DatabaseType,
-    target_db_type: &DatabaseType,
-    source_pool_key: &str,
-    target_pool_key: &str,
-    mut progress_callback: F,
-) -> Result<u64, String>
+/// Inputs identifying one table to move from a source pool to a target pool.
+/// Shared by [`transfer_table`] and the [`transfer_mongodb_table`] path it
+/// delegates to, so the eight values travel together instead of being duplicated
+/// as positional arguments across both signatures.
+#[derive(Clone, Copy)]
+pub struct TableTransferJob<'a> {
+    pub state: &'a AppState,
+    pub request: &'a TransferRequest,
+    pub table: &'a str,
+    pub table_index: usize,
+    pub source_db_type: &'a DatabaseType,
+    pub target_db_type: &'a DatabaseType,
+    pub source_pool_key: &'a str,
+    pub target_pool_key: &'a str,
+}
+
+async fn transfer_mongodb_table<F>(job: &TableTransferJob<'_>, mut progress_callback: F) -> Result<u64, String>
 where
     F: FnMut(TransferProgress),
 {
+    let &TableTransferJob {
+        state,
+        request,
+        table,
+        table_index,
+        source_db_type,
+        target_db_type,
+        source_pool_key,
+        target_pool_key,
+    } = job;
     let total_tables = request.tables.len();
     let batch_size = if request.batch_size == 0 { 1000 } else { request.batch_size };
     let mut offset: u64 = 0;
@@ -2338,10 +2347,7 @@ where
                 .map(|column| column.name.clone())
                 .collect::<Vec<_>>();
             let sql = pagination_sql_with_order(
-                &col_names,
-                table,
-                &request.source_schema,
-                source_db_type,
+                &PageSource { columns: &col_names, table, schema: &request.source_schema, db_type: source_db_type },
                 offset,
                 batch_size,
                 &primary_key_columns,
@@ -2446,14 +2452,16 @@ where
                 mongo_documents_to_rows(&documents, &sql_target_column_names)
             };
             let write_statements = generate_transfer_write_sql_batches(
-                &TransferMode::Append,
-                &sql_target_column_names,
-                &sql_target_column_types,
+                &TransferWriteTarget {
+                    mode: &TransferMode::Append,
+                    columns: &sql_target_column_names,
+                    column_types: &sql_target_column_types,
+                    table,
+                    schema: &request.target_schema,
+                    db_type: target_db_type,
+                    pk_columns: &[],
+                },
                 &rows,
-                table,
-                &request.target_schema,
-                target_db_type,
-                &[],
             );
             for (statement_index, batch_sql) in write_statements.iter().enumerate() {
                 execute_on_pool(state, target_pool_key, batch_sql).await.map_err(|e| {
@@ -2490,34 +2498,23 @@ where
 
 /// Transfer a single table. Returns rows transferred.
 /// `progress_callback` is invoked for progress updates.
-#[allow(clippy::too_many_arguments)]
-pub async fn transfer_table<F>(
-    state: &AppState,
-    request: &TransferRequest,
-    table: &str,
-    table_index: usize,
-    source_db_type: &DatabaseType,
-    target_db_type: &DatabaseType,
-    source_pool_key: &str,
-    target_pool_key: &str,
-    mut progress_callback: F,
-) -> Result<u64, String>
+pub async fn transfer_table<F>(job: &TableTransferJob<'_>, mut progress_callback: F) -> Result<u64, String>
 where
     F: FnMut(TransferProgress),
 {
+    let &TableTransferJob {
+        state,
+        request,
+        table,
+        table_index,
+        source_db_type,
+        target_db_type,
+        source_pool_key,
+        target_pool_key,
+    } = job;
+
     if is_mongodb_transfer_type(source_db_type) || is_mongodb_transfer_type(target_db_type) {
-        return transfer_mongodb_table(
-            state,
-            request,
-            table,
-            table_index,
-            source_db_type,
-            target_db_type,
-            source_pool_key,
-            target_pool_key,
-            progress_callback,
-        )
-        .await;
+        return transfer_mongodb_table(job, progress_callback).await;
     }
 
     let total_tables = request.tables.len();
@@ -2693,10 +2690,7 @@ where
         }
 
         let sql = pagination_sql_with_order(
-            &col_names,
-            table,
-            &request.source_schema,
-            source_db_type,
+            &PageSource { columns: &col_names, table, schema: &request.source_schema, db_type: source_db_type },
             offset,
             batch_size,
             &primary_key_columns,
@@ -2709,14 +2703,16 @@ where
         }
 
         let write_statements = generate_transfer_write_sql_batches(
-            &effective_mode,
-            &col_names,
-            &col_types,
+            &TransferWriteTarget {
+                mode: &effective_mode,
+                columns: &col_names,
+                column_types: &col_types,
+                table,
+                schema: &request.target_schema,
+                db_type: target_db_type,
+                pk_columns: &pk_columns,
+            },
             &result.rows,
-            table,
-            &request.target_schema,
-            target_db_type,
-            &pk_columns,
         );
         for (statement_index, batch_sql) in write_statements.iter().enumerate() {
             execute_on_pool(state, target_pool_key, batch_sql).await.map_err(|e| {
@@ -3408,10 +3404,12 @@ mod tests {
     #[test]
     fn postgres_pagination_uses_stable_primary_key_order() {
         let sql = pagination_sql_with_order(
-            &[String::from("id"), String::from("name")],
-            "users",
-            "public",
-            &DatabaseType::Postgres,
+            &PageSource {
+                columns: &[String::from("id"), String::from("name")],
+                table: "users",
+                schema: "public",
+                db_type: &DatabaseType::Postgres,
+            },
             200,
             100,
             &[String::from("id")],
@@ -3423,10 +3421,12 @@ mod tests {
     #[test]
     fn filtered_pagination_preserves_where_and_order() {
         let sql = pagination_sql_with_filter_order(
-            &[String::from("id"), String::from("status")],
-            "users",
-            "public",
-            &DatabaseType::SapHana,
+            &PageSource {
+                columns: &[String::from("id"), String::from("status")],
+                table: "users",
+                schema: "public",
+                db_type: &DatabaseType::SapHana,
+            },
             10_000,
             2_000,
             Some("WHERE status = 'active'"),
@@ -3687,14 +3687,16 @@ mod tests {
     fn transfer_write_sql_batches_split_large_insert_statements() {
         let rows = (0..4).map(|index| vec![json!(index), json!("x".repeat(180 * 1024))]).collect::<Vec<_>>();
         let statements = generate_transfer_write_sql_batches(
-            &TransferMode::Append,
-            &[String::from("id"), String::from("payload")],
-            &[Some(String::from("int")), Some(String::from("text"))],
+            &TransferWriteTarget {
+                mode: &TransferMode::Append,
+                columns: &[String::from("id"), String::from("payload")],
+                column_types: &[Some(String::from("int")), Some(String::from("text"))],
+                table: "events",
+                schema: "",
+                db_type: &DatabaseType::Mysql,
+                pk_columns: &[],
+            },
             &rows,
-            "events",
-            "",
-            &DatabaseType::Mysql,
-            &[],
         );
 
         assert!(statements.len() > 1);
@@ -3704,14 +3706,16 @@ mod tests {
     #[test]
     fn transfer_write_sql_batches_keep_existing_upsert_sql_shape() {
         let statements = generate_transfer_write_sql_batches(
-            &TransferMode::Upsert,
-            &[String::from("id"), String::from("name")],
-            &[Some(String::from("int")), Some(String::from("varchar(64)"))],
+            &TransferWriteTarget {
+                mode: &TransferMode::Upsert,
+                columns: &[String::from("id"), String::from("name")],
+                column_types: &[Some(String::from("int")), Some(String::from("varchar(64)"))],
+                table: "users",
+                schema: "",
+                db_type: &DatabaseType::Mysql,
+                pk_columns: &[String::from("id")],
+            },
             &[vec![json!(1), json!("Ada")]],
-            "users",
-            "",
-            &DatabaseType::Mysql,
-            &[String::from("id")],
         );
 
         assert_eq!(statements.len(), 1);

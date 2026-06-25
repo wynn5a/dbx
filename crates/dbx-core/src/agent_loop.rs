@@ -123,25 +123,25 @@ pub async fn run_agent_loop(
         let text_acc = Arc::new(Mutex::new(String::new()));
         let chunk_event = on_event.clone();
         let chunk_text = Arc::clone(&text_acc);
-        let stream_result = ai::stream_with_tools(
+        let stream_request = ai::ToolStreamRequest {
             config,
             system_prompt,
-            &convo,
+            messages: &convo,
             session_id,
-            &tools,
+            tools: &tools,
             max_tokens,
             temperature,
             cancelled,
-            move |chunk: AiStreamChunk| {
-                if let Some(reasoning) = chunk.reasoning_delta.as_ref().filter(|r| !r.is_empty()) {
-                    chunk_event(AgentEvent::ReasoningDelta { delta: reasoning.clone() });
-                }
-                if !chunk.delta.is_empty() {
-                    chunk_text.lock().expect("text accumulator poisoned").push_str(&chunk.delta);
-                    chunk_event(AgentEvent::TextDelta { delta: chunk.delta });
-                }
-            },
-        )
+        };
+        let stream_result = ai::stream_with_tools(&stream_request, move |chunk: AiStreamChunk| {
+            if let Some(reasoning) = chunk.reasoning_delta.as_ref().filter(|r| !r.is_empty()) {
+                chunk_event(AgentEvent::ReasoningDelta { delta: reasoning.clone() });
+            }
+            if !chunk.delta.is_empty() {
+                chunk_text.lock().expect("text accumulator poisoned").push_str(&chunk.delta);
+                chunk_event(AgentEvent::TextDelta { delta: chunk.delta });
+            }
+        })
         .await;
 
         let (tool_calls, usage) = match stream_result {

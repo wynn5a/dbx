@@ -713,16 +713,16 @@ export const useConnectionStore = defineStore("connection", () => {
     for (const key of Object.keys(elasticsearchCompletionIndicesCache.value)) {
       if (key === exactCacheKey || key.startsWith(cachePrefix)) delete elasticsearchCompletionIndicesCache.value[key];
     }
-    for (const key of [...completionTableIndex.keys()]) {
+    for (const key of completionTableIndex.keys()) {
       if (key.startsWith(cachePrefix)) completionTableIndex.delete(key);
     }
-    for (const key of [...completionObjectIndex.keys()]) {
+    for (const key of completionObjectIndex.keys()) {
       if (key.startsWith(cachePrefix)) completionObjectIndex.delete(key);
     }
-    for (const key of [...completionColumnIndex.keys()]) {
+    for (const key of completionColumnIndex.keys()) {
       if (key.startsWith(cachePrefix)) completionColumnIndex.delete(key);
     }
-    for (const key of [...completionInFlight.keys()]) {
+    for (const key of completionInFlight.keys()) {
       if (key.startsWith(cachePrefix)) completionInFlight.delete(key);
     }
   }
