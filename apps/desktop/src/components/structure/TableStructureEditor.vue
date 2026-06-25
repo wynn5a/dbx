@@ -106,6 +106,9 @@ const emit = defineEmits<{
 
 const activeTab = ref("columns");
 const loading = ref(false);
+// Indexes / foreign keys / triggers load after first paint; this gates actions and the SQL
+// preview so changes can't be applied (or previewed) against a half-loaded structure.
+const secondaryLoading = ref(false);
 const saving = ref(false);
 const sqlPreviewLoading = ref(false);
 const ddlContent = ref("");
@@ -472,6 +475,7 @@ async function refreshSqlPreview() {
 const canApply = computed(
   () =>
     !loading.value &&
+    !secondaryLoading.value &&
     !saving.value &&
     !sqlPreviewLoading.value &&
     pendingStatements.value.length > 0 &&
@@ -483,6 +487,7 @@ const canApply = computed(
 function resetState() {
   activeTab.value = "columns";
   loading.value = false;
+  secondaryLoading.value = false;
   saving.value = false;
   sqlPreviewLoading.value = false;
   errorMessage.value = "";
@@ -499,36 +504,59 @@ function resetState() {
   originalTableComment.value = "";
 }
 
+// Bumped on every (re)load so a stale in-flight secondary fetch can't clobber fresh state.
+let loadToken = 0;
+
 async function loadStructure(silent = false) {
   if (!props.connectionId || !props.database || !props.tableName) return;
+  const token = ++loadToken;
   if (!silent) loading.value = true;
+  // Hold the preview/actions until secondary metadata arrives, even before the first paint lands.
+  secondaryLoading.value = true;
   errorMessage.value = "";
   try {
     await store.ensureConnected(props.connectionId);
-    const nextColumns = await api.getColumns(props.connectionId, props.database, metadataSchema.value, props.tableName);
+    // First paint: only the lightweight pieces the editor needs immediately — columns and the
+    // table comment (via a dedicated endpoint, instead of pulling the whole table list).
+    const [nextColumns, comment] = await Promise.all([
+      api.getColumns(props.connectionId, props.database, metadataSchema.value, props.tableName),
+      api.getTableComment(props.connectionId, props.database, metadataSchema.value, props.tableName).catch(() => null),
+    ]);
+    if (token !== loadToken) return;
+    columns.value = createColumnDrafts(nextColumns, databaseType.value);
+    originalTableComment.value = comment || "";
+    tableComment.value = comment || "";
+  } catch (e: any) {
+    if (token !== loadToken) return;
+    errorMessage.value = e?.message || String(e);
+    secondaryLoading.value = false;
+    if (!silent) loading.value = false;
+    return;
+  }
+  if (!silent) loading.value = false;
+  // Indexes / foreign keys / triggers load in the background without blocking first paint.
+  void loadSecondaryMetadata(token);
+}
+
+async function loadSecondaryMetadata(token: number) {
+  // Reached only from loadStructure, which has already validated connection/database/table.
+  try {
     const [nextIndexes, nextForeignKeys, nextTriggers] = await Promise.all([
       api.listIndexes(props.connectionId, props.database, metadataSchema.value, props.tableName).catch(() => []),
       api.listForeignKeys(props.connectionId, props.database, metadataSchema.value, props.tableName).catch(() => []),
       api.listTriggers(props.connectionId, props.database, metadataSchema.value, props.tableName).catch(() => []),
     ]);
-    columns.value = createColumnDrafts(nextColumns, databaseType.value);
+    if (token !== loadToken) return;
     indexes.value = createIndexDrafts(nextIndexes);
     foreignKeys.value = nextForeignKeys;
     triggers.value = nextTriggers;
-    try {
-      const tables = await api.listTables(props.connectionId, props.database, metadataSchema.value);
-      const table = tables.find(
-        (t) => t.name.toLowerCase() === props.tableName!.toLowerCase() && t.table_type !== "VIEW",
-      );
-      originalTableComment.value = table?.comment || "";
-      tableComment.value = table?.comment || "";
-    } catch {
-      /* ignore — table comment is optional */
-    }
-  } catch (e: any) {
-    errorMessage.value = e?.message || String(e);
   } finally {
-    if (!silent) loading.value = false;
+    if (token === loadToken) {
+      secondaryLoading.value = false;
+      // The SQL preview was deferred while secondary metadata loaded; refresh once now that the
+      // full structure (including existing indexes) is known.
+      void refreshSqlPreview();
+    }
   }
 }
 
@@ -568,12 +596,21 @@ function canMoveColumn(index: number, direction: -1 | 1): boolean {
 
 const canShowColumnMoveControls = computed(() => isCreateMode.value || structureCapabilities.value.reorderColumn);
 
+// Guards against a re-entrant move (e.g. a doubled click event) mutating the array mid-splice.
+let columnMoveInProgress = false;
+
 function moveColumn(index: number, direction: -1 | 1) {
+  if (columnMoveInProgress) return;
   if (!canMoveColumn(index, direction)) return;
-  const targetIndex = index + direction;
-  const [column] = columns.value.splice(index, 1);
-  if (!column) return;
-  columns.value.splice(targetIndex, 0, column);
+  columnMoveInProgress = true;
+  try {
+    const targetIndex = index + direction;
+    const [column] = columns.value.splice(index, 1);
+    if (!column) return;
+    columns.value.splice(targetIndex, 0, column);
+  } finally {
+    columnMoveInProgress = false;
+  }
 }
 
 function toggleDropColumn(column: EditableStructureColumn) {
@@ -614,7 +651,8 @@ function canDropColumn(column: EditableStructureColumn): boolean {
 }
 
 function addIndex() {
-  if (!structureCapabilities.value.createIndex) return;
+  // Block while existing indexes are still loading — otherwise the diff would treat them as absent.
+  if (!structureCapabilities.value.createIndex || secondaryLoading.value) return;
   activeTab.value = "indexes";
   indexes.value.push({
     id: `new:${uuid()}`,
@@ -829,6 +867,9 @@ onBeforeUnmount(() => {
 watch(
   [isCreateMode, databaseType, () => props.schema, () => props.tableName, newTableName, tableComment, columns, indexes],
   () => {
+    // Defer preview recomputation while secondary metadata is still loading — it refreshes once
+    // on its own when the load completes, so first paint stays light.
+    if (secondaryLoading.value) return;
     void refreshSqlPreview();
   },
   { deep: true, immediate: true },
@@ -1027,7 +1068,7 @@ defineExpose({ applyChanges, canApply, saving, isCreateMode, newTableName });
               v-if="activeTab === 'indexes'"
               size="sm"
               :class="structureToolbarButtonClass"
-              :disabled="!structureCapabilities.createIndex"
+              :disabled="!structureCapabilities.createIndex || secondaryLoading"
               @click="addIndex"
             >
               <Plus :class="structureIconClass" />
@@ -1346,7 +1387,7 @@ defineExpose({ applyChanges, canApply, saving, isCreateMode, newTableName });
                         :disabled="!canMoveColumn(index, -1)"
                         :title="t('structureEditor.moveColumnUp')"
                         :aria-label="t('structureEditor.moveColumnUp')"
-                        @click="moveColumn(index, -1)"
+                        @click.stop.prevent="moveColumn(index, -1)"
                       >
                         <ChevronUp :class="structureIconClass" />
                       </Button>
@@ -1357,7 +1398,7 @@ defineExpose({ applyChanges, canApply, saving, isCreateMode, newTableName });
                         :disabled="!canMoveColumn(index, 1)"
                         :title="t('structureEditor.moveColumnDown')"
                         :aria-label="t('structureEditor.moveColumnDown')"
-                        @click="moveColumn(index, 1)"
+                        @click.stop.prevent="moveColumn(index, 1)"
                       >
                         <ChevronDown :class="structureIconClass" />
                       </Button>
@@ -1402,7 +1443,12 @@ defineExpose({ applyChanges, canApply, saving, isCreateMode, newTableName });
         </div>
 
         <div v-show="activeTab === 'indexes'" class="m-0 min-h-0 flex-1 overflow-auto p-0">
+          <div v-if="secondaryLoading" class="flex items-center justify-center gap-2 py-10 text-[var(--ds-text-3)]">
+            <Loader2 class="h-4 w-4 animate-spin" />
+            {{ t("common.loading") }}
+          </div>
           <table
+            v-else
             class="border-separate border-spacing-0 text-[length:var(--structure-font-size)] leading-[var(--structure-line-height)]"
             :style="{ minWidth: indexColWidths.reduce((a, w) => a + w, 0) + 'px' }"
           >
@@ -1607,8 +1653,12 @@ defineExpose({ applyChanges, canApply, saving, isCreateMode, newTableName });
         </div>
 
         <div v-show="activeTab === 'foreignKeys'" class="m-0 min-h-0 flex-1 overflow-auto p-[var(--structure-cell-px)]">
+          <div v-if="secondaryLoading" class="flex items-center justify-center gap-2 py-10 text-[var(--ds-text-3)]">
+            <Loader2 class="h-4 w-4 animate-spin" />
+            {{ t("common.loading") }}
+          </div>
           <div
-            v-if="foreignKeys.length === 0"
+            v-else-if="foreignKeys.length === 0"
             class="flex h-full flex-col items-center justify-center gap-2 py-10 text-center"
           >
             <Link2 class="h-7 w-7 text-[var(--ds-text-4)]" />
@@ -1631,8 +1681,12 @@ defineExpose({ applyChanges, canApply, saving, isCreateMode, newTableName });
         </div>
 
         <div v-show="activeTab === 'triggers'" class="m-0 min-h-0 flex-1 overflow-auto p-[var(--structure-cell-px)]">
+          <div v-if="secondaryLoading" class="flex items-center justify-center gap-2 py-10 text-[var(--ds-text-3)]">
+            <Loader2 class="h-4 w-4 animate-spin" />
+            {{ t("common.loading") }}
+          </div>
           <div
-            v-if="triggers.length === 0"
+            v-else-if="triggers.length === 0"
             class="flex h-full flex-col items-center justify-center gap-2 py-10 text-center"
           >
             <Zap class="h-7 w-7 text-[var(--ds-text-4)]" />

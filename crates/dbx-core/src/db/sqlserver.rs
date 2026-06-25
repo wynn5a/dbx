@@ -687,6 +687,28 @@ pub async fn list_tables(
         .collect())
 }
 
+/// Reads a single table's `MS_Description` extended property, avoiding a full table-list scan
+/// when the caller only needs the comment. Returns `None` when there is no description.
+pub async fn get_table_comment(
+    client: &mut SqlServerClient,
+    schema: &str,
+    table: &str,
+) -> Result<Option<String>, String> {
+    let schema_escaped = schema.replace('\'', "''");
+    let table_escaped = table.replace('\'', "''");
+    let sql = format!(
+        "SELECT ep.value AS TABLE_COMMENT \
+         FROM sys.objects o \
+         JOIN sys.schemas s ON s.schema_id = o.schema_id \
+         OUTER APPLY (SELECT CAST(ep.value AS NVARCHAR(MAX)) AS value FROM sys.extended_properties ep WHERE ep.major_id = o.object_id AND ep.minor_id = 0 AND ep.name = N'MS_Description') ep \
+         WHERE s.name = '{schema_escaped}' AND o.name = '{table_escaped}' \
+           AND o.type IN ('U','V') AND o.is_ms_shipped = 0"
+    );
+    let stream = client.query(&*sql, &[]).await.map_err(|e| e.to_string())?;
+    let rows = stream.into_first_result().await.map_err(|e| e.to_string())?;
+    Ok(rows.first().and_then(|row| row.get::<&str, _>(0)).filter(|s: &&str| !s.is_empty()).map(|s: &str| s.to_string()))
+}
+
 fn escape_like_literal(value: &str) -> String {
     value.replace('\\', "\\\\").replace('\'', "''").replace('%', "\\%").replace('_', "\\_").replace('[', "\\[")
 }

@@ -484,6 +484,15 @@ export async function getTableDdl(
   return get(`/api/schema/ddl?${qs({ connection_id: connectionId, database, schema, table })}`);
 }
 
+export async function getTableComment(
+  connectionId: string,
+  database: string,
+  schema: string,
+  table: string,
+): Promise<string | null> {
+  return get(`/api/schema/table-comment?${qs({ connection_id: connectionId, database, schema, table })}`);
+}
+
 export async function prepareSchemaDiff(options: SchemaDiffPreparationOptions): Promise<SchemaDiffPreparation> {
   return post("/api/schema-diff/prepare", options);
 }

@@ -912,6 +912,15 @@ export async function getTableDdl(
   return invoke("get_table_ddl", { connectionId, database, schema, table });
 }
 
+export async function getTableComment(
+  connectionId: string,
+  database: string,
+  schema: string,
+  table: string,
+): Promise<string | null> {
+  return invoke("get_table_comment", { connectionId, database, schema, table });
+}
+
 export async function prepareSchemaDiff(options: SchemaDiffPreparationOptions): Promise<SchemaDiffPreparation> {
   return invoke("prepare_schema_diff", { options });
 }

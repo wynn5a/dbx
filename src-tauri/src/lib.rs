@@ -415,6 +415,7 @@ pub fn run() {
             commands::schema::list_foreign_keys,
             commands::schema::list_triggers,
             commands::schema::get_table_ddl,
+            commands::schema::get_table_comment,
             commands::schema_diff::prepare_schema_diff,
             commands::schema_diff::generate_schema_sync_sql,
             commands::schema_cache::save_schema_cache,

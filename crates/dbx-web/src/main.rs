@@ -141,6 +141,7 @@ async fn main() {
         .route("/schema/foreign-keys", get(routes::schema::list_foreign_keys))
         .route("/schema/triggers", get(routes::schema::list_triggers))
         .route("/schema/ddl", get(routes::schema::get_ddl))
+        .route("/schema/table-comment", get(routes::schema::get_table_comment))
         .route("/schema-diff/prepare", post(routes::schema_diff::prepare_schema_diff))
         .route("/schema-diff/generate-sync-sql", post(routes::schema_diff::generate_schema_sync_sql))
         .route(

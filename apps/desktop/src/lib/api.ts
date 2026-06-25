@@ -105,6 +105,7 @@ export const listIndexes = forward("listIndexes");
 export const listForeignKeys = forward("listForeignKeys");
 export const listTriggers = forward("listTriggers");
 export const getTableDdl = forward("getTableDdl");
+export const getTableComment = forward("getTableComment");
 export const prepareSchemaDiff = forward("prepareSchemaDiff");
 export const generateSchemaSyncSql = forward("generateSchemaSyncSql");
 

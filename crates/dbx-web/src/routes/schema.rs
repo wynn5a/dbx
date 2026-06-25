@@ -163,3 +163,16 @@ pub async fn get_ddl(
         .map_err(AppError)?;
     Ok(Json(result))
 }
+
+pub async fn get_table_comment(
+    State(state): State<Arc<WebState>>,
+    Query(q): Query<SchemaQuery>,
+) -> Result<Json<Option<String>>, AppError> {
+    let database = q.database.as_deref().unwrap_or("");
+    let schema = q.schema.as_deref().unwrap_or("");
+    let table = q.table.as_deref().unwrap_or("");
+    let result = dbx_core::schema::get_table_comment_core(&state.app, &q.connection_id, database, schema, table)
+        .await
+        .map_err(AppError)?;
+    Ok(Json(result))
+}

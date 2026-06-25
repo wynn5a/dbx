@@ -120,3 +120,14 @@ pub async fn get_table_ddl(
 ) -> Result<String, String> {
     dbx_core::schema::get_table_ddl_core(&state, &connection_id, &database, &schema, &table).await
 }
+
+#[tauri::command]
+pub async fn get_table_comment(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    database: String,
+    schema: String,
+    table: String,
+) -> Result<Option<String>, String> {
+    dbx_core::schema::get_table_comment_core(&state, &connection_id, &database, &schema, &table).await
+}

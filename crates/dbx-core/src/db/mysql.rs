@@ -973,6 +973,27 @@ pub async fn list_tables(pool: &MySqlPool, database: &str) -> Result<Vec<TableIn
     Ok(tables)
 }
 
+/// Reads a single table's comment straight from `information_schema.TABLES`, avoiding a
+/// full table-list scan when the caller only needs the comment (e.g. the structure editor's
+/// first paint). Returns `None` when the table has no comment or the lookup fails.
+pub async fn get_table_comment(pool: &MySqlPool, database: &str, table: &str) -> Result<Option<String>, String> {
+    let sql = format!(
+        "SELECT TABLE_COMMENT FROM information_schema.TABLES WHERE TABLE_SCHEMA = {} AND TABLE_NAME = {} AND TABLE_TYPE <> 'VIEW' LIMIT 1",
+        quote_value(database),
+        quote_value(table),
+    );
+    let mut conn = pool.get_conn().await.map_err(|e| e.to_string())?;
+    let result = match conn.query_iter(&sql).await {
+        Ok(result) => result,
+        Err(err) => {
+            log::debug!("get_table_comment information_schema query failed for `{database}`.`{table}`: {err}");
+            return Ok(None);
+        }
+    };
+    let rows: Vec<mysql_async::Row> = result.collect_and_drop().await.map_err(|e| e.to_string())?;
+    Ok(rows.first().and_then(|row| get_opt_str(row, "TABLE_COMMENT")).filter(|s| !s.is_empty()))
+}
+
 #[derive(Clone, Debug, Default)]
 struct TableStatusMeta {
     comment: Option<String>,

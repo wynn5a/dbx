@@ -535,6 +535,65 @@ async fn list_tables_once(
     }
 }
 
+pub async fn get_table_comment_core(
+    state: &AppState,
+    connection_id: &str,
+    database: &str,
+    schema: &str,
+    table: &str,
+) -> Result<Option<String>, String> {
+    retry_metadata_connection(state, connection_id, Some(database), || {
+        get_table_comment_once(state, connection_id, database, schema, table)
+    })
+    .await
+}
+
+async fn get_table_comment_once(
+    state: &AppState,
+    connection_id: &str,
+    database: &str,
+    schema: &str,
+    table: &str,
+) -> Result<Option<String>, String> {
+    let pool_key = state.get_or_create_pool(connection_id, Some(database)).await?;
+    let db_config = connection_config(state, connection_id).await;
+
+    // Fast paths: read a single table's comment directly instead of scanning the whole table
+    // list. Only native engines whose list_tables already surfaces comments are special-cased;
+    // everything else uses the generic fallback below.
+    {
+        let connections = state.connections.read().await;
+        if let Some(PoolKind::Mysql(p, _)) = connections.get(&pool_key) {
+            if !db_config.as_ref().is_some_and(is_doris_family_config) {
+                let p = p.clone();
+                drop(connections);
+                return db::mysql::get_table_comment(&p, database, table).await;
+            }
+        } else if let Some(PoolKind::Postgres(p)) = connections.get(&pool_key) {
+            let p = p.clone();
+            drop(connections);
+            return db::postgres::get_table_comment(&p, schema, table).await;
+        } else if let Some(PoolKind::Sqlite(_)) = connections.get(&pool_key) {
+            // SQLite has no table-comment concept; skip the lookup entirely.
+            return Ok(None);
+        }
+        if let Some(client) = extract_pool!(&connections, &pool_key, SqlServer) {
+            drop(connections);
+            let mut client = client.lock().await;
+            return db::sqlserver::get_table_comment(&mut client, schema, table).await;
+        }
+    }
+
+    // Generic fallback: narrow the table list to the requested name and pull its comment.
+    let tables = list_tables_core(state, connection_id, database, schema, Some(table), Some(256)).await?;
+    let comment = tables
+        .into_iter()
+        .find(|t| t.name.eq_ignore_ascii_case(table) && t.table_type != "VIEW")
+        .and_then(|t| t.comment)
+        .filter(|c| !c.is_empty());
+    Ok(comment)
+}
+
 fn collection_names_to_tables(names: Vec<String>, table_type: &str) -> Vec<db::TableInfo> {
     names
         .into_iter()

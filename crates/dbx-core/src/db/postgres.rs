@@ -1357,6 +1357,20 @@ pub async fn list_tables(pool: &Pool, schema: &str) -> Result<Vec<TableInfo>, St
         .collect())
 }
 
+/// Reads a single relation's comment via `obj_description`, avoiding a full table-list scan when
+/// the caller only needs the comment. Covers the whole PostgreSQL family (gaussdb, opengauss, …)
+/// since they share this driver. Returns `None` when there is no comment.
+pub async fn get_table_comment(pool: &Pool, schema: &str, table: &str) -> Result<Option<String>, String> {
+    let client = pool.get().await.map_err(|e| e.to_string())?;
+    let sql = "SELECT obj_description(c.oid) AS table_comment \
+         FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('r','p','f','m') \
+         LIMIT 1";
+    let rows = client.query(sql, &[&schema, &table]).await.map_err(|e| e.to_string())?;
+    Ok(rows.first().and_then(|row| row.try_get::<_, Option<String>>(0).ok().flatten()).filter(|s| !s.is_empty()))
+}
+
 fn postgres_tables_sql() -> &'static str {
     "SELECT c.relname AS table_name, \
          CASE c.relkind WHEN 'r' THEN 'BASE TABLE' WHEN 'v' THEN 'VIEW' \
