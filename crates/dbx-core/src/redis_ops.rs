@@ -28,6 +28,7 @@ pub async fn redis_scan_keys_core(
     cursor: u64,
     pattern: &str,
     count: usize,
+    include_types: bool,
 ) -> Result<RedisScanResult, String> {
     let connections = state.connections.read().await;
     let pool = connections.get(connection_id).ok_or("Connection not found")?;
@@ -36,11 +37,11 @@ pub async fn redis_scan_keys_core(
             RedisConnection::Direct(con) => {
                 let mut con = con.lock().await;
                 redis_driver::select_db(&mut *con, db).await?;
-                redis_driver::scan_keys_page(&mut *con, cursor, pattern, count).await
+                redis_driver::scan_keys_page(&mut *con, cursor, pattern, count, include_types).await
             }
             RedisConnection::Cluster(cluster) => {
                 redis_driver::ensure_cluster_db(db)?;
-                redis_driver::scan_cluster_keys_page(cluster, cursor, pattern, count).await
+                redis_driver::scan_cluster_keys_page(cluster, cursor, pattern, count, include_types).await
             }
         },
         _ => Err("Not a Redis connection".to_string()),

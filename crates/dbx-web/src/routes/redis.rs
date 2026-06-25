@@ -21,6 +21,12 @@ pub struct RedisScanRequest {
     pub cursor: u64,
     pub pattern: String,
     pub count: usize,
+    #[serde(default = "default_include_types")]
+    pub include_types: bool,
+}
+
+fn default_include_types() -> bool {
+    true
 }
 
 #[derive(Deserialize)]
@@ -124,6 +130,7 @@ pub async fn scan_keys(
         req.cursor,
         &req.pattern,
         req.count,
+        req.include_types,
     )
     .await
     .map_err(AppError)?;

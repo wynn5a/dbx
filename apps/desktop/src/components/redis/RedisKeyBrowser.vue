@@ -39,6 +39,7 @@ import {
   collectRedisGroupKeyRaws,
   flattenVisibleRedisKeyTree,
   mergeKeysIntoRedisKeyTree,
+  redisKeyToFlatTreeRow,
   type RedisKeyTreeNode,
 } from "@/lib/redisKeyTree";
 import { classifyRedisCommandSafety } from "@/lib/redisCommandSafety";
@@ -127,6 +128,10 @@ const effectivePattern = computed(() =>
 const isSearchMode = computed(() =>
   searchMode.value === "key" ? effectivePattern.value !== "*" : valueQuery.value !== "",
 );
+// During a key-pattern search we render hits as a flat list rather than rebuilding the
+// namespace tree, and we skip per-key TYPE lookups on the backend. Type is omitted from
+// search rows (still shown in the detail panel and in normal browse).
+const useFlatKeySearchRows = computed(() => searchMode.value === "key" && isSearchMode.value);
 const searchPlaceholder = computed(() =>
   searchMode.value === "key"
     ? fuzzyKeySearch.value
@@ -168,12 +173,15 @@ const createKeyTypeOptions = computed<{ value: RedisCreateKeyType; label: string
   { value: "set", label: "Set" },
   { value: "zset", label: "Sorted Set" },
 ]);
-const visibleRows = computed(() =>
-  flattenVisibleRedisKeyTree(treeKeys.value, expandedGroupIds.value).map((row) => ({
+const visibleRows = computed(() => {
+  const rows = useFlatKeySearchRows.value
+    ? flatKeys.value.map((key) => redisKeyToFlatTreeRow(key, props.db))
+    : flattenVisibleRedisKeyTree(treeKeys.value, expandedGroupIds.value);
+  return rows.map((row) => ({
     ...row,
     id: row.node.id,
-  })),
-);
+  }));
+});
 let commandHistoryId = 0;
 
 function countLeaves(node: RedisKeyTreeNode): number {
@@ -221,7 +229,14 @@ async function fetchScanPage(): Promise<RedisScanResult> {
   const pageSize = settingsStore.editorSettings.redisScanPageSize;
   return searchMode.value === "value"
     ? await api.redisScanValues(props.connectionId, props.db, scanCursor.value, "*", valueQuery.value, pageSize)
-    : await api.redisScanKeys(props.connectionId, props.db, scanCursor.value, effectivePattern.value, pageSize);
+    : await api.redisScanKeys(
+        props.connectionId,
+        props.db,
+        scanCursor.value,
+        effectivePattern.value,
+        pageSize,
+        !useFlatKeySearchRows.value,
+      );
 }
 
 function appendScanResult(result: RedisScanResult) {
@@ -232,7 +247,11 @@ function appendScanResult(result: RedisScanResult) {
   hasMore.value = result.cursor !== 0;
   lastTotalKeys.value = result.total_keys;
 
-  if (treeKeys.value.length === 0) {
+  if (useFlatKeySearchRows.value) {
+    // Flat search rendering reads straight from flatKeys; keep the tree empty.
+    treeKeys.value = [];
+    expandedGroupIds.value = new Set();
+  } else if (treeKeys.value.length === 0) {
     rebuildTree(isSearchMode.value);
   } else {
     mergeTree(newKeys);
@@ -360,7 +379,7 @@ function onKeyDeleted() {
   if (!selectedKeyRaw.value) return;
   flatKeys.value = flatKeys.value.filter((key) => key.key_raw !== selectedKeyRaw.value);
   selectedKeyRaw.value = null;
-  rebuildTree(false);
+  if (!useFlatKeySearchRows.value) rebuildTree(false);
   connectionStore.updateRedisDbKeyStats(props.connectionId, props.db, {
     loaded: isSearchMode.value ? undefined : flatKeys.value.length,
     totalDelta: -1,
@@ -407,7 +426,7 @@ async function deleteKeyRaws(keys: string[]) {
     selectedKeyRaw.value = null;
   }
   checkedKeys.value = new Set();
-  rebuildTree(false);
+  if (!useFlatKeySearchRows.value) rebuildTree(false);
   connectionStore.updateRedisDbKeyStats(props.connectionId, props.db, {
     loaded: isSearchMode.value ? undefined : flatKeys.value.length,
     totalDelta: -deletedCount,
@@ -464,7 +483,7 @@ async function ensureCompletionKeys(db: number): Promise<string[]> {
   const cached = completionKeyCache.get(db);
   if (cached) return cached;
   try {
-    const scan = await api.redisScanKeys(props.connectionId, db, 0, "*", COMPLETION_KEY_SAMPLE);
+    const scan = await api.redisScanKeys(props.connectionId, db, 0, "*", COMPLETION_KEY_SAMPLE, false);
     const names = scan.keys.map((key) => key.key_display);
     completionKeyCache.set(db, names);
     return names;
@@ -476,7 +495,7 @@ async function ensureCompletionKeys(db: number): Promise<string[]> {
 
 async function refreshCompletionKeys(db: number): Promise<number | null> {
   try {
-    const scan = await api.redisScanKeys(props.connectionId, db, 0, "*", COMPLETION_KEY_SAMPLE);
+    const scan = await api.redisScanKeys(props.connectionId, db, 0, "*", COMPLETION_KEY_SAMPLE, false);
     completionKeyCache.set(
       db,
       scan.keys.map((key) => key.key_display),
@@ -624,7 +643,7 @@ function upsertCreatedKey(value: any) {
     flatKeys.value = [keyInfo, ...flatKeys.value];
   }
   selectedKeyRaw.value = keyInfo.key_raw;
-  rebuildTree(isSearchMode.value);
+  if (!useFlatKeySearchRows.value) rebuildTree(isSearchMode.value);
   connectionStore.updateRedisDbKeyStats(props.connectionId, props.db, {
     loaded: isSearchMode.value ? undefined : flatKeys.value.length,
     totalDelta: existingIndex >= 0 ? 0 : 1,
@@ -1014,7 +1033,7 @@ defineExpose({ focusSearch });
                 </div>
 
                 <div class="flex shrink-0 items-center justify-end gap-1.5 pr-1">
-                  <span v-if="row.node.kind === 'leaf'" class="inline-flex items-center gap-1.5">
+                  <span v-if="row.node.kind === 'leaf' && row.node.keyType" class="inline-flex items-center gap-1.5">
                     <span
                       class="size-1.5 rounded-full"
                       :style="{ backgroundColor: redisTypeColor(row.node.keyType) }"

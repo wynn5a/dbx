@@ -28,10 +28,26 @@ pub struct RedisDatabaseInfo {
 pub struct RedisKeyInfo {
     pub key_display: String,
     pub key_raw: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub key_type: String,
+    #[serde(default = "default_missing_ttl", skip_serializing_if = "is_missing_ttl")]
     pub ttl: i64,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub size: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub value_preview: String,
+}
+
+fn default_missing_ttl() -> i64 {
+    -2
+}
+
+fn is_missing_ttl(ttl: &i64) -> bool {
+    *ttl == -2
+}
+
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -444,6 +460,7 @@ pub async fn scan_cluster_keys_page(
     cursor: u64,
     pattern: &str,
     count: usize,
+    include_types: bool,
 ) -> Result<RedisScanResult, String> {
     let master_nodes = cluster_master_nodes(pool).await?;
     if master_nodes.is_empty() {
@@ -461,7 +478,7 @@ pub async fn scan_cluster_keys_page(
         let mut con =
             connect_direct_node(endpoint, pool.tls, pool.tls_insecure, &pool.username, &pool.password).await?;
         let current_cursor = if index == node_index { node_cursor } else { 0 };
-        let result = scan_keys_page(&mut con, current_cursor, pattern, count).await?;
+        let result = scan_keys_page(&mut con, current_cursor, pattern, count, include_types).await?;
         if !result.keys.is_empty() {
             let next_cursor = if result.cursor != 0 {
                 encode_cluster_cursor(index, result.cursor)?
@@ -817,7 +834,13 @@ where
     Ok(RedisCommandResult { command, safety, value: redis_command_raw_to_json(raw) })
 }
 
-pub async fn scan_keys_page<C>(con: &mut C, cursor: u64, pattern: &str, count: usize) -> Result<RedisScanResult, String>
+pub async fn scan_keys_page<C>(
+    con: &mut C,
+    cursor: u64,
+    pattern: &str,
+    count: usize,
+    include_types: bool,
+) -> Result<RedisScanResult, String>
 where
     C: ConnectionLike + Send + Sync + Unpin,
 {
@@ -837,22 +860,35 @@ where
         return Ok(RedisScanResult { cursor: next_cursor, keys: Vec::new(), total_keys });
     }
 
-    let mut pipe = redis::pipe();
-    for key in &keys {
-        pipe.cmd("TYPE").arg(key);
-    }
-    let key_types: Vec<String> = pipe.query_async(con).await.unwrap_or_default();
+    // Resolving each key's type requires an extra TYPE command per key, which dominates the
+    // cost of large key searches. Skip it when the caller doesn't need types (e.g. key search)
+    // and leave the type/preview fields empty so the response stays small.
+    let key_types: Vec<String> = if include_types {
+        let mut pipe = redis::pipe();
+        for key in &keys {
+            pipe.cmd("TYPE").arg(key);
+        }
+        pipe.query_async(con).await.unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
     let mut result = Vec::with_capacity(keys.len());
     for (index, key) in keys.iter().enumerate() {
-        let key_type = key_types.get(index).cloned().unwrap_or_else(|| "unknown".to_string());
+        let (key_type, value_preview) = if include_types {
+            let key_type = key_types.get(index).cloned().unwrap_or_else(|| "unknown".to_string());
+            let value_preview = redis_key_value_preview(key_types.get(index).map(String::as_str).unwrap_or("unknown"));
+            (key_type, value_preview)
+        } else {
+            (String::new(), String::new())
+        };
         result.push(RedisKeyInfo {
             key_display: redis_key_bytes_to_display(key),
             key_raw: redis_key_bytes_to_raw(key),
             key_type,
             ttl: -2,
             size: 0,
-            value_preview: redis_key_value_preview(key_types.get(index).map(String::as_str).unwrap_or("unknown")),
+            value_preview,
         });
     }
     Ok(RedisScanResult { cursor: next_cursor, keys: result, total_keys })

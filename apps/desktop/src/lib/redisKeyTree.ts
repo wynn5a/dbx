@@ -37,6 +37,25 @@ function buildLeafId(db: number, keyRaw: string): string {
   return `leaf:${db}:${keyRaw}`;
 }
 
+export function redisKeyToFlatTreeRow(key: RedisKeyInfo, db: number): RedisKeyTreeRow {
+  return {
+    node: {
+      kind: "leaf",
+      id: buildLeafId(db, key.key_raw),
+      label: key.key_display,
+      fullKeyDisplay: key.key_display,
+      keyRaw: key.key_raw,
+      db,
+      keyType: key.key_type ?? "",
+      ttl: key.ttl ?? -2,
+      size: key.size ?? 0,
+      valuePreview: key.value_preview ?? "",
+      pathSegments: [key.key_display],
+    },
+    depth: 0,
+  };
+}
+
 function compareRedisTreeNodes(a: RedisKeyTreeNode, b: RedisKeyTreeNode): number {
   if (a.kind !== b.kind) return a.kind === "group" ? -1 : 1;
   return a.label.localeCompare(b.label);
@@ -79,10 +98,10 @@ function insertKeyIntoTree(
       fullKeyDisplay: key.key_display,
       keyRaw: key.key_raw,
       db,
-      keyType: key.key_type,
-      ttl: key.ttl,
-      size: key.size,
-      valuePreview: key.value_preview,
+      keyType: key.key_type ?? "",
+      ttl: key.ttl ?? -2,
+      size: key.size ?? 0,
+      valuePreview: key.value_preview ?? "",
       pathSegments,
     });
     return;
@@ -115,10 +134,10 @@ function insertKeyIntoTree(
     fullKeyDisplay: key.key_display,
     keyRaw: key.key_raw,
     db,
-    keyType: key.key_type,
-    ttl: key.ttl,
-    size: key.size,
-    valuePreview: key.value_preview,
+    keyType: key.key_type ?? "",
+    ttl: key.ttl ?? -2,
+    size: key.size ?? 0,
+    valuePreview: key.value_preview ?? "",
     pathSegments,
   });
 }
@@ -205,11 +224,23 @@ export function flattenVisibleRedisKeyTree(
   depth = 0,
 ): RedisKeyTreeRow[] {
   const rows: RedisKeyTreeRow[] = [];
+  // Iterative (explicit stack) walk instead of recursion so a single very large
+  // expanded group can't overflow the call stack. Children are pushed in reverse
+  // so siblings come off the stack in their original order.
+  const stack: RedisKeyTreeRow[] = [];
+  for (let index = nodes.length - 1; index >= 0; index--) {
+    stack.push({ node: nodes[index], depth });
+  }
 
-  for (const node of nodes) {
-    rows.push({ node, depth });
-    if (node.kind === "group" && expandedGroupIds.has(node.id)) {
-      rows.push(...flattenVisibleRedisKeyTree(node.children, expandedGroupIds, depth + 1));
+  while (stack.length > 0) {
+    const row = stack.pop()!;
+    rows.push(row);
+
+    if (row.node.kind !== "group" || !expandedGroupIds.has(row.node.id)) continue;
+
+    const childDepth = row.depth + 1;
+    for (let index = row.node.children.length - 1; index >= 0; index--) {
+      stack.push({ node: row.node.children[index], depth: childDepth });
     }
   }
 
