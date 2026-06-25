@@ -628,6 +628,20 @@ function selectDefaultMember(redisValue: RedisValue) {
 }
 
 // TTL
+function formatTtlDuration(totalSeconds: number): string {
+  if (totalSeconds <= 0) return `${totalSeconds}s`;
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (seconds > 0 || parts.length === 0) parts.push(`${seconds}s`);
+  return parts.join(" ");
+}
+
 function startEditTtl() {
   if (!data.value) return;
   ttlInput.value = data.value.ttl > 0 ? String(data.value.ttl) : "";
@@ -828,9 +842,12 @@ onBeforeUnmount(() => {
           </span>
           <span v-if="metadataSizeLabel" :class="dsChip"> {{ t("redis.columnSize") }}: {{ metadataSizeLabel }} </span>
           <template v-if="!editingTtl">
-            <span v-if="data.ttl > 0" :class="[dsChip, dsChipClickable]" @click="startEditTtl"
-              >TTL: {{ data.ttl }}s</span
-            >
+            <Tooltip v-if="data.ttl > 0">
+              <TooltipTrigger as-child>
+                <span :class="[dsChip, dsChipClickable]" @click="startEditTtl">TTL: {{ data.ttl }}s</span>
+              </TooltipTrigger>
+              <TooltipContent>{{ formatTtlDuration(data.ttl) }}</TooltipContent>
+            </Tooltip>
             <span v-else-if="data.ttl === -1" :class="[dsChip, dsChipClickable]" @click="startEditTtl">{{
               t("redis.noExpiry")
             }}</span>
