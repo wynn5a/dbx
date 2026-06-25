@@ -56,6 +56,43 @@ describe("sqlCompletion quoted schema qualifiers", () => {
   });
 });
 
+describe("sqlCompletion column vs snippet ranking", () => {
+  const sql = "SELECT * FROM new_test WHERE name = 'eee' AND c";
+  const buildItems = () =>
+    buildSqlCompletionItems(sql, sql.length, {
+      tables: [{ name: "new_test", type: "table" }],
+      columnsByTable: new Map([
+        [
+          "new_test",
+          [
+            { name: "created_at", table: "new_test", dataType: "datetime" },
+            { name: "name", table: "new_test", dataType: "varchar" },
+            { name: "id", table: "new_test", dataType: "bigint" },
+          ],
+        ],
+      ]),
+    });
+
+  it("ranks a matching column of a referenced table above snippets in a WHERE clause", () => {
+    const items = buildItems();
+    const column = items.find((item) => item.label === "created_at" && item.type === "column");
+    const topSnippet = items.find((item) => item.type === "snippet");
+    expect(column).toBeDefined();
+    if (topSnippet) {
+      expect(column!.boost).toBeGreaterThan(topSnippet.boost);
+    }
+  });
+
+  it("does not suggest statement-starting snippets mid-expression", () => {
+    const labels = buildItems()
+      .filter((item) => item.type === "snippet")
+      .map((item) => item.label);
+    expect(labels).not.toContain("create table");
+    expect(labels).not.toContain("create index");
+    expect(labels).not.toContain("common table expression");
+  });
+});
+
 describe("sqlCompletion statement boundaries", () => {
   it("does not bleed into the next statement when a semicolon is missing", () => {
     // No semicolon after the AutomationQueue select; the following lines start a

@@ -1024,7 +1024,13 @@ export function buildSqlCompletionItemsFromContext(
     !context.exclusiveColumnSuggestions &&
     !context.exclusiveRoutineSuggestions
   ) {
-    items.push(...buildSnippetItems(context.prefix, input.snippets ?? DEFAULT_SQL_SNIPPETS));
+    // Inside a DML statement at a pure column/expression position, snippets are secondary
+    // to the columns being referenced — drop statement-starting ones and damp the rest.
+    const snippetsAreSecondary =
+      isDmlStatementKind(context.statementKind) && context.suggestColumns && !context.suggestTables;
+    items.push(
+      ...buildSnippetItems(context.prefix, input.snippets ?? DEFAULT_SQL_SNIPPETS, { secondary: snippetsAreSecondary }),
+    );
     items.push(...buildFunctionSnippetItems(context.prefix, getFunctionDescriptions(t), databaseType));
   }
 
@@ -2907,10 +2913,29 @@ export function snippetBodyToTemplate(body: string): string {
   return body.replace(/(?<![#$])\{(\w+)\}/g, "${$1}");
 }
 
-function buildSnippetItems(prefix: string, snippets: SqlSnippet[]): SqlCompletionItem[] {
+// Snippets whose body starts a new statement (SELECT/INSERT/CREATE/WITH/…). These make
+// no sense mid-expression (e.g. inside a WHERE clause), mirroring how DDL keywords are
+// gated by `showDdl` in buildKeywordItems.
+const STATEMENT_LEVEL_SNIPPET_BODY =
+  /^\s*(?:WITH|SELECT|INSERT|UPDATE|DELETE|MERGE|CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE)\b/i;
+
+function isStatementLevelSnippet(snippet: SqlSnippet): boolean {
+  return STATEMENT_LEVEL_SNIPPET_BODY.test(snippet.body);
+}
+
+function buildSnippetItems(
+  prefix: string,
+  snippets: SqlSnippet[],
+  options?: { secondary?: boolean },
+): SqlCompletionItem[] {
   if (!prefix) return [];
+  // In column/expression positions the columns being referenced are the primary
+  // suggestion; snippets are secondary. Drop statement-starting snippets entirely and
+  // damp the rest so matching columns rank above them.
+  const secondary = options?.secondary ?? false;
   return snippets
     .filter((snippet) => {
+      if (secondary && isStatementLevelSnippet(snippet)) return false;
       const matchesSnippetPrefix = matchesPrefix(snippet.prefix, prefix);
       const matchesSnippetLabel = prefix.length > snippet.prefix.length && matchesPrefix(snippet.label, prefix);
       return matchesSnippetPrefix || matchesSnippetLabel;
@@ -2921,8 +2946,9 @@ function buildSnippetItems(prefix: string, snippets: SqlSnippet[]): SqlCompletio
       const matchesByPrefix = matchesPrefix(snippet.prefix, prefix);
       // When the user types past the snippet prefix (e.g. "sele" vs prefix "sel"),
       // they are likely typing the actual keyword — reduce the base boost so
-      // the real keyword can rank higher.
-      const baseBoost = matchesByPrefix ? 4000 : 0;
+      // the real keyword can rank higher. In a secondary (expression) context the base
+      // is smaller still, so contextually-relevant columns outrank these snippets.
+      const baseBoost = matchesByPrefix ? (secondary ? 1500 : 4000) : 0;
       return {
         label: snippet.label,
         type: "snippet" as const,
@@ -3052,6 +3078,10 @@ function buildNonAggregatedColumnItems(
   return items;
 }
 
+function isDmlStatementKind(kind: SqlStatementKind): boolean {
+  return kind === "select" || kind === "insert" || kind === "update" || kind === "delete";
+}
+
 function activeSqlKeywords(databaseType?: DatabaseType): string[] {
   if (databaseType === "mongodb") return [];
   const databaseKeywords = databaseType ? DATABASE_SQL_KEYWORDS[databaseType] : undefined;
@@ -3065,11 +3095,7 @@ function buildKeywordItems(
   context: SqlCompletionContext,
   databaseType?: DatabaseType,
 ): SqlCompletionItem[] {
-  const isDml =
-    context.statementKind === "select" ||
-    context.statementKind === "insert" ||
-    context.statementKind === "update" ||
-    context.statementKind === "delete";
+  const isDml = isDmlStatementKind(context.statementKind);
   const showDdl = !isDml || context.suggestTables;
 
   return activeSqlKeywords(databaseType)
