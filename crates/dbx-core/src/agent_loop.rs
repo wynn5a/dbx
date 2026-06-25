@@ -22,6 +22,7 @@ use crate::agent_events::{AgentEvent, ToolCall, ToolDefinition, ToolResult};
 use crate::agent_tools;
 use crate::ai::{self, AiCompletionRequest, AiConfig, AiMessage, AiStreamChunk, TokenUsage, ToolCallRef};
 use crate::connection::AppState;
+use crate::database_capabilities;
 use crate::models::connection::DatabaseType;
 use crate::query_execution_sql::is_read_only_sql;
 use crate::schema;
@@ -210,9 +211,20 @@ pub async fn run_agent_loop(
     Ok(final_text)
 }
 
+/// Whether a tool call may run concurrently with the others in its turn.
+///
+/// A tool runs in parallel only when it is marked parallel-safe *and* the engine
+/// has a real multi-connection pool. Single-connection drivers (SQLite, DuckDB,
+/// Oracle, JDBC, …) serve every query from one pooled connection, so running a
+/// turn's read tools concurrently there only contends for that one connection —
+/// pointless at best, cascading "connection busy" tool errors at worst.
+fn runs_in_parallel(db_type: &DatabaseType, tool_parallel_ok: bool) -> bool {
+    tool_parallel_ok && !database_capabilities::is_single_connection_pool(db_type)
+}
+
 /// Execute a turn's tool calls: parallel-safe tools concurrently, the rest
-/// (only `execute_query`) sequentially with a write confirmation gate. Results
-/// are returned in the original call order.
+/// (`execute_query`, plus everything on single-connection engines) sequentially
+/// with a write confirmation gate. Results are returned in the original call order.
 async fn execute_tool_calls(
     tool_calls: &[ToolCall],
     tools: &[ToolDefinition],
@@ -222,8 +234,9 @@ async fn execute_tool_calls(
     cancelled: &Notify,
 ) -> Vec<ToolResult> {
     let parallel_ok: HashMap<&str, bool> = tools.iter().map(|t| (t.name, t.parallel_ok)).collect();
-    let (parallel_idx, sequential_idx): (Vec<usize>, Vec<usize>) =
-        (0..tool_calls.len()).partition(|&i| *parallel_ok.get(tool_calls[i].name.as_str()).unwrap_or(&false));
+    let (parallel_idx, sequential_idx): (Vec<usize>, Vec<usize>) = (0..tool_calls.len()).partition(|&i| {
+        runs_in_parallel(&ctx.db_type, *parallel_ok.get(tool_calls[i].name.as_str()).unwrap_or(&false))
+    });
 
     let parallel_futures = parallel_idx.iter().map(|&i| {
         let tc = tool_calls[i].clone();
@@ -379,6 +392,17 @@ mod tests {
         let out = compact_tool_result(&content);
         assert!(out.len() < content.len());
         assert!(out.contains("result truncated"));
+    }
+
+    #[test]
+    fn parallel_tools_serialize_on_single_connection_engines() {
+        // Multi-connection engines keep the parallel speedup for parallel-safe tools.
+        assert!(runs_in_parallel(&DatabaseType::Postgres, true));
+        // Single-connection engines force every tool sequential, even parallel-safe ones.
+        assert!(!runs_in_parallel(&DatabaseType::Sqlite, true));
+        assert!(!runs_in_parallel(&DatabaseType::DuckDb, true));
+        // A non-parallel tool (e.g. execute_query) is never parallelized anywhere.
+        assert!(!runs_in_parallel(&DatabaseType::Postgres, false));
     }
 
     #[test]
