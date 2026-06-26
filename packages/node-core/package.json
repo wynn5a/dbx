@@ -30,7 +30,6 @@
   "license": "Apache-2.0",
   "dependencies": {
     "better-sqlite3": "^12.9.0",
-    "keytar": "^7.9.0",
     "mysql2": "^3.14.1",
     "pg": "^8.16.0"
   },
@@ -38,7 +37,6 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.21",
     "@types/pg": "^8.15.4",
-    "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   }
 }

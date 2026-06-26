@@ -40,7 +40,7 @@ export function formatErrorMessage(code: string, message: string): string {
 
 function errorHint(code: string, message: string): string | undefined {
   if (code === "CONNECTION_STORE_ERROR" && /NODE_MODULE_VERSION|compiled against a different Node\.js version/i.test(message)) {
-    return "Rebuild DBX CLI native dependencies with your active Node.js: pnpm rebuild better-sqlite3 keytar --pending, or reinstall the package with the same Node.js version you use to run dbx.";
+    return "Rebuild DBX CLI native dependencies with your active Node.js: pnpm rebuild better-sqlite3 --pending, or reinstall the package with the same Node.js version you use to run dbx.";
   }
   return undefined;
 }

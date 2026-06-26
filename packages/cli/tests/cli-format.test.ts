@@ -53,7 +53,7 @@ test("adds remediation hints for native SQLite ABI errors", () => {
     error: {
       code: "CONNECTION_STORE_ERROR",
       message: "NODE_MODULE_VERSION 127 mismatch",
-      hint: "Rebuild DBX CLI native dependencies with your active Node.js: pnpm rebuild better-sqlite3 keytar --pending, or reinstall the package with the same Node.js version you use to run dbx.",
+      hint: "Rebuild DBX CLI native dependencies with your active Node.js: pnpm rebuild better-sqlite3 --pending, or reinstall the package with the same Node.js version you use to run dbx.",
     },
   });
   assert.match(formatErrorMessage("CONNECTION_STORE_ERROR", "compiled against a different Node.js version"), /Hint: Rebuild/);
