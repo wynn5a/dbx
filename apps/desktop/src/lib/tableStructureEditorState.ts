@@ -506,7 +506,10 @@ export function typeAcceptsLength(dbType: DatabaseType | undefined, baseType: st
   if (dbType === "mysql" && key in MYSQL_DISPLAY_WIDTHS) return true;
   if (PARAMETERIZED_TYPES[family].has(key)) return true;
 
-  return !getDataTypeOptions(dbType).includes(key);
+  // `family` is guaranteed present in PARAMETERIZED_TYPES (checked above), so it is
+  // also a valid DATA_TYPE_OPTIONS key — index it directly instead of going through
+  // getDataTypeOptions(), which would re-resolve the same alias.
+  return !DATA_TYPE_OPTIONS[family].includes(key);
 }
 
 export function buildStructureTargetLabel(
