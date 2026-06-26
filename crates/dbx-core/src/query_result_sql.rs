@@ -875,6 +875,20 @@ mod tests {
     }
 
     #[test]
+    fn mysql_pagination_handles_multibyte_chars_in_where_clause() {
+        // Regression: byte-level LIMIT detection must stay on UTF-8 boundaries
+        // so SQL with multi-byte chars (e.g. Chinese in a LIKE literal) cannot panic.
+        let result = build_paginated_query_sql(PaginatedQuerySqlOptions {
+            original_sql: "SELECT id FROM users WHERE name LIKE '%批量保存%'".to_string(),
+            database_type: Some(DatabaseType::Mysql),
+            limit: 50,
+            offset: 0,
+        });
+
+        assert_eq!(result.sql.unwrap(), "SELECT id FROM users WHERE name LIKE '%批量保存%' LIMIT 50;");
+    }
+
+    #[test]
     fn rejects_multiple_statements_for_pagination() {
         let result = build_paginated_query_sql(PaginatedQuerySqlOptions {
             original_sql: "SELECT 1; SELECT 2;".to_string(),
