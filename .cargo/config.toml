@@ -1,3 +1,12 @@
+[build]
+# Disable incremental compilation. The incremental cache
+# (target/debug/incremental) trades disk for faster *iterative* rebuilds and is
+# only worth it if you edit-and-rebuild Rust frequently — otherwise it just
+# accumulates GBs (it reached ~13 GB on a typical checkout here). Infrequent
+# builders lose nothing. If you do tight Rust edit→build loops, override locally
+# with `CARGO_INCREMENTAL=1` (env) rather than flipping this for everyone.
+incremental = false
+
 [env]
 # Enable SQLite's built-in math functions for rusqlite's bundled libsqlite3.
 LIBSQLITE3_FLAGS = "SQLITE_ENABLE_MATH_FUNCTIONS"

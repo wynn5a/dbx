@@ -17,3 +17,16 @@ strip = true
 lto = true
 codegen-units = 1
 opt-level = "s"
+
+# Dev disk-usage controls. The debug `target/` is dominated by DWARF debug info
+# baked into every dependency (duckdb, tiberius, mongodb, …), which you almost
+# never step into. Stripping debuginfo from dependencies shrinks target/ a lot
+# while keeping full debuggability for the workspace's own crates.
+[profile.dev.package."*"]
+debug = false
+
+# Workspace crates keep line tables (file:line in panics/backtraces) without the
+# full DWARF that bloats artifacts. Use `debug = true` here if you need a stepping
+# debugger on dbx-core/dbx-web/src-tauri.
+[profile.dev]
+debug = "line-tables-only"
