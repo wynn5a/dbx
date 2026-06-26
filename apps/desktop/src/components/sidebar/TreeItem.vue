@@ -3834,17 +3834,25 @@ function treeItemMenuItems(): ContextMenuItem[] {
   transition: color var(--ds-speed) var(--ds-ease);
 }
 /* Row fill lives on an inset ::before, so hover / selection / connection tint
-   leave a small gap at the left and right ends instead of bleeding to the
-   panel edge. Content sits above it via the z-index below. */
+   leave a small gap at the left/right ends and top/bottom instead of bleeding
+   to the panel edge or butting up against the adjacent row. Content sits above
+   it via the z-index below. */
 .tree-row::before {
   content: "";
   position: absolute;
-  inset: 0 6px;
+  inset: 2px 6px;
   z-index: 0;
   background-color: transparent;
   border-radius: var(--ds-radius);
   pointer-events: none;
   transition: background-color var(--ds-speed) var(--ds-ease);
+}
+/* Connections pack tighter to each other than folders do. Each connection
+   fill keeps its 2px top gap (preserving the space below a folder header) but
+   drops the bottom gap, so two stacked connections sit ~2px apart while
+   folder->connection and folder->folder gaps stay at the larger ~4px. */
+.tree-conn-head::before {
+  bottom: 0;
 }
 .tree-row > * {
   position: relative;
