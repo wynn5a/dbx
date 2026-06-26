@@ -134,7 +134,7 @@ function handleKeydown(event: KeyboardEvent) {
           <!-- Keep showing the selected value while options refresh; swapping to
                the loading text resizes the trigger and makes the toolbar jump.
                The popover list already shows its own loading row. -->
-          <span class="truncate">{{ loading && !modelValue ? loadingText : selectedLabel }}</span>
+          <span class="min-w-0 truncate">{{ loading && !modelValue ? loadingText : selectedLabel }}</span>
         </slot>
         <ChevronDown
           class="h-3 w-3 shrink-0 opacity-60 transition-transform duration-[var(--ds-speed)] ease-[var(--ds-ease)]"

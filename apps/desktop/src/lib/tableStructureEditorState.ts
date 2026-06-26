@@ -253,19 +253,9 @@ export function getDataTypeOptions(dbType: DatabaseType | undefined): string[] {
   return DATA_TYPE_OPTIONS[key] ?? [];
 }
 
+// Generic length/precision defaults, applied for any engine that has the type:
+// string length and exact-numeric precision/scale, which are portable SQL.
 export const DEFAULT_TYPE_LENGTHS: Record<string, string> = {
-  tinyint: "4",
-  smallint: "6",
-  mediumint: "9",
-  int: "11",
-  integer: "11",
-  int4: "11",
-  bigint: "20",
-  int8: "20",
-  float: "10,2",
-  real: "10,2",
-  "double precision": "10,2",
-  double: "10,2",
   decimal: "10,0",
   numeric: "10,0",
   number: "10,0",
@@ -279,7 +269,26 @@ export const DEFAULT_TYPE_LENGTHS: Record<string, string> = {
   nchar: "1",
   varbinary: "255",
   binary: "1",
-  bit: "1",
+};
+
+// MySQL-only defaults: integer display widths (e.g. int(11), bigint(20)) and
+// approximate-numeric precision (float(10,2)). Other engines reject a length on
+// integer/float types — Postgres `bigint(20)` is a syntax error — so these are
+// applied only for MySQL itself (not the wider MySQL-protocol family, where DDL
+// rejects display widths too).
+const MYSQL_DISPLAY_WIDTHS: Record<string, string> = {
+  tinyint: "4",
+  smallint: "6",
+  mediumint: "9",
+  int: "11",
+  integer: "11",
+  int4: "11",
+  bigint: "20",
+  int8: "20",
+  float: "10,2",
+  real: "10,2",
+  "double precision": "10,2",
+  double: "10,2",
   year: "4",
 };
 
@@ -439,9 +448,65 @@ function isValidTemporalPrecision(dbType: DatabaseType | undefined, params: stri
   return Number.isInteger(value) && value >= 0 && value <= max && String(value) === params;
 }
 
-export function getDefaultLengthForType(_dbType: DatabaseType | undefined, baseType: string): string {
+export function getDefaultLengthForType(dbType: DatabaseType | undefined, baseType: string): string {
   const key = baseType.trim().toLowerCase();
+  if (dbType === "mysql" && key in MYSQL_DISPLAY_WIDTHS) {
+    return MYSQL_DISPLAY_WIDTHS[key];
+  }
   return DEFAULT_TYPE_LENGTHS[key] ?? "";
+}
+
+// Base types (lowercased) that accept a length/precision parameter, keyed by
+// engine family. Temporal types (isTemporalPrecisionType) and MySQL display
+// widths (MYSQL_DISPLAY_WIDTHS) are handled separately and intentionally omitted.
+const PARAMETERIZED_TYPES: Record<string, Set<string>> = {
+  mysql: new Set(["decimal", "numeric", "bit", "char", "varchar", "binary", "varbinary", "enum", "set"]),
+  postgres: new Set([
+    "decimal",
+    "numeric",
+    "float",
+    "char",
+    "character",
+    "varchar",
+    "character varying",
+    "bit",
+    "bit varying",
+    "varbit",
+    "interval",
+  ]),
+  sqlserver: new Set(["decimal", "numeric", "float", "char", "nchar", "varchar", "nvarchar", "binary", "varbinary"]),
+  oracle: new Set([
+    "number",
+    "float",
+    "char",
+    "nchar",
+    "varchar2",
+    "nvarchar2",
+    "raw",
+    "interval year to month",
+    "interval day to second",
+    "vector",
+  ]),
+};
+
+// Whether the length/precision field should be editable for a given type. We only
+// disable for types we positively recognize as length-less on that engine (e.g.
+// Postgres bigint, uuid); custom/unknown types and engines with composite or
+// length-tolerant type systems (ClickHouse, SQLite) stay editable.
+export function typeAcceptsLength(dbType: DatabaseType | undefined, baseType: string): boolean {
+  if (!dbType) return true;
+  const family = DATA_TYPE_OPTION_ALIASES[dbType] ?? dbType;
+  if (!(family in PARAMETERIZED_TYPES)) return true;
+
+  const key = baseType.trim().replace(/\s+/g, " ").toLowerCase();
+  if (!key) return true;
+  if (isTemporalPrecisionType(dbType, key)) return true;
+  // Integer/float display widths apply to MySQL itself only, matching
+  // getDefaultLengthForType — the wider MySQL-protocol family rejects them.
+  if (dbType === "mysql" && key in MYSQL_DISPLAY_WIDTHS) return true;
+  if (PARAMETERIZED_TYPES[family].has(key)) return true;
+
+  return !getDataTypeOptions(dbType).includes(key);
 }
 
 export function buildStructureTargetLabel(

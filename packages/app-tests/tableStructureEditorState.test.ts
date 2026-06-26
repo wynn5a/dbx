@@ -6,7 +6,9 @@ import {
   createColumnDrafts,
   createIndexDrafts,
   getDataTypeOptions,
+  getDefaultLengthForType,
   normalizeDataTypeParams,
+  typeAcceptsLength,
   parseExtraToColumnExtra,
   toColumnNames,
 } from "../../apps/desktop/src/lib/tableStructureEditorState.ts";
@@ -179,6 +181,69 @@ test("normalizes temporal precision when combining data types", () => {
   assert.equal(combineDataTypeForDatabase("mysql", "varchar", "255"), "varchar(255)");
   assert.equal(normalizeDataTypeParams("oracle", "timestamp", "9"), "9");
   assert.equal(normalizeDataTypeParams("oracle", "timestamp", "10"), "");
+});
+
+test("only suggests MySQL integer display widths for MySQL", () => {
+  // MySQL keeps its display-width defaults.
+  assert.equal(getDefaultLengthForType("mysql", "bigint"), "20");
+  assert.equal(getDefaultLengthForType("mysql", "int"), "11");
+  assert.equal(getDefaultLengthForType("mysql", "float"), "10,2");
+
+  // Other engines reject a length on integer/float types, so no default is suggested.
+  for (const dbType of ["postgres", "sqlserver", "oracle", "doris"] as const) {
+    assert.equal(getDefaultLengthForType(dbType, "bigint"), "");
+    assert.equal(getDefaultLengthForType(dbType, "int"), "");
+    assert.equal(getDefaultLengthForType(dbType, "real"), "");
+  }
+
+  // Generic string/exact-numeric defaults still apply everywhere.
+  assert.equal(getDefaultLengthForType("postgres", "varchar"), "255");
+  assert.equal(getDefaultLengthForType("postgres", "numeric"), "10,0");
+  assert.equal(getDefaultLengthForType("sqlserver", "decimal"), "10,0");
+});
+
+test("does not auto-fill an invalid length when picking an integer type", () => {
+  // Reproduces the bigint(20) bug: selecting bigint for Postgres must stay "bigint".
+  assert.equal(
+    combineDataTypeForDatabase("postgres", "bigint", getDefaultLengthForType("postgres", "bigint")),
+    "bigint",
+  );
+  assert.equal(combineDataTypeForDatabase("mysql", "bigint", getDefaultLengthForType("mysql", "bigint")), "bigint(20)");
+});
+
+test("knows which types accept a length parameter per engine", () => {
+  // Postgres: integers/uuid/text/serial reject a length; strings/numeric/temporal accept one.
+  assert.equal(typeAcceptsLength("postgres", "bigint"), false);
+  assert.equal(typeAcceptsLength("postgres", "integer"), false);
+  assert.equal(typeAcceptsLength("postgres", "uuid"), false);
+  assert.equal(typeAcceptsLength("postgres", "serial"), false);
+  assert.equal(typeAcceptsLength("postgres", "varchar"), true);
+  assert.equal(typeAcceptsLength("postgres", "numeric"), true);
+  assert.equal(typeAcceptsLength("postgres", "timestamp"), true);
+
+  // MySQL keeps integer display widths editable.
+  assert.equal(typeAcceptsLength("mysql", "bigint"), true);
+  assert.equal(typeAcceptsLength("mysql", "datetime"), true);
+  assert.equal(typeAcceptsLength("mysql", "text"), false);
+
+  // SQL Server: bit is boolean (no length), int rejects length, decimal accepts.
+  assert.equal(typeAcceptsLength("sqlserver", "bit"), false);
+  assert.equal(typeAcceptsLength("sqlserver", "int"), false);
+  assert.equal(typeAcceptsLength("sqlserver", "decimal"), true);
+
+  // Aliased families resolve like their base engine.
+  assert.equal(typeAcceptsLength("redshift", "bigint"), false);
+  assert.equal(typeAcceptsLength("dameng", "number"), true);
+
+  // MySQL-protocol family (Doris) rejects integer display widths just like the
+  // default-length suggestion does — only literal MySQL keeps them editable.
+  assert.equal(typeAcceptsLength("doris", "bigint"), false);
+  assert.equal(typeAcceptsLength("doris", "varchar"), true);
+
+  // Custom/unknown types and unrestricted engines stay editable.
+  assert.equal(typeAcceptsLength("postgres", "citext"), true);
+  assert.equal(typeAcceptsLength("clickhouse", "Int64"), true);
+  assert.equal(typeAcceptsLength(undefined, "bigint"), true);
 });
 
 test("returns data type options for compatible table structure editors", () => {

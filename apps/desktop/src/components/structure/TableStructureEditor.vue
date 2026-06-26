@@ -56,6 +56,7 @@ import {
   getDefaultLengthForType,
   splitDataType,
   toColumnNames,
+  typeAcceptsLength,
 } from "@/lib/tableStructureEditorState";
 import type { ForeignKeyInfo, TriggerInfo } from "@/types/database";
 import * as api from "@/lib/api";
@@ -383,10 +384,19 @@ const showExtendedProperties = computed(() => {
   return dt === "mysql" || isPostgresIdentityType(dt) || dt === "sqlserver";
 });
 const extendedPropertiesColumnIndex = 8;
+const typeColumnIndex = 2;
 const visibleColWidths = computed(() =>
   showExtendedProperties.value
     ? colWidths.value
     : colWidths.value.filter((_, index) => index !== extendedPropertiesColumnIndex),
+);
+
+// The type cell hosts a SearchableSelect/Input whose content (long type names) would
+// otherwise drive the auto-layout column wider than its configured width. Cap the
+// content to the cell's inner width (column width minus border-box padding) so the
+// column stays put and the trigger truncates instead.
+const typeColumnContentWidth = computed(
+  () => `${Math.max(0, visibleColWidths.value[typeColumnIndex] - structureDensityMetric.value.cellPaddingX * 2)}px`,
 );
 
 function columnWidthIndex(visibleIndex: number) {
@@ -1131,7 +1141,7 @@ defineExpose({ applyChanges, canApply, saving, isCreateMode, newTableName });
                   />
                 </td>
                 <td :class="structureCellClass">
-                  <div class="flex min-w-0 items-center gap-2">
+                  <div class="flex min-w-0 items-center gap-2" :style="{ maxWidth: typeColumnContentWidth }">
                     <span
                       class="h-1.5 w-1.5 shrink-0 rounded-full"
                       :style="{ backgroundColor: typeDotColor(column.dataType) }"
@@ -1167,7 +1177,10 @@ defineExpose({ applyChanges, canApply, saving, isCreateMode, newTableName });
                   <Input
                     :model-value="splitDataType(column.dataType).params"
                     :class="structureMonoControlClass"
-                    :disabled="isColumnTypeDisabled(column)"
+                    :disabled="
+                      isColumnTypeDisabled(column) ||
+                      !typeAcceptsLength(databaseType, splitDataType(column.dataType).baseType)
+                    "
                     @update:model-value="
                       column.dataType = combineDataTypeForDatabase(
                         databaseType,
