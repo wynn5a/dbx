@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { uuid } from "@/lib/utils";
 import { useI18n } from "vue-i18n";
 import { translateBackendError } from "@/i18n/backend-errors";
@@ -301,6 +301,9 @@ function appendAssistantDelta(assistantIdx: number, delta: string) {
   const msg = messages.value[assistantIdx];
   if (msg.isThinking) msg.isThinking = false;
   msg.content += delta;
+  // Keep msg.content authoritative (history/finalize read it), but feed the
+  // in-flight render through a throttled, shiki-free mirror — see streamingIndex.
+  scheduleLiveStreamUpdate(msg.content);
   scrollToBottom();
 }
 
@@ -741,6 +744,13 @@ function handleAgentEvent(assistantIdx: number, sessionId: string, event: AgentE
       appendAssistantReasoning(assistantIdx, event.delta);
       break;
     case "text_delta":
+      // A tool call between two text runs ends the prior run mid-stream; the
+      // model rarely re-emits a leading newline, so without a separator the runs
+      // glue together (e.g. a code-fence onto following prose). Break the
+      // paragraph when resuming text after a tool step.
+      if (msg.content && msg.toolSteps?.length && !/\n\s*$/.test(msg.content)) {
+        msg.content += "\n\n";
+      }
       appendAssistantDelta(assistantIdx, event.delta);
       break;
     case "tool_call_start": {
@@ -943,6 +953,35 @@ const messageRenderer = computed(() => {
     highlightCode: highlightCode ? (content, lang) => highlightCode(content, lang, appearance) : undefined,
   });
 });
+
+// While a reply streams, re-running markdown + shiki on the whole growing
+// message every token is O(n²) and freezes the main thread on long replies
+// (measured: multi-second frames in long conversations). The in-flight bubble
+// therefore renders WITHOUT shiki and at a throttled ~10fps; once the turn
+// finishes it switches back to `messageRenderer` for a one-time, cached,
+// fully-highlighted render.
+const liveMessageRenderer = createAiMessageRenderer({ markdown: formatInlineText });
+const streamingIndex = computed(() => (currentSessionId.value ? messages.value.length - 1 : null));
+const liveStreamContent = ref("");
+let liveStreamPending = "";
+let liveStreamTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleLiveStreamUpdate(content: string) {
+  liveStreamPending = content;
+  if (liveStreamTimer == null) {
+    liveStreamTimer = setTimeout(() => {
+      liveStreamTimer = null;
+      liveStreamContent.value = liveStreamPending;
+    }, 90);
+  }
+}
+watch(streamingIndex, () => {
+  liveStreamContent.value = "";
+  liveStreamPending = "";
+  if (liveStreamTimer != null) {
+    clearTimeout(liveStreamTimer);
+    liveStreamTimer = null;
+  }
+});
 </script>
 
 <template>
@@ -1015,7 +1054,10 @@ const messageRenderer = computed(() => {
     <ScrollArea v-else ref="scrollRef" class="min-h-0 flex-1 overflow-hidden">
       <div class="flex flex-col gap-3 p-3">
         <template v-for="(msg, i) in messages" :key="i">
-          <div v-if="msg.role === 'user'" class="flex justify-end">
+          <div
+            v-if="msg.role === 'user'"
+            class="flex w-full justify-end [content-visibility:auto] [contain-intrinsic-size:auto_60px]"
+          >
             <div
               class="max-w-[85%] rounded-lg border border-[var(--ds-accent-line)] bg-[var(--ds-accent-soft)] px-3 py-2 text-xs leading-relaxed text-[var(--ds-text-1)]"
             >
@@ -1023,7 +1065,10 @@ const messageRenderer = computed(() => {
             </div>
           </div>
 
-          <div v-else-if="msg.content || msg.reasoning || msg.isThinking" class="flex">
+          <div
+            v-else-if="msg.content || msg.reasoning || msg.isThinking"
+            class="flex w-full [content-visibility:auto] [contain-intrinsic-size:auto_200px]"
+          >
             <div
               class="max-w-[95%] rounded-lg border border-[var(--ds-border)] bg-[var(--ds-bg-elevated)] px-3 py-2 text-xs leading-relaxed text-[var(--ds-text-1)]"
             >
@@ -1139,7 +1184,12 @@ const messageRenderer = computed(() => {
                   </Button>
                 </div>
               </div>
-              <template v-for="(seg, j) in messageRenderer.render(msg.content)" :key="j">
+              <template
+                v-for="(seg, j) in i === streamingIndex
+                  ? liveMessageRenderer.render(liveStreamContent)
+                  : messageRenderer.render(msg.content)"
+                :key="j"
+              >
                 <div v-if="seg.type === 'text'" class="ai-markdown whitespace-normal">
                   <div v-html="seg.html" />
                 </div>
