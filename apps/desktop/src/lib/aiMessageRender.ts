@@ -99,11 +99,21 @@ export function parseAiMessage(text: string): MessageSegment[] {
       const lang = fenceMatch[1] || "sql";
       const codeLines: string[] = [];
       i++;
-      while (i < lines.length && !/^```\s*$/.test(lines[i])) {
+      while (i < lines.length) {
+        // A closing fence is any line starting with ```. Streamed agent output
+        // can glue prose onto the closing fence (e.g. "```No results...") when a
+        // tool call splits two text runs; that trailing text is split back out so
+        // it renders as prose instead of being swallowed into the code block.
+        const closeMatch = lines[i].match(/^```\s*(.*)$/);
+        if (closeMatch) {
+          i++;
+          const trailing = closeMatch[1];
+          if (trailing.trim()) lines.splice(i, 0, trailing);
+          break;
+        }
         codeLines.push(lines[i]);
         i++;
       }
-      if (i < lines.length) i++;
       const content = codeLines.join("\n").trim();
       if (content) segments.push({ type: "code", lang, content });
     } else {
