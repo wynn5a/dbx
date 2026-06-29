@@ -553,6 +553,10 @@ function createHoverDom(kind: SqlHoverKind, title: string, typeInfo?: string, ro
   return dom;
 }
 
+// How long the function signature card lingers, untouched, before it auto-hides so it
+// stops covering the code beneath the cursor. Any typing or cursor movement restarts it.
+const SIGNATURE_HELP_AUTO_DISMISS_MS = 5000;
+
 function createSignatureDom(signature: ReturnType<typeof getSqlFunctionSignatureHelp>) {
   // CodeMirror tags this returned element `.cm-tooltip`, which the editor theme keeps
   // chrome-free. So the visible card is an inner `.ds-tooltip` child (mirroring how hover
@@ -1820,12 +1824,16 @@ onMounted(async () => {
         create: () => ({ dom: createSignatureDom(signature) }),
       };
     };
+    // Hides the card once it has lingered untouched (dispatched by the auto-dismiss
+    // plugin below). A later doc/selection change recomputes the field from scratch.
+    const dismissEffect = StateEffect.define<null>();
     // A StateField (not showTooltip.compute) so `update` runs on every transaction —
     // including the hover plugin's — letting us react when hover state toggles, which
     // a ["doc", "selection"] compute would miss (hovering changes neither).
-    return StateField.define<import("@codemirror/view").Tooltip | null>({
+    const field = StateField.define<import("@codemirror/view").Tooltip | null>({
       create: (state) => computeSignatureTooltip(state),
       update(value, tr) {
+        if (tr.effects.some((effect) => effect.is(dismissEffect))) return null;
         const hoverChanged = hasHoverTooltips(tr.startState) !== hasHoverTooltips(tr.state);
         const selectionMoved = tr.startState.selection.main.head !== tr.state.selection.main.head;
         if (!tr.docChanged && !selectionMoved && !hoverChanged) return value;
@@ -1833,6 +1841,32 @@ onMounted(async () => {
       },
       provide: (field) => showTooltip.from(field),
     });
+    // The card stays put as long as the cursor sits inside a call, covering the code
+    // below it. Auto-hide it after a spell of inactivity; the timer restarts whenever
+    // the field recomputes to a new card (i.e. on any further typing or cursor movement).
+    const autoDismiss = ViewPlugin.fromClass(
+      class {
+        timer = 0;
+        constructor(view: EditorViewType) {
+          if (view.state.field(field)) this.schedule(view);
+        }
+        update(update: import("@codemirror/view").ViewUpdate) {
+          const next = update.state.field(field);
+          if (!next) clearTimeout(this.timer);
+          else if (next !== update.startState.field(field)) this.schedule(update.view);
+        }
+        schedule(view: EditorViewType) {
+          clearTimeout(this.timer);
+          this.timer = window.setTimeout(() => {
+            if (view.state.field(field)) view.dispatch({ effects: dismissEffect.of(null) });
+          }, SIGNATURE_HELP_AUTO_DISMISS_MS);
+        }
+        destroy() {
+          clearTimeout(this.timer);
+        }
+      },
+    );
+    return [field, autoDismiss];
   };
 
   buildSqlCompletionExtension = () =>
