@@ -1949,6 +1949,7 @@ export default {
     shortcutCopyCurrentRow: "复制当前数据行",
     shortcutDeleteCurrentRow: "删除当前数据行",
     shortcutNewQuery: "新建查询",
+    shortcutNewConnection: "新建连接",
     shortcutOpenSettings: "打开设置",
     shortcutCloseTab: "关闭标签页",
     shortcutToggleSidebar: "切换侧边栏",

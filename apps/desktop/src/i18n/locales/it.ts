@@ -1931,6 +1931,7 @@ export default {
     shortcutCopyCurrentRow: "Copia riga dati corrente",
     shortcutDeleteCurrentRow: "Elimina riga dati corrente",
     shortcutNewQuery: "Nuova query",
+    shortcutNewConnection: "Nuova connessione",
     shortcutOpenSettings: "Apri impostazioni",
     shortcutCloseTab: "Chiudi scheda",
     shortcutToggleSidebar: "Attiva/disattiva barra laterale",

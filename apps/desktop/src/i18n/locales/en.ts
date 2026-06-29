@@ -1999,6 +1999,7 @@ export default {
     shortcutCopyCurrentRow: "Copy current data row",
     shortcutDeleteCurrentRow: "Delete current data row",
     shortcutNewQuery: "New query",
+    shortcutNewConnection: "New connection",
     shortcutOpenSettings: "Open settings",
     shortcutCloseTab: "Close tab",
     shortcutFocusSearch: "Focus search",

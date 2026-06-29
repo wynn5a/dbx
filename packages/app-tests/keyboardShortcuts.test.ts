@@ -8,6 +8,7 @@ import {
   isExecuteSqlShortcut,
   isFocusSearchShortcut,
   isModRShortcut,
+  isNewConnectionShortcut,
   isNewQueryShortcut,
   isObjectSourceSaveShortcutTarget,
   isOpenSettingsShortcut,
@@ -66,6 +67,24 @@ test("matches custom shortcut settings for opening a new query", () => {
   );
 });
 
+test("matches Cmd+N for opening a new connection", () => {
+  assert.equal(isNewConnectionShortcut({ key: "n", metaKey: true }), true);
+  assert.equal(isNewConnectionShortcut({ key: "n", ctrlKey: true }), true);
+});
+
+test("matches custom shortcut settings for opening a new connection", () => {
+  assert.equal(isNewConnectionShortcut({ key: "n", metaKey: true }, { newConnection: "Shift+Mod+N" } as any), false);
+  assert.equal(
+    isNewConnectionShortcut(
+      { key: "n", ctrlKey: true, shiftKey: true } as any,
+      {
+        newConnection: "Shift+Mod+N",
+      } as any,
+    ),
+    true,
+  );
+});
+
 test("matches Mod+Comma for opening settings", () => {
   assert.equal(isOpenSettingsShortcut({ key: ",", metaKey: true }), true);
   assert.equal(isOpenSettingsShortcut({ key: ",", ctrlKey: true }), true);
@@ -75,9 +94,12 @@ test("matches Mod+Comma for opening settings", () => {
 test("matches custom shortcut settings for opening settings", () => {
   assert.equal(isOpenSettingsShortcut({ key: ",", metaKey: true }, { openSettings: "Shift+Mod+P" } as any), false);
   assert.equal(
-    isOpenSettingsShortcut({ key: "p", ctrlKey: true, shiftKey: true } as any, {
-      openSettings: "Shift+Mod+P",
-    } as any),
+    isOpenSettingsShortcut(
+      { key: "p", ctrlKey: true, shiftKey: true } as any,
+      {
+        openSettings: "Shift+Mod+P",
+      } as any,
+    ),
     true,
   );
 });

@@ -1820,6 +1820,7 @@ export default {
     shortcutCopyCurrentRow: "複製目前資料列",
     shortcutDeleteCurrentRow: "刪除目前資料列",
     shortcutNewQuery: "建立查詢",
+    shortcutNewConnection: "建立連線",
     shortcutOpenSettings: "開啟設定",
     shortcutCloseTab: "關閉分頁",
     shortcutToggleSidebar: "切換側邊欄",

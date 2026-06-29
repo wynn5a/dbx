@@ -1920,6 +1920,7 @@ export default {
     shortcutCopyCurrentRow: "Copiar linha de dados atual",
     shortcutDeleteCurrentRow: "Excluir linha de dados atual",
     shortcutNewQuery: "Nova consulta",
+    shortcutNewConnection: "Nova conexão",
     shortcutOpenSettings: "Abrir configurações",
     shortcutCloseTab: "Fechar aba",
     shortcutToggleSidebar: "Alternar barra lateral",

@@ -45,6 +45,7 @@ import {
   isExecuteSqlShortcut,
   isFocusSearchShortcut,
   isModRShortcut,
+  isNewConnectionShortcut,
   isNewQueryShortcut,
   isObjectSourceSaveShortcutTarget,
   isOpenSettingsShortcut,
@@ -773,6 +774,13 @@ function handleKeydown(e: KeyboardEvent) {
     e.preventDefault();
     e.stopPropagation();
     void newQuery();
+    return;
+  }
+  if (isNewConnectionShortcut(e, shortcuts)) {
+    e.preventDefault();
+    e.stopPropagation();
+    connectionDialogPrefill.value = null;
+    showConnectionDialog.value = true;
     return;
   }
   if (isToggleSidebarShortcut(e, shortcuts)) {
