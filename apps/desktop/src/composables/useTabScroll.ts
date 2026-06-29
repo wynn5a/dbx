@@ -1,6 +1,14 @@
 import { onBeforeUnmount, ref, watch, type Ref } from "vue";
 
-export function useTabScroll(tabsContainerRef: Ref<HTMLElement | null>, onResize?: () => void) {
+export function useTabScroll(
+  tabsContainerRef: Ref<HTMLElement | null>,
+  onResize?: () => void,
+  // Element to attach the ResizeObserver to. Defaults to the scroller itself, but callers
+  // should pass a stable outer element whose width does NOT depend on the overflow controls
+  // this composable toggles — otherwise showing/hiding those controls resizes the observed
+  // element and re-triggers the observer in an endless rAF+layout loop (high idle CPU).
+  resizeTargetRef?: Ref<HTMLElement | null>,
+) {
   const hasTabOverflow = ref(false);
   const canScrollLeft = ref(false);
   const canScrollRight = ref(false);
@@ -61,7 +69,7 @@ export function useTabScroll(tabsContainerRef: Ref<HTMLElement | null>, onResize
   }
 
   watch(
-    tabsContainerRef,
+    () => (resizeTargetRef ?? tabsContainerRef).value,
     (el) => {
       resizeObserver?.disconnect();
       resizeObserver = null;
