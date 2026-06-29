@@ -3890,14 +3890,17 @@ function treeItemMenuItems(): ContextMenuItem[] {
   color: var(--ds-text-4);
 }
 
-/* Status dot: filled dot + 13%-tint halo; pulse = live connection */
+/* Status dot: filled dot + 13%-tint halo. The dot only renders while connected,
+   so it briefly pulses when the connection goes live, then rests static.
+   A perpetual (infinite) animation here repaints the layer every frame for every
+   connected connection — burning CPU/GPU at idle — so it is intentionally finite. */
 .tree-row-status-dot {
   width: 7px;
   height: 7px;
   border-radius: 99px;
   background: var(--ds-green);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ds-green) 13%, transparent);
-  animation: tree-row-status-pulse 2.4s var(--ds-ease) infinite;
+  animation: tree-row-status-pulse 2.4s var(--ds-ease) 2;
 }
 @keyframes tree-row-status-pulse {
   0%,
