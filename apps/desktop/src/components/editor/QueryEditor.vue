@@ -554,8 +554,14 @@ function createHoverDom(kind: SqlHoverKind, title: string, typeInfo?: string, ro
 }
 
 function createSignatureDom(signature: ReturnType<typeof getSqlFunctionSignatureHelp>) {
+  // CodeMirror tags this returned element `.cm-tooltip`, which the editor theme keeps
+  // chrome-free. So the visible card is an inner `.ds-tooltip` child (mirroring how hover
+  // tooltips nest a `.ds-tooltip` section inside CodeMirror's hover host) — putting the
+  // card class on the outer element instead would let the wrapper-reset strip its surface.
   const dom = document.createElement("div");
-  dom.className = "ds-tooltip";
+  const card = document.createElement("div");
+  card.className = "ds-tooltip";
+  dom.appendChild(card);
   if (!signature) return dom;
 
   const signatureNode = document.createElement("div");
@@ -584,7 +590,7 @@ function createSignatureDom(signature: ReturnType<typeof getSqlFunctionSignature
   closeNode.className = "text-[var(--ds-text-3)]";
   closeNode.textContent = ")";
   signatureNode.appendChild(closeNode);
-  dom.appendChild(signatureNode);
+  card.appendChild(signatureNode);
 
   return dom;
 }
@@ -1704,6 +1710,7 @@ onMounted(async () => {
       keymap,
       rectangularSelection,
       hoverTooltip,
+      hasHoverTooltips,
       showTooltip,
       Decoration,
       tooltips,
@@ -1798,17 +1805,35 @@ onMounted(async () => {
     return [field, diagnosticTheme];
   };
 
-  buildSqlSignatureExtension = () =>
-    showTooltip.compute(["doc", "selection"], (currentState) => {
-      const signature = getSqlFunctionSignatureHelp(currentState.doc.toString(), currentState.selection.main.head);
+  buildSqlSignatureExtension = () => {
+    const computeSignatureTooltip = (state: import("@codemirror/state").EditorState) => {
+      // While an identifier-hover card is showing, suppress the generic function
+      // signature card: both are opaque body-mounted tooltips and otherwise stack
+      // and visually collide when the cursor sits inside a call that's being hovered.
+      if (hasHoverTooltips(state)) return null;
+      const signature = getSqlFunctionSignatureHelp(state.doc.toString(), state.selection.main.head);
       if (!signature) return null;
       return {
-        pos: currentState.selection.main.head,
+        pos: state.selection.main.head,
         above: false,
         clip: false,
         create: () => ({ dom: createSignatureDom(signature) }),
       };
+    };
+    // A StateField (not showTooltip.compute) so `update` runs on every transaction —
+    // including the hover plugin's — letting us react when hover state toggles, which
+    // a ["doc", "selection"] compute would miss (hovering changes neither).
+    return StateField.define<import("@codemirror/view").Tooltip | null>({
+      create: (state) => computeSignatureTooltip(state),
+      update(value, tr) {
+        const hoverChanged = hasHoverTooltips(tr.startState) !== hasHoverTooltips(tr.state);
+        const selectionMoved = tr.startState.selection.main.head !== tr.state.selection.main.head;
+        if (!tr.docChanged && !selectionMoved && !hoverChanged) return value;
+        return computeSignatureTooltip(tr.state);
+      },
+      provide: (field) => showTooltip.from(field),
     });
+  };
 
   buildSqlCompletionExtension = () =>
     autocompletion({

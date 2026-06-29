@@ -382,9 +382,11 @@ export function editorFontTheme(
 
 export function buildSqlCompletionThemeRules(): CodeMirrorStyleSpec {
   return {
-    // Hover and signature tooltips supply their own card DOM (.ds-tooltip);
-    // keep the outer .cm-tooltip wrapper chrome-free so the editor theme's
-    // gray tooltip background doesn't bleed around the card.
+    // Hover and signature tooltips render their visible card as an inner `.ds-tooltip`
+    // element; the `.cm-tooltip` wrapper around it must stay chrome-free, otherwise the
+    // editor theme's gray tooltip background/border draws a second card around the inner
+    // one. (CodeMirror gives hover tooltips this wrapper via its hover host; signature
+    // tooltips build it explicitly in `createSignatureDom`.)
     ".cm-tooltip:not(.cm-tooltip-autocomplete)": {
       backgroundColor: "transparent !important",
       border: "none !important",
