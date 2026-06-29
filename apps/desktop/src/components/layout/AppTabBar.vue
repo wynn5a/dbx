@@ -127,6 +127,9 @@ function getTabMenuItems(tab: QueryTab): ContextMenuItem[] {
 }
 
 const tabsContainerRef = ref<HTMLElement | null>(null);
+// Stable element for resize detection: its width is fixed by the layout, not by the
+// overflow controls we toggle — observing the inner scroller instead would loop forever.
+const tabBarRootRef = ref<HTMLElement | null>(null);
 const tabScrollBehavior = ref<ScrollBehavior>("smooth");
 
 function scrollActiveTabIntoView(behavior: ScrollBehavior) {
@@ -143,6 +146,7 @@ const { hasTabOverflow, canScrollLeft, canScrollRight, updateScrollButtons, scro
   tabsContainerRef,
   // Keep the active tab visible when the bar is resized (window resize, sidebar toggle).
   () => scrollActiveTabIntoView("auto"),
+  tabBarRootRef,
 );
 
 onMounted(() => {
@@ -288,6 +292,7 @@ function activateTab(tabId: string) {
 <template>
   <div
     v-if="queryStore.tabs.length > 0 || showDriverStore"
+    ref="tabBarRootRef"
     class="relative flex border-b border-[var(--ds-border)] shrink-0 h-10 items-center bg-[var(--ds-bg-canvas)] px-2"
   >
     <button
