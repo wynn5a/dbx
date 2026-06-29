@@ -908,6 +908,19 @@ export default {
       title: "執行這條語句？",
       run: "執行",
       reject: "拒絕",
+      category: {
+        read: "唯讀",
+        low_risk_write: "低風險寫入",
+        write: "寫入",
+        schema_change: "結構變更",
+        dangerous: "高危操作",
+        unknown: "無法辨識",
+      },
+      production: "正式環境",
+      reasons: {
+        multi_statement: "多條語句",
+        empty_sql: "空語句",
+      },
     },
     agentOutcome: {
       executed: "已執行",

@@ -984,6 +984,19 @@ export default {
       title: "Run this statement?",
       run: "Run",
       reject: "Reject",
+      category: {
+        read: "Read-only",
+        low_risk_write: "Low-risk write",
+        write: "Write",
+        schema_change: "Schema change",
+        dangerous: "Destructive",
+        unknown: "Unrecognized",
+      },
+      production: "Production",
+      reasons: {
+        multi_statement: "Multiple statements",
+        empty_sql: "Empty SQL",
+      },
     },
     agentOutcome: {
       executed: "Executed",

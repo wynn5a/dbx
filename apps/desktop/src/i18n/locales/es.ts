@@ -868,6 +868,19 @@ export default {
       title: "¿Ejecutar esta sentencia?",
       run: "Ejecutar",
       reject: "Rechazar",
+      category: {
+        read: "Solo lectura",
+        low_risk_write: "Escritura de bajo riesgo",
+        write: "Escritura",
+        schema_change: "Cambio de esquema",
+        dangerous: "Destructiva",
+        unknown: "No reconocida",
+      },
+      production: "Producción",
+      reasons: {
+        multi_statement: "Varias sentencias",
+        empty_sql: "Sentencia vacía",
+      },
     },
     agentOutcome: {
       executed: "Ejecutado",

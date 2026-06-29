@@ -968,6 +968,19 @@ export default {
       title: "Eseguire questa istruzione?",
       run: "Esegui",
       reject: "Rifiuta",
+      category: {
+        read: "Sola lettura",
+        low_risk_write: "Scrittura a basso rischio",
+        write: "Scrittura",
+        schema_change: "Modifica schema",
+        dangerous: "Distruttiva",
+        unknown: "Non riconosciuta",
+      },
+      production: "Produzione",
+      reasons: {
+        multi_statement: "Più istruzioni",
+        empty_sql: "Istruzione vuota",
+      },
     },
     agentOutcome: {
       executed: "Eseguito",

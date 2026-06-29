@@ -964,6 +964,19 @@ export default {
       title: "执行这条语句？",
       run: "执行",
       reject: "拒绝",
+      category: {
+        read: "只读",
+        low_risk_write: "低风险写入",
+        write: "写入",
+        schema_change: "结构变更",
+        dangerous: "高危操作",
+        unknown: "无法识别",
+      },
+      production: "生产环境",
+      reasons: {
+        multi_statement: "多条语句",
+        empty_sql: "空语句",
+      },
     },
     agentOutcome: {
       executed: "已执行",

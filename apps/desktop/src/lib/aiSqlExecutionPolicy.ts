@@ -121,9 +121,3 @@ export function shouldAttemptAiAutoExecute(instruction: string, action: string):
   if (!normalized || NEGATIVE_EXECUTION_RE.test(normalized)) return false;
   return true;
 }
-
-export function extractFirstSqlCodeBlock(content: string): string | undefined {
-  const match = content.match(/```(?:sql|mysql|postgresql|sqlite|tsql|clickhouse)?\s*\n([\s\S]*?)```/i);
-  const sql = match?.[1]?.trim();
-  return sql || undefined;
-}

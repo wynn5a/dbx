@@ -72,22 +72,6 @@ function buildTurnUserPrompt(input: AiRequestInput): string {
   ].join("\n");
 }
 
-export async function runAiAction(input: AiRequestInput, history?: api.AiMessage[]): Promise<string> {
-  const systemPrompt = buildSystemPrompt(input.action, input.context, input.mode);
-  const userPrompt = buildTurnUserPrompt(input);
-
-  const messages: api.AiMessage[] = [...(history || []), { role: "user", content: userPrompt }];
-
-  const params = actionParams(input.action);
-  return api.aiComplete({
-    config: input.config,
-    systemPrompt,
-    messages,
-    maxTokens: params.maxTokens,
-    temperature: params.temperature,
-  });
-}
-
 export async function runAiStream(
   input: AiRequestInput,
   history: api.AiMessage[] | undefined,
@@ -131,12 +115,6 @@ function actionParams(action: AiAction): { maxTokens: number; temperature: numbe
     default:
       return { maxTokens: 2400, temperature: 0.15 };
   }
-}
-
-export function extractSql(text: string): string {
-  const fenced = text.match(/```(?:sql|mysql|postgresql|sqlite|tsql|clickhouse)?\s*([\s\S]*?)```/i);
-  if (fenced?.[1]) return fenced[1].trim();
-  return text.trim();
 }
 
 // Stable, cacheable system prompt: persona + rules + mode/action + db identity +

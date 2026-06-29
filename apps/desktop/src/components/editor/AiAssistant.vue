@@ -52,7 +52,11 @@ import {
   type AiAction,
   type AiContext,
 } from "@/lib/ai";
-import { classifyAiSqlExecution, type AiSqlExecutionDecision } from "@/lib/aiSqlExecutionPolicy";
+import {
+  classifyAiSqlExecution,
+  type AiSqlExecutionCategory,
+  type AiSqlExecutionDecision,
+} from "@/lib/aiSqlExecutionPolicy";
 import ExplainPlanViewer from "@/components/explain/ExplainPlanViewer.vue";
 import { parseExplainResult, type ParsedExplainPlan } from "@/lib/explainPlan";
 import type { QueryResult } from "@/types/database";
@@ -333,6 +337,37 @@ function agentStepClass(tone: AgentStepTone): string {
     default:
       return "border-[var(--ds-border)] bg-[var(--ds-bg-active)] text-[var(--ds-text-3)]";
   }
+}
+
+// Risk descriptors shown on the write-confirmation card, derived from the
+// client-side execution-policy classification of the SQL the agent wants to run.
+type RiskTone = "danger" | "warning" | "neutral";
+
+function confirmCategoryTone(category: AiSqlExecutionCategory): RiskTone {
+  if (category === "dangerous") return "danger";
+  if (category === "write" || category === "schema_change" || category === "unknown") return "warning";
+  return "neutral";
+}
+
+function confirmCategoryLabel(category: AiSqlExecutionCategory): string {
+  return t(`ai.toolConfirm.category.${category}`);
+}
+
+function riskBadgeClass(tone: RiskTone): string {
+  switch (tone) {
+    case "danger":
+      return "border-[color-mix(in_srgb,var(--ds-red)_35%,transparent)] bg-[color-mix(in_srgb,var(--ds-red)_14%,transparent)] text-[var(--ds-red)]";
+    case "warning":
+      return "border-[color-mix(in_srgb,var(--ds-amber)_35%,transparent)] bg-[color-mix(in_srgb,var(--ds-amber)_14%,transparent)] text-[var(--ds-amber)]";
+    default:
+      return "border-[var(--ds-border)] bg-[var(--ds-bg-active)] text-[var(--ds-text-3)]";
+  }
+}
+
+const KNOWN_CONFIRM_REASONS = new Set(["multi_statement", "empty_sql"]);
+
+function confirmReasonLabel(reason: string): string {
+  return KNOWN_CONFIRM_REASONS.has(reason) ? t(`ai.toolConfirm.reasons.${reason}`) : reason;
 }
 
 /** Parse a tool's `explain_data` (a serialized QueryResult) into a plan for the viewer. */
@@ -1065,6 +1100,29 @@ const messageRenderer = computed(() => {
                 <div class="flex items-center gap-1.5 text-[11px] font-medium text-[var(--ds-amber)]">
                   <AlertTriangle class="h-3.5 w-3.5 shrink-0" />
                   <span>{{ t("ai.toolConfirm.title") }}</span>
+                </div>
+                <div class="mt-1.5 flex flex-wrap items-center gap-1">
+                  <span
+                    class="inline-flex h-5 items-center rounded-full border px-1.5 text-[10px] font-medium"
+                    :class="riskBadgeClass(confirmCategoryTone(msg.pendingConfirm.decision.category))"
+                  >
+                    {{ confirmCategoryLabel(msg.pendingConfirm.decision.category) }}
+                  </span>
+                  <span
+                    v-if="msg.pendingConfirm.decision.environment === 'production'"
+                    class="inline-flex h-5 items-center rounded-full border px-1.5 text-[10px] font-medium"
+                    :class="riskBadgeClass('danger')"
+                  >
+                    {{ t("ai.toolConfirm.production") }}
+                  </span>
+                  <span
+                    v-for="reason in msg.pendingConfirm.decision.reasons"
+                    :key="reason"
+                    class="inline-flex h-5 items-center rounded-full border px-1.5 text-[10px] font-medium"
+                    :class="riskBadgeClass('neutral')"
+                  >
+                    {{ confirmReasonLabel(reason) }}
+                  </span>
                 </div>
                 <pre
                   class="mt-1.5 max-h-32 overflow-auto rounded bg-[var(--ds-bg-canvas)] px-2 py-1 font-mono text-[10px] text-[var(--ds-text-1)] whitespace-pre-wrap"

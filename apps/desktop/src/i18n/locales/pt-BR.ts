@@ -964,6 +964,19 @@ export default {
       title: "Executar esta instrução?",
       run: "Executar",
       reject: "Rejeitar",
+      category: {
+        read: "Somente leitura",
+        low_risk_write: "Escrita de baixo risco",
+        write: "Escrita",
+        schema_change: "Alteração de esquema",
+        dangerous: "Destrutiva",
+        unknown: "Não reconhecida",
+      },
+      production: "Produção",
+      reasons: {
+        multi_statement: "Várias instruções",
+        empty_sql: "Instrução vazia",
+      },
     },
     agentOutcome: {
       executed: "Executado",
