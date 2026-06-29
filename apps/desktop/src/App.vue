@@ -11,6 +11,7 @@ import EditorToolbar from "@/components/layout/EditorToolbar.vue";
 import ContentArea from "@/components/layout/ContentArea.vue";
 import AppDialogs from "@/components/layout/AppDialogs.vue";
 import WelcomeScreen from "@/components/layout/WelcomeScreen.vue";
+import { connectionDriverLabel, connectionIconType } from "@/lib/connectionPresentation";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -250,7 +251,30 @@ const connectionStats = computed(() => ({
   connected: connectionStore.connectedIds.size,
   types: new Set(connectionStore.connections.map((c) => c.driver_profile || c.db_type)).size,
 }));
-const recentConnections = computed(() => connectionStore.connections.slice(0, 5));
+// Distinct database types in use, most-frequent first, for the Welcome icon band.
+const databaseTypes = computed(() => {
+  const byKey = new Map<string, { iconType: string; label: string; count: number }>();
+  for (const c of connectionStore.connections) {
+    const key = c.driver_profile || c.db_type;
+    const existing = byKey.get(key);
+    if (existing) existing.count += 1;
+    else byKey.set(key, { iconType: connectionIconType(c), label: connectionDriverLabel(c), count: 1 });
+  }
+  return [...byKey.values()].sort((a, b) => b.count - a.count);
+});
+// Most-recently-used connections first (stable original order for ties and
+// never-used connections), so the Welcome quick-start reflects real recency.
+const recentConnections = computed(() => {
+  const lastUsed = connectionStore.connectionLastUsedAt;
+  return connectionStore.connections
+    .map((connection, index) => ({ connection, index }))
+    .sort((a, b) => {
+      const diff = (lastUsed[b.connection.id] ?? 0) - (lastUsed[a.connection.id] ?? 0);
+      return diff !== 0 ? diff : a.index - b.index;
+    })
+    .slice(0, 6)
+    .map((item) => item.connection);
+});
 const saveSqlFolders = computed(() => {
   const tab = activeTab.value;
   return tab ? savedSqlStore.listFolders(tab.connectionId) : [];
@@ -1150,7 +1174,10 @@ onUnmounted(() => {
               <WelcomeScreen
                 v-else
                 :connection-stats="connectionStats"
+                :database-types="databaseTypes"
                 :recent-connections="recentConnections"
+                :connected-ids="connectionStore.connectedIds"
+                :last-used-at="connectionStore.connectionLastUsedAt"
                 :app-version="appVersion"
                 :has-connections="connectionStore.connections.length > 0"
                 @open-connection-query="openConnectionQuery"

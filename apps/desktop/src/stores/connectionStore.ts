@@ -83,6 +83,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 
 const PINNED_TREE_NODES_STORAGE_KEY = "dbx-pinned-tree-nodes";
 const ACTIVE_CONNECTION_STORAGE_KEY = "dbx-active-connection";
+const CONNECTION_LAST_USED_STORAGE_KEY = "dbx-connection-last-used";
 type ImportSource = "dbx" | "navicat" | "dbeaver";
 
 interface TreeClipboardTableStructure {
@@ -126,6 +127,10 @@ export const useConnectionStore = defineStore("connection", () => {
   const treeNodes = ref<TreeNode[]>([]);
   const pinnedTreeNodeIds = ref<Set<string>>(new Set());
   const connectedIds = ref<Set<string>>(new Set());
+  // Per-connection "last used" timestamps (epoch ms), kept frontend-only in
+  // localStorage so the Welcome screen can surface and sort by recency without
+  // touching the backend ConnectionConfig schema.
+  const connectionLastUsedAt = ref<Record<string, number>>(loadConnectionLastUsedFromLocalStorage());
   const loadedTreeNodeChildrenIds = ref<Set<string>>(new Set());
   const connectionErrors = ref<Record<string, string>>({});
   const editingConnectionId = ref<string | null>(null);
@@ -387,6 +392,36 @@ export const useConnectionStore = defineStore("connection", () => {
       query_timeout_secs: config.query_timeout_secs ?? 30,
       idle_timeout_secs: config.idle_timeout_secs ?? 60,
     };
+  }
+
+  function loadConnectionLastUsedFromLocalStorage(): Record<string, number> {
+    try {
+      if (typeof localStorage === "undefined") return {};
+      const saved = localStorage.getItem(CONNECTION_LAST_USED_STORAGE_KEY);
+      const parsed = saved ? JSON.parse(saved) : {};
+      if (!parsed || typeof parsed !== "object") return {};
+      const result: Record<string, number> = {};
+      for (const [id, value] of Object.entries(parsed)) {
+        if (typeof value === "number" && Number.isFinite(value)) result[id] = value;
+      }
+      return result;
+    } catch {
+      return {};
+    }
+  }
+
+  function persistConnectionLastUsed() {
+    if (typeof localStorage === "undefined") return;
+    try {
+      localStorage.setItem(CONNECTION_LAST_USED_STORAGE_KEY, JSON.stringify(connectionLastUsedAt.value));
+    } catch {
+      // Ignore quota/serialization errors — last-used ordering is best-effort.
+    }
+  }
+
+  function recordConnectionUsed(connectionId: string) {
+    connectionLastUsedAt.value = { ...connectionLastUsedAt.value, [connectionId]: Date.now() };
+    persistConnectionLastUsed();
   }
 
   function loadPinnedTreeNodeIdsFromLocalStorage(): Set<string> {
@@ -739,10 +774,20 @@ export const useConnectionStore = defineStore("connection", () => {
       pinnedTreeNodeIds.value = prunePinnedTreeNodeIdsForConnection(pinnedTreeNodeIds.value, id);
     }
     persistPinnedTreeNodeIds();
+    let removedLastUsed = false;
+    const nextLastUsed = { ...connectionLastUsedAt.value };
     for (const id of removedIds) {
       clearConnectionError(id);
       connectedIds.value.delete(id);
       sidebarLayout.value = removeConnectionFromSidebarLayout(sidebarLayout.value, id);
+      if (id in nextLastUsed) {
+        delete nextLastUsed[id];
+        removedLastUsed = true;
+      }
+    }
+    if (removedLastUsed) {
+      connectionLastUsedAt.value = nextLastUsed;
+      persistConnectionLastUsed();
     }
     rebuildTreeNodes();
     persistSidebarLayoutDebounced();
@@ -849,6 +894,7 @@ export const useConnectionStore = defineStore("connection", () => {
       const id = await withConnectionAttemptTimeout(api.connectDb(config), config);
       activeConnectionId.value = id;
       connectedIds.value.add(id);
+      recordConnectionUsed(id);
       clearConnectionError(config.id);
       if (id !== config.id) clearConnectionError(id);
 
@@ -950,6 +996,7 @@ export const useConnectionStore = defineStore("connection", () => {
       await withConnectionAttemptTimeout(api.connectDb(config), config);
       connectedIds.value.add(connectionId);
       activeConnectionId.value = connectionId;
+      recordConnectionUsed(connectionId);
       clearConnectionError(connectionId);
     } catch (e) {
       recordConnectionError(connectionId, e);
@@ -2704,6 +2751,8 @@ export const useConnectionStore = defineStore("connection", () => {
     refreshDatabaseTreeNode,
     refreshObjectListTreeNode,
     connectedIds,
+    connectionLastUsedAt,
+    recordConnectionUsed,
     connectionErrors,
     setConnectionError,
     clearConnectionError,
