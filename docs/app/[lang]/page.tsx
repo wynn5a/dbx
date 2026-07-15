@@ -37,7 +37,7 @@ function formatStars(count: number) {
 
 async function getGitHubStarLabel() {
   try {
-    const response = await fetch('https://api.github.com/repos/t8y2/dbx', {
+    const response = await fetch('https://api.github.com/repos/wynn5a/dbx', {
       headers: { Accept: 'application/vnd.github+json' },
       next: { revalidate: 60 * 60 * 6 },
     });
@@ -545,7 +545,7 @@ export default async function LandingPage({
           <p className="mt-2 text-landing-muted text-sm leading-[1.65]">{t.footerDesc}</p>
         </div>
         <div className="flex items-center gap-2.5 flex-wrap justify-end max-[760px]:mt-[18px]">
-          <Link href="https://github.com/t8y2/dbx/releases/latest" target="_blank" className="landing-final-link inline-flex items-center justify-center min-h-[42px] rounded-[7px] px-[15px] text-sm font-[650]">
+          <Link href="https://github.com/wynn5a/dbx/releases/latest" target="_blank" className="landing-final-link inline-flex items-center justify-center min-h-[42px] rounded-[7px] px-[15px] text-sm font-[650]">
             {t.release}
           </Link>
           <Link href={`/${l}/docs/getting-started#docker`} target="_blank" className="landing-final-link inline-flex items-center justify-center min-h-[42px] rounded-[7px] px-[15px] text-sm font-[650]">

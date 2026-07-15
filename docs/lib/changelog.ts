@@ -32,8 +32,7 @@ type GitHubRelease = {
   prerelease: boolean;
 };
 
-const DEFAULT_BASE_URL = 'https://dl.dbxio.com/changelog';
-const GITHUB_RELEASES_URL = 'https://api.github.com/repos/t8y2/dbx/releases?per_page=30';
+const GITHUB_RELEASES_URL = 'https://api.github.com/repos/wynn5a/dbx/releases?per_page=30';
 
 const SECTION_MAP: Record<string, string> = {
   新功能: 'added',
@@ -48,17 +47,20 @@ const SECTION_MAP: Record<string, string> = {
   Removed: 'removed',
 };
 
-export function changelogUrl(lang: 'en' | 'cn') {
+export function changelogUrl(lang: 'en' | 'cn'): string | null {
   const baseUrl =
     (typeof process !== 'undefined' &&
       (process.env.NEXT_PUBLIC_CHANGELOG_BASE_URL || process.env.CHANGELOG_BASE_URL)) ||
-    DEFAULT_BASE_URL;
+    null;
 
-  return `${baseUrl}/releases-${lang}.json`;
+  return baseUrl ? `${baseUrl}/releases-${lang}.json` : null;
 }
 
 export async function fetchChangelog(lang: 'en' | 'cn'): Promise<ChangelogData> {
   const url = changelogUrl(lang);
+  if (!url) {
+    return fetchGitHubChangelog();
+  }
 
   try {
     return await requestJson<ChangelogData>(url);

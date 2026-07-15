@@ -3,7 +3,7 @@
   "name": "io.github.t8y2/dbx",
   "description": "Query and manage databases from AI agents using connections configured in DBX.",
   "repository": {
-    "url": "https://github.com/t8y2/dbx",
+    "url": "https://github.com/wynn5a/dbx",
     "source": "github"
   },
   "version": "0.4.7",
