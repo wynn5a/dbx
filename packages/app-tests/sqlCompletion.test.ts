@@ -288,7 +288,9 @@ test("shows column comments in WHERE field completions", () => {
   });
 
   const column = items.find((item) => item.type === "column" && item.label === "status");
-  assert.equal(column?.detail, "public.orders  [varchar]  NOT NULL  -- Order lifecycle state");
+  // The comment stays out of the inline detail (which crowds the column name)
+  // and appears only in the hover info panel.
+  assert.equal(column?.detail, "public.orders  [varchar]  NOT NULL");
   assert.equal(column?.info, "public.orders.status\nType: varchar\nNullable: no\nComment: Order lifecycle state");
 });
 

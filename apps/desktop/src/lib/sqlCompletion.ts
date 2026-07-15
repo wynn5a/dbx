@@ -2453,14 +2453,13 @@ function isKeyColumn(name: string): boolean {
 }
 
 function buildColumnDetail(column: SqlCompletionColumn): string {
+  // Keep the inline detail short so the column name (the label) always stays
+  // fully visible. The comment can be long and would push the name into
+  // truncation, so it lives only in the hover `info` panel (buildColumnInfo).
   const tableInfo = column.schema ? `${column.schema}.${column.table}` : column.table;
   let detail = column.dataType ? `${tableInfo}  [${column.dataType}]` : tableInfo;
   if (column.isNullable === false) {
     detail += "  NOT NULL";
-  }
-  const comment = column.comment?.trim();
-  if (comment) {
-    detail += `  -- ${comment}`;
   }
   return detail;
 }
