@@ -75,7 +75,7 @@
       }
     },
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJCOTBGRkRCRjMxQjlDODAKUldTQW5CdnoyLytRSzZrZGN6OFlid2ZDdjJMb1VQRHdMd3JWblNtbDMxUzNVbnJxelpUeXJ0YnYK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhDOTMyOUE2NjYzODZEMTQKUldRVWJUaG1waW1UaktQblhEMllVdTE4VjZ1NWtZYzc5bCt0TlAzNVJQemVlUnZWRmtVQXp2MEMK",
       "endpoints": [
         "https://github.com/wynn5a/dbx/releases/latest/download/latest.json"
       ]
