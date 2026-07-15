@@ -370,6 +370,7 @@ export default {
       executeSelection: "Esegui selezione",
       executeCurrent: "Esegui SQL",
       copySelection: "Copia selezione",
+      selectStatement: "Seleziona istruzione",
       selectAll: "Seleziona tutto",
     },
     search: {

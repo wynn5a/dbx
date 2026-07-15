@@ -361,6 +361,7 @@ export default {
       executeSelection: "執行選取 SQL",
       executeCurrent: "執行 SQL",
       copySelection: "複製選取內容",
+      selectStatement: "選取目前 SQL",
       selectAll: "全選",
     },
     search: {

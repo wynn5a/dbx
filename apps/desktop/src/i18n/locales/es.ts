@@ -365,6 +365,7 @@ export default {
       executeSelection: "Ejecutar seleccion",
       executeCurrent: "Ejecutar SQL",
       copySelection: "Copiar seleccion",
+      selectStatement: "Seleccionar sentencia",
       selectAll: "Seleccionar todo",
     },
     search: {

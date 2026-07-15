@@ -42,6 +42,7 @@ import {
   type ElasticsearchCompletionItem,
 } from "@/lib/elasticsearchCompletion";
 import { extractIdentifierAt, isSqlKeyword, matchTable } from "@/lib/sqlNavigation";
+import { sqlStatementRangeAt } from "@/lib/sqlStatementSelection";
 import { lineColumnToOffset, parseSqlErrorLocation } from "@/lib/sqlDiagnostics";
 import {
   DBX_TABLE_REFERENCE_MIME,
@@ -342,6 +343,24 @@ async function copySelectedSqlFromContextMenu() {
   }
 }
 
+function selectStatementAt(currentView: EditorViewType, pos: number): boolean {
+  const range = sqlStatementRangeAt(currentView.state.doc.toString(), pos);
+  if (!range) return false;
+  currentView.dispatch({
+    selection: { anchor: range.from, head: range.to },
+    scrollIntoView: true,
+    userEvent: "select.pointer",
+  });
+  return true;
+}
+
+function selectStatementFromContextMenu() {
+  const currentView = view.value;
+  if (!currentView) return;
+  selectStatementAt(currentView, currentView.state.selection.main.head);
+  focusEditor();
+}
+
 function selectAllSqlFromContextMenu() {
   const currentView = view.value;
   if (!currentView) return;
@@ -381,6 +400,12 @@ const contextMenuItems = computed<ContextMenuItem[]>(() => [
     action: copySelectedSqlFromContextMenu,
     disabled: !canCopySelectedSql.value,
     icon: Copy,
+  },
+  {
+    label: t("editor.contextMenu.selectStatement"),
+    action: selectStatementFromContextMenu,
+    disabled: !canExecuteContextSql.value,
+    icon: TextSelect,
   },
   { label: t("editor.contextMenu.selectAll"), action: selectAllSqlFromContextMenu, icon: TextSelect },
 ]);
@@ -1682,6 +1707,17 @@ async function resolveCtrlClickTarget(doc: string, pos: number, identifier: stri
 }
 
 function handleEditorMouseDown(event: MouseEvent): boolean {
+  // Triple click -> select the whole statement under the cursor. The default
+  // triple-click line selection can't grab a statement that spans multiple
+  // lines, and drag-selecting across wrapped lines is fiddly.
+  if (event.button === 0 && event.detail >= 3 && !event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+    const currentView = view.value;
+    const pos = currentView?.posAtCoords({ x: event.clientX, y: event.clientY });
+    if (currentView && pos != null && selectStatementAt(currentView, pos)) {
+      event.preventDefault();
+      return true;
+    }
+  }
   // Click without modifier -> close column panel
   if (!event.metaKey && !event.ctrlKey) {
     if (event.button === 0) emit("closeColumnPanel");

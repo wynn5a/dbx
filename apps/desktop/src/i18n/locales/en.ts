@@ -383,6 +383,7 @@ export default {
       executeSelection: "Execute selection",
       executeCurrent: "Execute SQL",
       copySelection: "Copy selection",
+      selectStatement: "Select statement",
       selectAll: "Select all",
     },
     search: {
