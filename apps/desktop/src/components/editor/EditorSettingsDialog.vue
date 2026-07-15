@@ -3256,7 +3256,7 @@ watch(
                 <button
                   type="button"
                   class="rounded-lg border border-[var(--ds-border)] p-4 text-left transition-colors duration-[var(--ds-speed)] ease-[var(--ds-ease)] hover:border-[var(--ds-border-strong)] hover:bg-[var(--ds-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ds-accent-line)]"
-                  @click="openExternalUrl('https://github.com/t8y2/dbx')"
+                  @click="openExternalUrl('https://github.com/wynn5a/dbx')"
                 >
                   <div class="ds-menu-label">
                     {{ t("settings.project") }}
@@ -3270,7 +3270,7 @@ watch(
                     {{ t("settings.openSource") }}
                     <ExternalLink class="ml-auto h-3.5 w-3.5 text-[var(--ds-text-3)]" />
                   </div>
-                  <div class="mt-1 text-sm text-[var(--ds-accent)]">github.com/t8y2/dbx</div>
+                  <div class="mt-1 text-sm text-[var(--ds-accent)]">github.com/wynn5a/dbx</div>
                 </button>
                 <button
                   type="button"

@@ -163,18 +163,25 @@ jobs:
           path: dist
 
       # Sets tauri.conf.json/package.json version from the tag, disables
-      # updater artifacts (no signing key here), and clears beforeBuildCommand
-      # so tauri build consumes the downloaded dist instead of rebuilding it.
+      # updater artifacts when the signing key secret is missing, and clears
+      # beforeBuildCommand so tauri build consumes the downloaded dist instead
+      # of rebuilding it.
       - name: Set version from tag
         shell: bash
         env:
           TAG_NAME: ${{ github.ref_name }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: node .github/scripts/set-release-version.mjs "${TAG_NAME#v}"
 
+      # With TAURI_SIGNING_PRIVATE_KEY set, tauri-action also signs the update
+      # bundles and uploads latest.json (uploadUpdaterJson defaults to true),
+      # which is what the in-app updater endpoint fetches.
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.prepare.outputs.release_id }}
           args: --target ${{ matrix.target }}
