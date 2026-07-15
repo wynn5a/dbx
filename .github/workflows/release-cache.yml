@@ -1,16 +1,31 @@
 name: Release Cache Warm
 
-# Tag-triggered workflows (tauri-build.yml) can only restore caches from the
-# default branch — never from another tag. So a v1.2.4 release cannot reuse the
-# cache built by v1.2.3 directly. This workflow runs on main and writes the
-# release-profile build cache, keyed by major version, so every v<major>.x.x
-# release restores a single shared, warm cache.
+# Tag-triggered workflows (release.yml) can only restore caches from the
+# default branch — never from another tag. So a v1.2.4 release cannot reuse
+# the cache built by v1.2.3 directly. This workflow runs on main and writes
+# the release-profile DEPENDENCY cache, keyed by major version, so every
+# v<major>.x.x release restores a single shared, warm cache.
+#
+# Scope: rust-cache only keeps dependency artifacts — it purges the workspace
+# crates (dbx, dbx-core, dbx-web) from the cache on save. The cacheable set
+# therefore only changes when Cargo.lock / Cargo.toml / the toolchain change,
+# which is exactly when this runs. (The old design warmed on every push to
+# main: four full release builds per merge whose most expensive output — the
+# workspace build + LTO link — was 100% discarded.)
 on:
-  # Re-warm on every merge to main so the release cache always reflects the
-  # latest workspace state (and never goes stale enough for GitHub's 7-day
-  # eviction to drop it).
   push:
     branches: [main]
+    paths:
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'src-tauri/Cargo.toml'
+      - 'crates/*/Cargo.toml'
+      - 'rust-toolchain*'
+      - '.github/workflows/release-cache.yml'
+  schedule:
+    # Weekly keep-alive: restoring a cache resets GitHub's 7-day eviction
+    # clock, and a new stable rustc (new cache key) gets re-warmed here.
+    - cron: '0 3 * * 1'
   workflow_dispatch:
 
 concurrency:
@@ -21,7 +36,7 @@ jobs:
   warm:
     strategy:
       fail-fast: false
-      # Mirror tauri-build.yml exactly: same runners + targets, so the cached
+      # Mirror release.yml exactly: same runners + targets, so the cached
       # artifacts match what the release build consumes.
       matrix:
         include:
@@ -35,6 +50,7 @@ jobs:
             target: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -46,22 +62,6 @@ jobs:
           # main, so it lines up with the tags cut from this branch.
           MAJOR=$(node -p "require('./package.json').version.split('.')[0]")
           echo "major=${MAJOR}" >> "$GITHUB_OUTPUT"
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
-
-      # tauri::generate_context! reads the frontend dist at compile time, so a
-      # dist must exist for `cargo build -p dbx` to compile.
-      - name: Build frontend
-        run: pnpm build
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -82,8 +82,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev xdg-utils
 
-      # Compile the same crate the release builds (dbx = src-tauri), pulling in
-      # tauri/wry/dbx-core/duckdb and every other heavy dependency. We skip
-      # tauri-action packaging; only the cached target/ artifacts matter here.
+      # tauri::generate_context! only needs a dist directory to exist at
+      # compile time; its contents only affect the dbx crate's own artifacts,
+      # which rust-cache purges from the cache anyway. A stub dist replaces
+      # the Node setup + pnpm install + vite build the old warmer paid for.
+      - name: Stub frontend dist
+        shell: bash
+        run: |
+          mkdir -p dist
+          echo '<!doctype html><title>cache warm stub</title>' > dist/index.html
+
+      # Compile the same crate the release builds (dbx = src-tauri), pulling
+      # in tauri/wry/dbx-core/duckdb and every other heavy dependency. Only
+      # the cached dependency artifacts matter here.
       - name: Warm release build cache
         run: cargo build --release --target ${{ matrix.target }} -p dbx

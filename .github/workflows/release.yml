@@ -1,0 +1,190 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  # Create the draft release and build the frontend ONCE. The dist is
+  # platform-independent (vite.config's isTauri only affects the dev server),
+  # so building it per-platform in the matrix just re-paid pnpm install +
+  # vite build four times — worst on the slow Intel mac runner.
+  prepare:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    outputs:
+      major: ${{ steps.meta.outputs.major }}
+      release_id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate tag and compute cache major version
+        id: meta
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "Tag does not contain a semver version: $TAG_NAME" >&2
+            exit 1
+          fi
+          # Release caches are shared per major series (all v1.x.x); the warm
+          # cache is written on main by release-cache.yml because tag runs can
+          # only restore caches from the default branch.
+          echo "major=${VERSION%%.*}" >> "$GITHUB_OUTPUT"
+
+      # Draft first, publish in the final job: the release only becomes
+      # visible (to the in-app updater and the docs site) once every
+      # platform's assets are uploaded. Also removes the race of four matrix
+      # jobs concurrently creating the same release.
+      - name: Create draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          # GET /releases/tags/<tag> cannot see drafts, so list-and-filter to
+          # make re-runs reuse the draft created by a previous attempt.
+          id=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq ".[] | select(.tag_name == \"${TAG_NAME}\") | .id" | head -n1)
+          if [ -z "$id" ]; then
+            id=$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases" \
+              -f "tag_name=${TAG_NAME}" \
+              -f "name=DBX ${TAG_NAME}" \
+              -f "body=DBX ${TAG_NAME}" \
+              -F draft=true \
+              --jq .id)
+          fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Set version from tag
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: node .github/scripts/set-release-version.mjs "${TAG_NAME#v}"
+
+      - name: Build frontend
+        run: pnpm build
+
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: macos-15-intel
+            target: x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          # Pinned to windows-2022 (VS 2022, MSVC 14.4x). windows-latest moved
+          # to windows-2025 with VS 2026 (MSVC 14.51), which removed
+          # stdext::checked_array_iterator — a symbol DuckDB's bundled fmt
+          # (libduckdb-sys) still references, breaking the MSVC build. See
+          # https://github.com/fmtlib/fmt/issues/3540
+          - platform: windows-2022
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # tauri-action drives the build through `pnpm tauri`, so node_modules
+      # must exist; the frontend itself is NOT rebuilt here (see prepare).
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: './ -> target'
+          shared-key: release-v${{ needs.prepare.outputs.major }}-${{ matrix.target }}
+          # Restore the cache release-cache.yml warmed on main; never save. A
+          # tag's cache is isolated to that tag, so saving just wastes the
+          # 10 GB repo budget without ever being reused.
+          save-if: false
+
+      - name: Install system dependencies (Linux)
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev xdg-utils
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist
+
+      # Sets tauri.conf.json/package.json version from the tag, disables
+      # updater artifacts (no signing key here), and clears beforeBuildCommand
+      # so tauri build consumes the downloaded dist instead of rebuilding it.
+      - name: Set version from tag
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: node .github/scripts/set-release-version.mjs "${TAG_NAME#v}"
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          args: --target ${{ matrix.target }}
+
+  # Flip the draft to published only after every platform uploaded its
+  # assets. If a platform fails, the draft stays invisible; re-run the failed
+  # jobs and this one completes the release.
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/${{ needs.prepare.outputs.release_id }}" \
+            -F draft=false
