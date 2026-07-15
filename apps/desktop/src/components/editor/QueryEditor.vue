@@ -501,6 +501,35 @@ async function ensureColumnsForTable(table: { name: string; schema?: string | nu
   cachedColumnsByTable.set(cacheKey, columns);
 }
 
+// A bare `from destinations` reference carries no schema, but its columns get
+// fetched and cached under the resolved schema (e.g. `public.destinations`).
+// Completion resolves that schema before loading columns; hover must do the
+// same, otherwise it queries columns under the connection's default schema
+// (often empty) and finds nothing. Resolve from the shared table cache first,
+// then fall back to a name lookup so hover works before completion has run.
+async function resolveReferencedTableSchema<T extends { name: string; schema?: string; columns?: unknown }>(
+  refTable: T,
+): Promise<T> {
+  if (refTable.schema || refTable.columns || !props.connectionId || props.database == null) return refTable;
+  const cached = cachedTables.find((t) => t.name.toLowerCase() === refTable.name.toLowerCase());
+  if (cached?.schema) return { ...refTable, schema: cached.schema };
+  try {
+    const lookup = await connectionStore.listCompletionTables(
+      props.connectionId,
+      props.database,
+      refTable.name,
+      MAX_COMPLETION_TABLES,
+      props.schema,
+    );
+    const matched = lookup.find((t) => t.name.toLowerCase() === refTable.name.toLowerCase());
+    if (lookup.length > 0) cachedTables = [...cachedTables, ...lookup];
+    if (matched?.schema) return { ...refTable, schema: matched.schema };
+  } catch {
+    // fall through to the unresolved reference
+  }
+  return refTable;
+}
+
 async function ensureForeignKeysForTable(table: { name: string; schema?: string | null }) {
   const cacheKey = completionCacheKey(table);
   if (cachedForeignKeysByTable.has(cacheKey) || !props.connectionId || props.database == null) return;
@@ -677,7 +706,8 @@ async function resolveSqlHoverTooltip(currentView: EditorViewType, pos: number) 
         )
       : context.referencedTables;
 
-    for (const refTable of candidates) {
+    for (const rawRefTable of candidates) {
+      const refTable = await resolveReferencedTableSchema(rawRefTable);
       await ensureColumnsForTable(refTable);
       const columns = cachedColumnsByTable.get(completionCacheKey(refTable)) ?? [];
       const column = columns.find((col) => col.name.toLowerCase() === name.toLowerCase());
