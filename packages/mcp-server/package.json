@@ -33,10 +33,10 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/t8y2/dbx",
+    "url": "https://github.com/wynn5a/dbx",
     "directory": "packages/mcp-server"
   },
-  "homepage": "https://github.com/t8y2/dbx/tree/main/packages/mcp-server",
+  "homepage": "https://github.com/wynn5a/dbx/tree/main/packages/mcp-server",
   "dependencies": {
     "@dbx-app/node-core": "workspace:^",
     "@modelcontextprotocol/sdk": "^1.12.1",

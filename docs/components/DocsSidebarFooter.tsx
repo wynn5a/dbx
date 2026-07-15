@@ -58,7 +58,7 @@ export function DocsSidebarFooter() {
         <div className="flex items-center gap-1">
           <a
             className={iconButton}
-            href="https://github.com/t8y2/dbx"
+            href="https://github.com/wynn5a/dbx"
             target="_blank"
             rel="noreferrer"
             aria-label="GitHub"

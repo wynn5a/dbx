@@ -13,38 +13,13 @@ This guide gets you through three things:
 
 <Tabs groupId="platform" items={['macOS', 'Windows', 'Linux', 'Docker']}>
   <Tab value="macOS">
-    Install with Homebrew:
-
-    ```bash
-    brew install --cask dbx
-    ```
-
-    Update later with:
-
-    ```bash
-    brew upgrade --cask dbx
-    ```
-
-    You can also download a `.dmg` installer from [GitHub Releases](https://github.com/t8y2/dbx/releases).
+    Download the `.dmg` installer from [GitHub Releases](https://github.com/wynn5a/dbx/releases) and drag DBX into Applications.
   </Tab>
   <Tab value="Windows">
-    Install with Scoop:
-
-    ```bash
-    scoop bucket add dbx https://github.com/t8y2/scoop-bucket
-    scoop install dbx
-    ```
-
-    Update later with:
-
-    ```bash
-    scoop update dbx
-    ```
-
-    You can also download a `.msi` installer from [GitHub Releases](https://github.com/t8y2/dbx/releases).
+    Download the `.msi` installer from [GitHub Releases](https://github.com/wynn5a/dbx/releases) and run it.
   </Tab>
   <Tab value="Linux">
-    Download a package from [GitHub Releases](https://github.com/t8y2/dbx/releases):
+    Download a package from [GitHub Releases](https://github.com/wynn5a/dbx/releases):
 
     | Format | Use Case |
     |---|---|
@@ -58,33 +33,15 @@ This guide gets you through three things:
     ```
   </Tab>
   <Tab value="Docker">
-    Docker is for self-hosting DBX on a server and opening it from a browser:
+    Docker is for self-hosting DBX on a server and opening it from a browser. Build and run it from source with the compose file shipped in the repository:
 
     ```bash
-    docker run -d \
-      --name dbx \
-      -p 4224:4224 \
-      -v dbx-data:/app/data \
-      t8y2/dbx
+    git clone https://github.com/wynn5a/dbx.git
+    cd dbx
+    docker compose -f deploy/docker-compose.yml up -d --build
     ```
 
-    Then open `http://localhost:4224`.
-
-    Docker Compose:
-
-    ```yaml
-    services:
-      dbx:
-        image: t8y2/dbx
-        ports:
-          - "4224:4224"
-        volumes:
-          - dbx-data:/app/data
-        restart: unless-stopped
-
-    volumes:
-      dbx-data:
-    ```
+    Then open `http://localhost:4224`. The web password is set via `DBX_PASSWORD` in `deploy/docker-compose.yml` — change it before exposing the server.
   </Tab>
 </Tabs>
 
@@ -200,7 +157,7 @@ Use source mode when contributing or debugging DBX locally.
 ### Start Development
 
 ```bash
-git clone https://github.com/t8y2/dbx.git
+git clone https://github.com/wynn5a/dbx.git
 cd dbx
 pnpm install
 pnpm dev:tauri

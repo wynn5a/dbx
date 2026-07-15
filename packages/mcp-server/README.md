@@ -1,6 +1,6 @@
 # DBX MCP Server
 
-MCP server for [DBX](https://github.com/t8y2/dbx) — lets AI agents (Claude Code, Cursor, etc.) query your databases using connections already configured in DBX.
+MCP server for [DBX](https://github.com/wynn5a/dbx) — lets AI agents (Claude Code, Cursor, etc.) query your databases using connections already configured in DBX.
 
 [中文](#中文说明) | English
 
@@ -128,7 +128,7 @@ PostgreSQL, MySQL, SQLite, Doris, StarRocks, and Redshift queries run directly f
 
 ## Requirements
 
-- [DBX](https://github.com/t8y2/dbx) installed with at least one connection configured
+- [DBX](https://github.com/wynn5a/dbx) installed with at least one connection configured
 - Node.js 22.13.0 或更高版本
 
 ## License
@@ -139,7 +139,7 @@ Apache-2.0
 
 ## 中文说明
 
-[DBX](https://github.com/t8y2/dbx) 的 MCP Server，让 AI 编程助手（Claude Code、Cursor 等）直接使用 DBX 中已配置的数据库连接查询数据。
+[DBX](https://github.com/wynn5a/dbx) 的 MCP Server，让 AI 编程助手（Claude Code、Cursor 等）直接使用 DBX 中已配置的数据库连接查询数据。
 
 ### 特性
 
@@ -245,5 +245,5 @@ PostgreSQL、MySQL、SQLite、Doris、StarRocks、Redshift 查询可由 MCP Serv
 
 ### 系统要求
 
-- 已安装 [DBX](https://github.com/t8y2/dbx) 并配置了至少一个数据库连接
+- 已安装 [DBX](https://github.com/wynn5a/dbx) 并配置了至少一个数据库连接
 - Node.js 22.13.0 or newer

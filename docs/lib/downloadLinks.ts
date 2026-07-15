@@ -12,7 +12,7 @@ type DownloadArtifact = {
   suffix: string;
 };
 
-const DOWNLOAD_BASE_URL = 'https://dl.dbxio.com/releases/latest';
+const DOWNLOAD_BASE_URL = 'https://github.com/wynn5a/dbx/releases/download';
 
 const downloadArtifacts: DownloadArtifact[] = [
   {
@@ -35,17 +35,12 @@ const downloadArtifacts: DownloadArtifact[] = [
     labels: { en: 'For Linux x64', cn: '适用于 Linux x64' },
     suffix: 'amd64.AppImage',
   },
-  {
-    id: 'linux-arm',
-    labels: { en: 'For Linux ARM64', cn: '适用于 Linux ARM64' },
-    suffix: 'aarch64.AppImage',
-  },
 ];
 
 export function createInstallOptions(lang: InstallLang, version: string): InstallOption[] {
   return downloadArtifacts.map((artifact) => ({
     id: artifact.id,
     label: artifact.labels[lang],
-    href: `${DOWNLOAD_BASE_URL}/DBX_${version}_${artifact.suffix}`,
+    href: `${DOWNLOAD_BASE_URL}/v${version}/DBX_${version}_${artifact.suffix}`,
   }));
 }

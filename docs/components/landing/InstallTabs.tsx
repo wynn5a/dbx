@@ -2,7 +2,7 @@
 
 import { ChevronDown, Download, Server } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { createInstallOptions, type InstallOption } from '@/lib/downloadLinks';
+import { createInstallOptions } from '@/lib/downloadLinks';
 import { fetchLatestReleaseInfo } from '@/lib/latestRelease';
 
 type InstallTabsProps = {
@@ -33,7 +33,7 @@ function detectPlatformId(): string {
   if (typeof navigator === 'undefined') return 'macos-arm';
   const ua = navigator.userAgent.toLowerCase();
   if (ua.includes('win')) return 'windows';
-  if (ua.includes('linux')) return ua.includes('aarch64') || ua.includes('arm') ? 'linux-arm' : 'linux';
+  if (ua.includes('linux')) return 'linux';
   return 'macos-arm';
 }
 

@@ -84,7 +84,7 @@ export function LandingNav({
             {t.drivers}
           </Link>
           <Link
-            href="https://github.com/t8y2/dbx"
+            href="https://github.com/wynn5a/dbx"
             target="_blank"
             className="landing-nav-link rounded-[7px] px-[11px] py-2 text-landing-muted text-[13px] font-medium max-[760px]:hidden"
           >
