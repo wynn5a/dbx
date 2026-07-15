@@ -139,7 +139,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: './ -> target'
-          shared-key: release-v${{ needs.prepare.outputs.major }}-${{ matrix.target }}
+          # Must mirror release-cache.yml's shared-key exactly. The root
+          # Cargo.toml hash is included because rust-cache never hashes the
+          # virtual workspace root, where [profile.release] lives.
+          shared-key: release-v${{ needs.prepare.outputs.major }}-${{ matrix.target }}-${{ hashFiles('Cargo.toml') }}
           # Restore the cache release-cache.yml warmed on main; never save. A
           # tag's cache is isolated to that tag, so saving just wastes the
           # 10 GB repo budget without ever being reused.

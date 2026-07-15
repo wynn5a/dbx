@@ -68,16 +68,23 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # The root Cargo.toml hash is baked into the shared-key because
+      # rust-cache only hashes workspace MEMBER manifests + Cargo.lock — the
+      # virtual workspace root (where [profile.release] lives) never enters
+      # its key. Without this, a profile change (e.g. the LTO mode) reuses the
+      # old key, hits the existing cache, and silently skips saving the
+      # rebuilt artifacts (GitHub caches are immutable).
       - name: Rust cache
+        id: rust_cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: './ -> target'
-          shared-key: release-v${{ steps.cache_ver.outputs.major }}-${{ matrix.target }}
+          shared-key: release-v${{ steps.cache_ver.outputs.major }}-${{ matrix.target }}-${{ hashFiles('Cargo.toml') }}
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install system dependencies (Linux)
-        if: startsWith(matrix.platform, 'ubuntu')
+        if: startsWith(matrix.platform, 'ubuntu') && steps.rust_cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev xdg-utils
@@ -87,6 +94,7 @@ jobs:
       # which rust-cache purges from the cache anyway. A stub dist replaces
       # the Node setup + pnpm install + vite build the old warmer paid for.
       - name: Stub frontend dist
+        if: steps.rust_cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           mkdir -p dist
@@ -95,5 +103,14 @@ jobs:
       # Compile the same crate the release builds (dbx = src-tauri), pulling
       # in tauri/wry/dbx-core/duckdb and every other heavy dependency. Only
       # the cached dependency artifacts matter here.
+      #
+      # --features tauri/custom-protocol matches what `tauri build` passes to
+      # cargo (tauri-cli interface/rust.rs); without it the whole tauri/wry
+      # stack is warmed with a different feature set and every release
+      # recompiles it anyway.
+      #
+      # Skipped entirely on an exact cache hit: the key already exists, so
+      # rust-cache would skip saving and the build output would be discarded.
       - name: Warm release build cache
-        run: cargo build --release --target ${{ matrix.target }} -p dbx
+        if: steps.rust_cache.outputs.cache-hit != 'true'
+        run: cargo build --release --target ${{ matrix.target }} -p dbx --features tauri/custom-protocol
