@@ -14,7 +14,10 @@ mysql_common = { git = "https://github.com/t8y2/rust_mysql_common.git", rev = "5
 [profile.release]
 panic = "abort"
 strip = true
-lto = true
+# Thin, not fat, LTO: the fat-LTO final link re-optimizes every dependency's
+# bitcode single-threaded — 10-30 min per release platform that no build cache
+# can absorb. Thin LTO parallelizes that step for a few percent of binary size.
+lto = "thin"
 codegen-units = 1
 opt-level = "s"
 
