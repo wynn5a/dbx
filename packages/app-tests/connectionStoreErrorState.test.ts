@@ -34,15 +34,27 @@ function conn(id: string): ConnectionConfig {
   };
 }
 
+function installTauriInvokeStub(router: (cmd: string, args: Record<string, unknown>) => Promise<unknown>) {
+  const originalWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    __TAURI_INTERNALS__: {
+      invoke: async (cmd: string, args?: Record<string, unknown>) => router(cmd, args ?? {}),
+    },
+  };
+  return () => {
+    if (originalWindow === undefined) Reflect.deleteProperty(globalThis as any, "window");
+    else (globalThis as any).window = originalWindow;
+  };
+}
+
 test("successful disconnect clears the connection error", async () => {
   const restoreStorage = installMemoryStorage();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (input) => {
-    if (String(input) === "/api/connection/disconnect") {
-      return new Response("null", { status: 200, headers: { "Content-Type": "application/json" } });
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    if (cmd === "disconnect_db") {
+      return null;
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     setActivePinia(createPinia());
@@ -54,20 +66,19 @@ test("successful disconnect clears the connection error", async () => {
 
     assert.equal(store.connectionErrors["conn-1"], undefined);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
 
 test("failed disconnect keeps the existing connection error", async () => {
   const restoreStorage = installMemoryStorage();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (input) => {
-    if (String(input) === "/api/connection/disconnect") {
-      return new Response("disconnect failed", { status: 500 });
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    if (cmd === "disconnect_db") {
+      throw new Error("disconnect failed");
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     setActivePinia(createPinia());
@@ -79,7 +90,7 @@ test("failed disconnect keeps the existing connection error", async () => {
 
     assert.equal(store.connectionErrors["conn-1"], "metadata failed");
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });

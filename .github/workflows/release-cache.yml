@@ -7,7 +7,7 @@ name: Release Cache Warm
 # v<major>.x.x release restores a single shared, warm cache.
 #
 # Scope: rust-cache only keeps dependency artifacts — it purges the workspace
-# crates (dbx, dbx-core, dbx-web) from the cache on save. The cacheable set
+# crates (dbx, dbx-core) from the cache on save. The cacheable set
 # therefore only changes when Cargo.lock / Cargo.toml / the toolchain change,
 # which is exactly when this runs. (The old design warmed on every push to
 # main: four full release builds per merge whose most expensive output — the

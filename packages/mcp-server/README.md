@@ -67,15 +67,6 @@ In Claude Code, just ask:
 
 ## CLI
 
-For terminal, script, and Codex workflows, install the dedicated CLI package:
-
-```bash
-npm install -g @dbx-app/cli
-dbx connections list --json
-dbx query local "select 1" --json
-```
-
-See the [DBX CLI README](../cli/README.md) for command details.
 
 ## Tools
 
@@ -124,7 +115,7 @@ The MCP server reads your database connections from DBX's SQLite database:
 
 The `dbx_open_table` tool communicates with the running DBX app to open tables directly in the UI. This requires DBX to be running. If DBX is not running, the tool will return an error message.
 
-PostgreSQL, MySQL, SQLite, Doris, StarRocks, and Redshift queries run directly from the MCP server. Other database types still use the DBX desktop bridge for query, table, and column operations unless `DBX_WEB_URL` is configured.
+PostgreSQL, MySQL, SQLite, Doris, StarRocks, and Redshift queries run directly from the MCP server. Other database types use the DBX desktop bridge for query, table, and column operations.
 
 ## Requirements
 
@@ -190,13 +181,6 @@ npx @dbx-app/mcp-server
 
 ### CLI
 
-终端、脚本和 Codex 工作流请安装独立 CLI 包：
-
-```bash
-npm install -g @dbx-app/cli
-dbx connections list --json
-dbx query local "select 1" --json
-```
 
 命令详情见 [DBX CLI README](../cli/README.md)。
 
@@ -241,7 +225,7 @@ MCP Server 从 DBX 的 SQLite 数据库读取连接信息：
 
 `dbx_open_table` 工具通过本地 HTTP 接口与运行中的 DBX 应用通信，直接在 UI 中打开表。需要 DBX 正在运行。
 
-PostgreSQL、MySQL、SQLite、Doris、StarRocks、Redshift 查询可由 MCP Server 直接执行。其他数据库类型的查询、表列表、字段读取仍会走 DBX 桌面端 bridge，除非配置了 `DBX_WEB_URL` 使用 Web 后端。
+PostgreSQL、MySQL、SQLite、Doris、StarRocks、Redshift 查询可由 MCP Server 直接执行。其他数据库类型的查询、表列表、字段读取会走 DBX 桌面端 bridge。
 
 ### 系统要求
 

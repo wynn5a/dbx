@@ -119,12 +119,8 @@ async function loadTargetColumns() {
   }
 }
 
-async function previewSelectedImportFile(fileOrPath: string | File) {
-  if (isTauriRuntime()) {
-    return api.previewTableImportFile(fileOrPath as string);
-  }
-  const { previewTableImportFile } = await import("@/lib/http");
-  return previewTableImportFile(fileOrPath as File);
+function previewSelectedImportFile(fileOrPath: string | File) {
+  return api.previewTableImportFile(fileOrPath as string);
 }
 
 async function loadPreview(fileOrPath: string | File) {

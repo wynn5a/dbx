@@ -17,22 +17,22 @@ function installBrowserTestGlobals() {
     key: () => null,
     length: 0,
   };
-  globalThis.fetch = (async (input, init) => {
-    if (String(input) !== "/api/query/prepare-data-grid-save") {
-      return new Response("unexpected request", { status: 500 });
-    }
-    const body = JSON.parse(String(init?.body ?? "{}"));
-    const options = body.options as DataGridSaveStatementOptions;
-    return new Response(
-      JSON.stringify({
-        statements: mockPreparedSaveStatements(options),
-        rollbackStatements: [],
-        executionSchema:
-          options.databaseType === "oracle" || options.databaseType === "neo4j" ? undefined : options.tableMeta.schema,
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
-  }) as typeof fetch;
+  (globalThis as any).window = {
+    __TAURI_INTERNALS__: {
+      invoke: async (cmd: string, args?: Record<string, unknown>) => {
+        if (cmd !== "prepare_data_grid_save") {
+          throw new Error("unexpected command: " + cmd);
+        }
+        const options = (args ?? {}).options as DataGridSaveStatementOptions;
+        return {
+          statements: mockPreparedSaveStatements(options),
+          rollbackStatements: [],
+          executionSchema:
+            options.databaseType === "oracle" || options.databaseType === "neo4j" ? undefined : options.tableMeta.schema,
+        };
+      },
+    },
+  };
 }
 
 function mockPreparedSaveStatements(options: DataGridSaveStatementOptions): string[] {
@@ -697,29 +697,28 @@ test("failed table data save records a failed history entry", async () => {
 
   const permissionError = "Statement 1 failed: Server error: ERROR 42000 (1142): UPDATE command denied to user";
   const savedHistoryEntries: Array<Record<string, unknown>> = [];
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-    if (url === "/api/query/prepare-data-grid-save") {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      const options = body.options as DataGridSaveStatementOptions;
-      return new Response(
-        JSON.stringify({
-          statements: mockPreparedSaveStatements(options),
-          rollbackStatements: [`UPDATE "pp_questions" SET "title" = 'Old title' WHERE "id" = 1;`],
-          executionSchema: options.tableMeta.schema,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    }
-    if (url === "/api/query/execute-in-transaction") {
-      return new Response(permissionError, { status: 500 });
-    }
-    if (url === "/api/history/save") {
-      savedHistoryEntries.push(JSON.parse(String(init?.body ?? "{}")).entry);
-      return new Response("null", { status: 200, headers: { "Content-Type": "application/json" } });
-    }
-    return new Response(`unexpected request: ${url}`, { status: 500 });
-  }) as typeof fetch;
+  (globalThis as any).window = {
+    __TAURI_INTERNALS__: {
+      invoke: async (cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === "prepare_data_grid_save") {
+          const options = (args ?? {}).options as DataGridSaveStatementOptions;
+          return {
+            statements: mockPreparedSaveStatements(options),
+            rollbackStatements: [`UPDATE "pp_questions" SET "title" = 'Old title' WHERE "id" = 1;`],
+            executionSchema: options.tableMeta.schema,
+          };
+        }
+        if (cmd === "execute_in_transaction") {
+          throw new Error(permissionError);
+        }
+        if (cmd === "save_history") {
+          savedHistoryEntries.push((args ?? {}).entry as Record<string, unknown>);
+          return null;
+        }
+        throw new Error("unexpected command: " + cmd);
+      },
+    },
+  };
 
   const result = computed(() => ({
     columns: ["id", "title"],

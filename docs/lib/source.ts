@@ -24,7 +24,6 @@ const pageIcons: Record<string, keyof typeof icons> = {
   'database-export': 'Download',
   'sql-snippets': 'ScrollText',
   'ai-assistant': 'Bot',
-  cli: 'Terminal',
   mcp: 'Cable',
   plugins: 'Plug',
   'driver-management': 'Package',

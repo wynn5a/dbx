@@ -209,7 +209,7 @@ AI 助手 → MCP Server → HTTP localhost → DBX 后端 → Tauri 事件 → 
 
 ### 支持的数据库
 
-桌面本地模式下，MCP 查询支持 PostgreSQL、MySQL 及兼容数据库。Web 模式会通过 `DBX_WEB_URL` 转发到 DBX Web 后端。打开表等 UI 联动能力支持当前 DBX 桌面端可以打开的所有数据库类型。
+MCP 查询支持 PostgreSQL、MySQL 及兼容数据库。打开表等 UI 联动能力支持当前 DBX 桌面端可以打开的所有数据库类型。
 
 ### SQL 安全
 
@@ -225,12 +225,9 @@ MCP 查询执行默认非常保守：
 
 设置 `DBX_MCP_ALLOW_WRITES=1` 可以允许写入语句。只有在受控环境并且确实需要破坏性 SQL 时，才设置 `DBX_MCP_ALLOW_DANGEROUS_SQL=1`。
 
-### 桌面模式与 Web 模式
+### 桌面 Bridge
 
-| 模式 | 如何选择 | 说明 |
-|---|---|---|
-| 桌面本地模式 | 默认 | 读取 DBX 桌面端连接存储，并可调用桌面专属 UI bridge 工具 |
-| Web 模式 | 设置 `DBX_WEB_URL` | 不读取本机桌面存储，而是把请求发给 DBX Web 后端 |
+MCP 工具始终面向本机的 DBX 桌面应用工作。查询类工具直接读取桌面端本地存储，`dbx_open_table`、`dbx_execute_and_show` 等 UI 工具则通过桌面 bridge（运行中的 DBX 应用提供的本地 HTTP 接口）调用桌面应用。
 
 ## 常见问题
 
@@ -246,9 +243,6 @@ MCP 查询执行默认非常保守：
   </Accordion>
   <Accordion title="查询超时">
     MCP Server 的查询超时为 30 秒。如果查询较慢，考虑添加索引或简化查询。也可以让 AI 助手先用 `dbx_describe_table` 了解表结构，再生成优化后的查询。
-  </Accordion>
-  <Accordion title="Docker 环境下如何使用 MCP？">
-    Docker 部署的 DBX 同样支持 MCP。MCP Server 会读取 Docker 容器内的连接配置。确保 MCP Server 能访问到 DBX 的配置目录。
   </Accordion>
 </Accordions>
 

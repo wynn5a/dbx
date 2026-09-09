@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 export const SITE_URL = 'https://dbxio.com';
 export const SITE_NAME = 'DBX';
 export const DEFAULT_DESCRIPTION =
-  '25+ databases in 15 MB. Desktop & Docker self-hosting, with built-in AI assistant.';
+  '25+ databases in 15 MB. A native desktop app for macOS, Windows, and Linux, with built-in AI assistant.';
 export const DEFAULT_OG_IMAGE = '/logo.png';
 
 const LOCALE_MAP: Record<string, string> = {

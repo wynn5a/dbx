@@ -1,4 +1,3 @@
-import { isTauriRuntime } from "./tauriRuntime";
 import type * as TauriModule from "./tauri";
 import { appendDebugLog } from "./debugLog";
 
@@ -12,7 +11,7 @@ let _backend: Backend | null = null;
 
 async function getBackend(): Promise<Backend> {
   if (_backend) return _backend;
-  _backend = isTauriRuntime(globalThis) ? await import("./tauri") : await import("./http");
+  _backend = await import("./tauri");
   return _backend;
 }
 

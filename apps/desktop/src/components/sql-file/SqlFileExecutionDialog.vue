@@ -214,12 +214,8 @@ async function loadDatabasesForConnection(id: string) {
   }
 }
 
-async function previewSelectedSqlFile(fileOrPath: string | File) {
-  if (isTauriRuntime()) {
-    return previewSqlFile(fileOrPath as string);
-  }
-  const { previewSqlFile: previewWebSqlFile } = await import("@/lib/http");
-  return previewWebSqlFile(fileOrPath as File);
+function previewSelectedSqlFile(fileOrPath: string | File) {
+  return previewSqlFile(fileOrPath as string);
 }
 
 async function loadPreview(fileOrPath: string | File) {
@@ -273,11 +269,8 @@ async function handleFileInputChange(event: Event) {
 }
 
 async function listenProgress(id: string, handler: (next: SqlFileProgress) => void): Promise<() => void> {
-  if (isTauriRuntime()) {
-    return listenSqlFileProgress(handler);
-  }
-  const { listenSqlFileProgressById } = await import("@/lib/httpSqlFileProgress");
-  return listenSqlFileProgressById(id, handler);
+  void id;
+  return listenSqlFileProgress(handler);
 }
 
 async function refreshTargetAfterImport() {

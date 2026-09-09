@@ -1,5 +1,5 @@
 <div align="center">
-  <p style="font-size: 18px; white-space: nowrap;"><strong>15 MB 驾驭 40+ 种数据库。桌面端 & Docker 自托管，内置 AI 助手。</strong></p>
+  <p style="font-size: 18px; white-space: nowrap;"><strong>15 MB 驾驭 40+ 种数据库。原生桌面应用，内置 AI 助手。</strong></p>
 
   <p>
     <a href="https://github.com/wynn5a/dbx/releases"><img src="https://img.shields.io/github/downloads/wynn5a/dbx/total?style=for-the-badge&color=blue" /></a>
@@ -72,8 +72,8 @@
       <p>DBX 原生支持 Model Context Protocol。Claude Code、Cursor、Windsurf 等 AI 编程助手可以直接通过你已配置的数据库连接查询数据。一次配置，处处可用。</p>
     </td>
     <td>
-      <h3>🌐 桌面端 + Docker + Web</h3>
-      <p>macOS、Windows、Linux 原生应用。通过 Docker 自托管供团队访问。Web 版本适配纯浏览器环境。同样的功能，同样的连接配置。</p>
+      <h3>🌐 原生桌面应用</h3>
+      <p>macOS、Windows、Linux 原生应用。同样的功能，同样的连接配置。</p>
     </td>
   </tr>
 </table>
@@ -150,29 +150,11 @@ npx @dbx-app/mcp-server
 
 支持 Claude Code、Cursor、Windsurf 等 MCP 兼容的 AI 助手。可列出连接、浏览表、执行 SQL，还能直接在 DBX 界面中打开表。
 
-DBX 也提供独立 CLI 包，适合终端、脚本和 Codex 工作流：
-
-```bash
-npm install -g @dbx-app/cli
-dbx connections list --json
-dbx query local "select 1" --json
-```
-
-详见 [MCP Server 说明](packages/mcp-server/README.md) 和 [CLI 说明](packages/cli/README.md)。
+详见 [MCP Server 说明](packages/mcp-server/README.md)。
 
 ## 安装
 
 从 [Releases](https://github.com/wynn5a/dbx/releases/latest) 页面下载最新版本（macOS 使用 `.dmg`，Windows 使用 `.msi`，Linux 使用 `.deb` / `.AppImage`）。
-
-## 自托管 (Docker)
-
-DBX 提供 Web 版本，可通过 Docker 部署。使用仓库自带的 `deploy/docker-compose.yml` 从源码构建并运行：
-
-```bash
-docker compose -f deploy/docker-compose.yml up -d --build
-```
-
-浏览器访问 `http://localhost:4224`。Web 访问密码由 `deploy/docker-compose.yml` 中的 `DBX_PASSWORD` 设置，对外暴露前请先修改。
 
 ## 快速开始
 
@@ -203,13 +185,6 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev 
 ```bash
 pnpm install
 pnpm dev:tauri
-```
-
-Web 版本：
-
-```bash
-pnpm dev:web       # 前端
-pnpm dev:backend   # 后端
 ```
 
 [dbx-agents](https://github.com/t8y2/dbx-agents) 存放了驱动开发的工程。
@@ -258,7 +233,7 @@ pnpm tauri build
 
 <details>
 <summary><strong>DBX 和 DBeaver / TablePlus / Beekeeper Studio 有什么区别？</strong></summary>
-DBX 仅 15 MB，无需运行时依赖（无需 Java、无需 Python）。AI 和 MCP 是原生内置功能，不是插件。单一代码库同时支持 40+ 数据库、桌面端、Docker 和 Web。
+DBX 仅 15 MB，无需运行时依赖（无需 Java、无需 Python）。AI 和 MCP 是原生内置功能，不是插件。单一代码库支持 40+ 数据库。
 </details>
 
 <details>

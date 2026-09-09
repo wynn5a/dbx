@@ -25,6 +25,19 @@ function installMemoryStorage(initial: Record<string, string> = {}) {
   };
 }
 
+function installTauriInvokeStub(router: (cmd: string, args: Record<string, unknown>) => Promise<unknown>) {
+  const originalWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    __TAURI_INTERNALS__: {
+      invoke: async (cmd: string, args?: Record<string, unknown>) => router(cmd, args ?? {}),
+    },
+  };
+  return () => {
+    if (originalWindow === undefined) Reflect.deleteProperty(globalThis as any, "window");
+    else (globalThis as any).window = originalWindow;
+  };
+}
+
 function conn(id: string, name: string): ConnectionConfig {
   return {
     id,
@@ -41,26 +54,24 @@ test("removeConnection prunes pinned ids and persists the pruned set", async () 
   const storage = installMemoryStorage({
     "dbx-pinned-tree-nodes": JSON.stringify(["conn-a", "conn-a:db:main", "conn-b:db:main"]),
   });
-  const originalFetch = globalThis.fetch;
   const savedPayloads: unknown[] = [];
 
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-    if (url === "/api/connection/list") {
-      return new Response(JSON.stringify([conn("conn-a", "A"), conn("conn-b", "B")]), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+  const restoreTauri = installTauriInvokeStub(async (cmd, args) => {
+    if (cmd === "load_connections") {
+      return [conn("conn-a", "A"), conn("conn-b", "B")];
     }
-    if (url === "/api/layout/sidebar") {
-      return new Response("null", { status: 200, headers: { "Content-Type": "application/json" } });
+    if (cmd === "load_sidebar_layout") {
+      return null;
     }
-    if (url === "/api/connection/save") {
-      savedPayloads.push(JSON.parse(String(init?.body ?? "{}")));
-      return new Response("null", { status: 200, headers: { "Content-Type": "application/json" } });
+    if (cmd === "save_sidebar_layout") {
+      return null;
     }
-    return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
-  }) as typeof fetch;
+    if (cmd === "save_connections") {
+      savedPayloads.push(args);
+      return null;
+    }
+    return [];
+  });
 
   try {
     setActivePinia(createPinia());
@@ -79,7 +90,7 @@ test("removeConnection prunes pinned ids and persists the pruned set", async () 
     assert.deepEqual(JSON.parse(storage.values.get("dbx-pinned-tree-nodes") || "[]"), ["conn-b:db:main"]);
     assert.equal(savedPayloads.length >= 1, true);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     storage.restore();
   }
 });

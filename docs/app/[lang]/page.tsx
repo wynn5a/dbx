@@ -56,13 +56,13 @@ function metrics(starLabel: string) {
     en: [
     { value: '~15 MB', label: 'desktop installer' },
     { value: '40+', label: 'database engines' },
-    { value: '2 modes', label: 'desktop and Docker' },
+    { value: '3 platforms', label: 'macOS, Windows, Linux' },
       { value: starLabel, label: 'GitHub stars, fully open-source' },
     ],
     cn: [
     { value: '~15 MB', label: '桌面安装包' },
     { value: '40+', label: '数据库引擎' },
-    { value: '2 种模式', label: '桌面与 Docker' },
+    { value: '3 个平台', label: 'macOS、Windows、Linux' },
       { value: starLabel, label: 'GitHub Star，完全开源' },
     ],
   };
@@ -158,7 +158,7 @@ const capabilities = {
     { icon: Bot, label: 'AI assistant plus MCP server for Claude Code, Cursor, and agents' },
     { icon: Network, label: 'ER diagrams, schema diff, and field lineage for deeper analysis' },
     { icon: FileCode, label: 'CSV, Excel, SQL files, full exports, and cross-engine transfer' },
-    { icon: Zap, label: 'Desktop app and self-hosted web deployment from the same project' },
+    { icon: Zap, label: 'One lightweight desktop app for macOS, Windows, and Linux' },
   ],
   cn: [
     { icon: Database, label: 'Rust 原生驱动，不依赖 JDBC 运行时' },
@@ -166,7 +166,7 @@ const capabilities = {
     { icon: Bot, label: '内置 AI 助手，以及面向 Claude Code、Cursor 的 MCP Server' },
     { icon: Network, label: 'ER 图、Schema 对比、字段血缘，覆盖更深层分析场景' },
     { icon: FileCode, label: 'CSV、Excel、SQL 文件、完整导出和跨引擎传输' },
-    { icon: Zap, label: '桌面应用与自托管 Web 部署来自同一个项目' },
+    { icon: Zap, label: '一个轻量桌面应用，覆盖 macOS、Windows 和 Linux' },
   ],
 };
 
@@ -186,9 +186,9 @@ const testimonials = {
     },
     {
       name: '@ar414',
-      role: 'Self-hosted tooling',
+      role: 'Local database tooling',
       avatar: '/avatars/ar414.jpg',
-      quote: 'Desktop mode is light enough for local work, and Docker mode makes it easy to give the team browser access.',
+      quote: 'Desktop mode is light enough for local work, and it starts fast enough to keep open all day.',
     },
     {
       name: '@ryan',
@@ -260,9 +260,9 @@ const testimonials = {
     },
     {
       name: '孙志岗',
-      role: '团队自托管工具',
+      role: '本地数据库工具',
       avatar: '/avatars/sunzhigang.jpg',
-      quote: '本地桌面版足够轻，自托管 Web 版又方便团队共用，同一个项目覆盖了两种场景。',
+      quote: '本地桌面版足够轻，启动也快，日常数据库工作开着这一个就够了。',
     },
     {
       name: 'zhufeng',
@@ -325,7 +325,7 @@ const i18nText = {
   en: {
     heroTitle: '15 MB to manage 40+ databases!',
     heroSubtitle:
-      'DBX brings connections, SQL editing, data grids, schema tools, AI assistance, and self-hosted access into one lightweight product.',
+      'DBX brings connections, SQL editing, data grids, schema tools, and AI assistance into one lightweight desktop app.',
     download: 'Download DBX',
     downloadName: 'Download DBX',
     readDocs: 'Read the docs',
@@ -340,13 +340,12 @@ const i18nText = {
     testimonialsDesc: 'A closer look at the everyday database workflows DBX is built to make smoother.',
     capabilitiesTitle: 'Built for real database work',
     footerTitle: 'Ready to try DBX?',
-    footerDesc: 'Use the desktop app for local work, or deploy the Docker version for browser-based access.',
+    footerDesc: 'Download the desktop app and manage your databases locally on macOS, Windows, and Linux.',
     release: 'Latest release',
-    docker: 'Docker setup',
   },
   cn: {
     heroTitle: '15MB，管理40+种数据库！',
-    heroSubtitle: 'DBX 将连接管理、SQL 编辑、数据表格、结构工具、AI 助手和自托管访问放进一个轻量产品里。',
+    heroSubtitle: 'DBX 将连接管理、SQL 编辑、数据表格、结构工具和 AI 助手放进一个轻量桌面应用里。',
     download: '下载 DBX',
     downloadName: '下载 DBX',
     readDocs: '查看文档',
@@ -361,9 +360,8 @@ const i18nText = {
     testimonialsDesc: '从连接管理、数据浏览到 AI 辅助，DBX 围绕高频数据库工作流打磨体验。',
     capabilitiesTitle: '面向真实数据库工作的能力',
     footerTitle: '准备试试 DBX？',
-    footerDesc: '本地工作使用桌面版，需要浏览器访问时部署 Docker 版。',
+    footerDesc: '下载桌面版，在 macOS、Windows 和 Linux 上本地管理你的数据库。',
     release: '最新版本',
-    docker: 'Docker 部署',
   },
 };
 
@@ -373,12 +371,12 @@ const landingMeta = {
   en: {
     title: 'DBX - 15 MB to manage 40+ databases!',
     description:
-      'DBX brings connections, SQL editing, data grids, schema tools, AI assistance, and self-hosted access into one lightweight product.',
+      'DBX brings connections, SQL editing, data grids, schema tools, and AI assistance into one lightweight desktop app.',
   },
   cn: {
     title: 'DBX - 15MB，管理40+种数据库！',
     description:
-      'DBX 将连接管理、SQL 编辑、数据表格、结构工具、AI 助手和自托管访问放进一个轻量产品里。',
+      'DBX 将连接管理、SQL 编辑、数据表格、结构工具和 AI 助手放进一个轻量桌面应用里。',
   },
 };
 
@@ -547,9 +545,6 @@ export default async function LandingPage({
         <div className="flex items-center gap-2.5 flex-wrap justify-end max-[760px]:mt-[18px]">
           <Link href="https://github.com/wynn5a/dbx/releases/latest" target="_blank" className="landing-final-link inline-flex items-center justify-center min-h-[42px] rounded-[7px] px-[15px] text-sm font-[650]">
             {t.release}
-          </Link>
-          <Link href={`/${l}/docs/getting-started#docker`} target="_blank" className="landing-final-link inline-flex items-center justify-center min-h-[42px] rounded-[7px] px-[15px] text-sm font-[650]">
-            {t.docker}
           </Link>
         </div>
       </RevealSection>

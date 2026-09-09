@@ -49,8 +49,7 @@ export const DBX_CONNECTION_TYPE_DESCRIPTION =
   "Database type: postgres, mysql, sqlite, rqlite, redis, duckdb, clickhouse, sqlserver, mongodb, oracle, elasticsearch, doris, starrocks, redshift, dameng, kingbase, highgo, vastbase, goldendb, databend, gaussdb, kwdb, yashandb, databricks, saphana, teradata, vertica, firebird, exasol, opengauss, oceanbase-oracle, gbase, h2, snowflake, trino, hive, db2, informix, iris, neo4j, cassandra, bigquery, kylin, sundb, tdengine, iotdb, xugu, jdbc, access";
 const FILE_CAPABLE_CONNECTION_TYPES = new Set(["sqlite", "duckdb", "access", "h2"]);
 
-export function createDbxMcpServer(backend: Backend, options: { isWebMode?: boolean } = {}): McpServer {
-  const isWebMode = options.isWebMode ?? !!process.env.DBX_WEB_URL;
+export function createDbxMcpServer(backend: Backend): McpServer {
   const server = new McpServer({
     name: "dbx",
     version: DBX_MCP_PACKAGE_VERSION,
@@ -225,61 +224,59 @@ export function createDbxMcpServer(backend: Backend, options: { isWebMode?: bool
   );
 
   // Desktop-only tools: open table and execute-and-show require the Tauri bridge
-  if (!isWebMode) {
-    server.tool(
-      "dbx_open_table",
-      "Open a table in DBX desktop app UI. Requires DBX to be running.",
-      {
-        connection_name: z.string().describe("Name of the DBX connection"),
-        table: z.string().describe("Table name to open"),
-        database: z.string().optional().describe("Database name"),
-        schema: z.string().optional().describe("Schema name"),
-      },
-      async ({ connection_name, table, database, schema }) => {
-        const config = await backend.findConnection(connection_name);
-        if (!config) return toolError("CONNECTION_NOT_FOUND", `Connection "${connection_name}" not found.`);
-        return bridgeRequest("/open-table", { connection_name, table, database, schema }, `Opened ${table} in DBX`);
-      },
-    );
+server.tool(
+  "dbx_open_table",
+  "Open a table in DBX desktop app UI. Requires DBX to be running.",
+  {
+    connection_name: z.string().describe("Name of the DBX connection"),
+    table: z.string().describe("Table name to open"),
+    database: z.string().optional().describe("Database name"),
+    schema: z.string().optional().describe("Schema name"),
+  },
+  async ({ connection_name, table, database, schema }) => {
+    const config = await backend.findConnection(connection_name);
+    if (!config) return toolError("CONNECTION_NOT_FOUND", `Connection "${connection_name}" not found.`);
+    return bridgeRequest("/open-table", { connection_name, table, database, schema }, `Opened ${table} in DBX`);
+  },
+);
 
-    server.tool(
-      "dbx_execute_and_show",
-      "Execute a SQL query in DBX desktop app UI and show results there. Requires DBX to be running.",
+server.tool(
+  "dbx_execute_and_show",
+  "Execute a SQL query in DBX desktop app UI and show results there. Requires DBX to be running.",
+  {
+    connection_name: z.string().describe("Name of the DBX connection"),
+    sql: z.string().describe("SQL query to execute"),
+    database: z.string().optional().describe("Database name"),
+  },
+  async ({ connection_name, sql, database }) => {
+    const config = await backend.findConnection(connection_name);
+    if (!config) return toolError("CONNECTION_NOT_FOUND", `Connection "${connection_name}" not found.`);
+    const safetyOptions = sqlSafetyFromEnv();
+    if (config?.db_type === "mongodb") {
+      const aggregate = parseMongoAggregateCommand(sql);
+      if (aggregate) {
+        const safety = evaluateMongoAggregateSafety(aggregate, safetyOptions);
+        if (!safety.allowed) return toolError("SQL_BLOCKED", safety.reason ?? "Query blocked.");
+      }
+    } else {
+      const safety = evaluateSqlSafety(sql, { ...safetyOptions, allowMultipleStatements: true });
+      if (!safety.allowed) return toolError("SQL_BLOCKED", safety.reason ?? "SQL blocked.");
+    }
+    // MongoDB shell commands bypass the SQL safety evaluator; pass MCP
+    // safety flags to the desktop executor for command-aware gating.
+    return bridgeRequest(
+      "/execute-query",
       {
-        connection_name: z.string().describe("Name of the DBX connection"),
-        sql: z.string().describe("SQL query to execute"),
-        database: z.string().optional().describe("Database name"),
+        connection_name,
+        sql,
+        database,
+        allow_writes: safetyOptions.allowWrites,
+        allow_dangerous: safetyOptions.allowDangerous,
       },
-      async ({ connection_name, sql, database }) => {
-        const config = await backend.findConnection(connection_name);
-        if (!config) return toolError("CONNECTION_NOT_FOUND", `Connection "${connection_name}" not found.`);
-        const safetyOptions = sqlSafetyFromEnv();
-        if (config?.db_type === "mongodb") {
-          const aggregate = parseMongoAggregateCommand(sql);
-          if (aggregate) {
-            const safety = evaluateMongoAggregateSafety(aggregate, safetyOptions);
-            if (!safety.allowed) return toolError("SQL_BLOCKED", safety.reason ?? "Query blocked.");
-          }
-        } else {
-          const safety = evaluateSqlSafety(sql, { ...safetyOptions, allowMultipleStatements: true });
-          if (!safety.allowed) return toolError("SQL_BLOCKED", safety.reason ?? "SQL blocked.");
-        }
-        // MongoDB shell commands bypass the SQL safety evaluator; pass MCP
-        // safety flags to the desktop executor for command-aware gating.
-        return bridgeRequest(
-          "/execute-query",
-          {
-            connection_name,
-            sql,
-            database,
-            allow_writes: safetyOptions.allowWrites,
-            allow_dangerous: safetyOptions.allowDangerous,
-          },
-          "Query sent to DBX",
-        );
-      },
+      "Query sent to DBX",
     );
-  }
+  },
+);
 
   return server;
 }

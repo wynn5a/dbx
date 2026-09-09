@@ -15,7 +15,7 @@ const text = {
     desc: 'Mirrored from the latest GitHub release notes.',
     link: 'Read the changelog',
     fallbackItems: [
-      'Desktop and Docker release assets',
+      'Desktop release assets for macOS, Windows, and Linux',
       'Database workflow improvements',
       'Bug fixes and reliability updates',
       'Documentation and packaging updates',
@@ -26,7 +26,7 @@ const text = {
     desc: '同步 GitHub 最新 Release Notes。',
     link: '查看更新日志',
     fallbackItems: [
-      '桌面版与 Docker 发布资产',
+      '面向 macOS、Windows 和 Linux 的桌面版发布资产',
       '数据库工作流改进',
       '问题修复与稳定性更新',
       '文档与打包流程更新',

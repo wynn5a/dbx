@@ -75,7 +75,6 @@ const QueryHistory = defineAsyncComponent(() => import("@/components/editor/Quer
 const DriverStorePage = defineAsyncComponent(() => import("@/components/config/DriverStoreDialog.vue"));
 const UpdateDialog = defineAsyncComponent(() => import("@/components/layout/UpdateDialog.vue"));
 const KillProcessDialog = defineAsyncComponent(() => import("@/components/layout/KillProcessDialog.vue"));
-const LoginPage = defineAsyncComponent(() => import("@/components/auth/LoginPage.vue"));
 
 type AiAssistantHandle = {
   triggerAction: (action: AiAction, instruction?: string) => void;
@@ -115,9 +114,6 @@ const { setupFileDrop } = useFileDrop();
 const isDesktop = isTauriRuntime();
 const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 let updateCheckTimer: ReturnType<typeof setInterval> | undefined;
-const needsAuth = ref(!isDesktop);
-const authenticated = ref(isDesktop);
-const setupRequired = ref(false);
 
 const showConnectionDialog = ref(false);
 const connectionDialogPrefill = ref<ConnectionDeepLinkDraft | null>(null);
@@ -873,14 +869,6 @@ function handleKeydown(e: KeyboardEvent) {
   }
 }
 
-function onLoginSuccess() {
-  authenticated.value = true;
-  setupRequired.value = false;
-  needsAuth.value = true;
-  window.history.replaceState(null, "", "/");
-  initApp();
-}
-
 function initApp() {
   const t0 = performance.now();
   console.log("[STARTUP] initApp begin");
@@ -956,28 +944,6 @@ onMounted(async () => {
   if (isDesktop) {
     document.addEventListener("contextmenu", handleContextMenu);
   }
-  if (!isDesktop) {
-    try {
-      const res = await fetch("/api/auth/check");
-      const data = await res.json();
-      needsAuth.value = data.required;
-      authenticated.value = data.authenticated;
-      setupRequired.value = data.setup_required;
-    } catch {
-      /* server unreachable */
-    }
-    if (needsAuth.value && !authenticated.value) {
-      history.replaceState(null, "", "/login");
-    }
-    if (!setupRequired.value && (!needsAuth.value || authenticated.value)) initApp();
-    api
-      .getAppVersion()
-      .then((v) => {
-        appVersion.value = v;
-      })
-      .catch(() => {});
-    return;
-  }
   initApp();
   setupFileDrop().catch(() => {});
   setTimeout(() => {
@@ -1011,12 +977,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <LoginPage
-    v-if="setupRequired || (needsAuth && !authenticated)"
-    :setup-mode="setupRequired"
-    @authenticated="onLoginSuccess"
-  />
-  <div v-show="!setupRequired && (!needsAuth || authenticated)" class="h-screen w-screen overflow-hidden">
+  <div class="h-screen w-screen overflow-hidden">
     <TooltipProvider>
       <div
         class="h-screen w-screen max-w-full min-w-[760px] min-h-[600px] flex flex-col bg-background text-foreground overflow-hidden"

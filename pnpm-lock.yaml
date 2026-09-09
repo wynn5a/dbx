@@ -199,22 +199,6 @@ importers:
         specifier: ^3.3.3
         version: 3.3.3(typescript@6.0.3)
 
-  packages/cli:
-    dependencies:
-      '@dbx-app/node-core':
-        specifier: workspace:^
-        version: link:../node-core
-    devDependencies:
-      '@types/node':
-        specifier: ^22.15.21
-        version: 22.19.19
-      tsx:
-        specifier: ^4.19.4
-        version: 4.21.0
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
   packages/mcp-server:
     dependencies:
       '@dbx-app/node-core':

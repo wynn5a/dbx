@@ -14,7 +14,7 @@ const LOCALE_MAP: Record<string, { locale: string; title: string; description: s
   cn: {
     locale: 'zh_CN',
     title: 'DBX - 15MB，管理40+种数据库',
-    description: '25+ 种数据库，仅 15 MB。支持桌面与 Docker 自托管，内置 AI 助手。',
+    description: '25+ 种数据库，仅 15 MB。支持 macOS、Windows、Linux 桌面版，内置 AI 助手。',
   },
 };
 

@@ -1,17 +1,15 @@
 # Contributing to DBX
 
-Thanks for helping improve DBX. This repository contains the desktop app, Rust backend, Docker service, documentation site, CLI, MCP server, and optional plugins.
+Thanks for helping improve DBX. This repository contains the desktop app, Rust backend, documentation site, MCP server, and optional plugins.
 
 ## Project Layout
 
 - `apps/desktop/` - Vue desktop frontend.
 - `crates/dbx-core/` - shared Rust database core.
-- `crates/dbx-web/` - Docker/web backend service.
 - `src-tauri/` - Tauri desktop shell and native commands.
-- `packages/` - Node packages, including CLI, MCP server, shared Node core, and app tests.
+- `packages/` - Node packages, including MCP server, shared Node core, and app tests.
 - `plugins/` - optional DBX plugins.
 - `docs/` - documentation site and docs assets.
-- `deploy/` - Docker and deployment assets.
 
 ## Development Setup
 
@@ -34,12 +32,6 @@ Run the desktop app during development:
 pnpm dev:tauri
 ```
 
-Run the web backend:
-
-```bash
-pnpm dev:backend
-```
-
 ## Checks
 
 Before opening a pull request, run:
@@ -57,11 +49,9 @@ pnpm test:packages
 pnpm publish:dry-run
 ```
 
-For Docker or deployment changes, run the relevant Docker Compose or Docker build checks from `deploy/`.
-
 ## Database Driver Metadata
 
-When adding or changing a database type, update `crates/dbx-core/assets/database-drivers.manifest.json` first. The manifest is the shared source for driver mode, MCP/CLI routing, agent keys, and core capability expectations. Then run:
+When adding or changing a database type, update `crates/dbx-core/assets/database-drivers.manifest.json` first. The manifest is the shared source for driver mode, MCP routing, agent keys, and core capability expectations. Then run:
 
 ```bash
 cargo test -p dbx-core --test database_capabilities

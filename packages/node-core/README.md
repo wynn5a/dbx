@@ -30,4 +30,4 @@ import {
 } from "@dbx-app/node-core";
 ```
 
-The package is intended as a shared implementation layer for official DBX Node packages. Applications should prefer `@dbx-app/cli` for terminal workflows and `@dbx-app/mcp-server` for MCP clients.
+The package is intended as a shared implementation layer for official DBX Node packages. Applications should prefer `@dbx-app/mcp-server` for MCP clients.

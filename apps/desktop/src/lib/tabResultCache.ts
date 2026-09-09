@@ -199,9 +199,7 @@ function base64ToBytes(value: string): Uint8Array {
 }
 
 function canUseRemoteRuntimeCache(): boolean {
-  return (
-    typeof btoa !== "undefined" && typeof atob !== "undefined" && (isTauriRuntime() || typeof fetch !== "undefined")
-  );
+  return typeof btoa !== "undefined" && typeof atob !== "undefined" && isTauriRuntime();
 }
 
 async function writeRemoteRuntimeCache(
@@ -211,27 +209,14 @@ async function writeRemoteRuntimeCache(
 ): Promise<boolean> {
   if (!canUseRemoteRuntimeCache()) return false;
   try {
-    if (isTauriRuntime()) {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("save_tab_runtime_cache", {
-        key,
-        payloadBase64: bytesToBase64(bytes),
-        rowCount: stats.rowCount,
-        columnCount: stats.columnCount,
-      });
-      return true;
-    }
-    const response = await fetch("/api/tab-runtime-cache", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        key,
-        payloadBase64: bytesToBase64(bytes),
-        rowCount: stats.rowCount,
-        columnCount: stats.columnCount,
-      }),
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("save_tab_runtime_cache", {
+      key,
+      payloadBase64: bytesToBase64(bytes),
+      rowCount: stats.rowCount,
+      columnCount: stats.columnCount,
     });
-    return response.ok;
+    return true;
   } catch (error) {
     console.warn("[DBX][tab-result-cache:remote-write:error]", { key, error });
     return false;
@@ -241,14 +226,8 @@ async function writeRemoteRuntimeCache(
 async function readRemoteRuntimeCache(key: string): Promise<Uint8Array | undefined> {
   if (!canUseRemoteRuntimeCache()) return undefined;
   try {
-    if (isTauriRuntime()) {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const entry = await invoke<{ payloadBase64?: string } | null>("load_tab_runtime_cache", { key });
-      return entry?.payloadBase64 ? base64ToBytes(entry.payloadBase64) : undefined;
-    }
-    const response = await fetch(`/api/tab-runtime-cache?key=${encodeURIComponent(key)}`);
-    if (!response.ok) return undefined;
-    const entry = (await response.json()) as { payloadBase64?: string } | null;
+    const { invoke } = await import("@tauri-apps/api/core");
+    const entry = await invoke<{ payloadBase64?: string } | null>("load_tab_runtime_cache", { key });
     return entry?.payloadBase64 ? base64ToBytes(entry.payloadBase64) : undefined;
   } catch (error) {
     console.warn("[DBX][tab-result-cache:remote-read:error]", { key, error });
@@ -259,12 +238,8 @@ async function readRemoteRuntimeCache(key: string): Promise<Uint8Array | undefin
 async function deleteRemoteRuntimeCache(key: string): Promise<void> {
   if (!canUseRemoteRuntimeCache()) return;
   try {
-    if (isTauriRuntime()) {
-      const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("delete_tab_runtime_cache", { key });
-      return;
-    }
-    await fetch(`/api/tab-runtime-cache?key=${encodeURIComponent(key)}`, { method: "DELETE" });
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("delete_tab_runtime_cache", { key });
   } catch (error) {
     console.warn("[DBX][tab-result-cache:remote-delete:error]", { key, error });
   }

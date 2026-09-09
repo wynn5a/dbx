@@ -24,11 +24,7 @@ export interface Backend {
   close?(): Promise<void>;
 }
 
-export async function createBackend(env: NodeJS.ProcessEnv = process.env): Promise<Backend> {
-  if (env.DBX_WEB_URL) {
-    return await import("./web-backend.js");
-  }
-
+export async function createBackend(): Promise<Backend> {
   return {
     loadConnections: desktopLoadConnections,
     findConnection: desktopFindConnection,

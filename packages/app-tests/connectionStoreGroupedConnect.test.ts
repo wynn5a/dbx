@@ -24,6 +24,19 @@ function installMemoryStorage() {
   };
 }
 
+function installTauriInvokeStub(router: (cmd: string, args: Record<string, unknown>) => Promise<unknown>) {
+  const originalWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    __TAURI_INTERNALS__: {
+      invoke: async (cmd: string, args?: Record<string, unknown>) => router(cmd, args ?? {}),
+    },
+  };
+  return () => {
+    if (originalWindow === undefined) Reflect.deleteProperty(globalThis as any, "window");
+    else (globalThis as any).window = originalWindow;
+  };
+}
+
 function conn(id: string, name: string): ConnectionConfig {
   return {
     id,
@@ -46,36 +59,30 @@ function countConnectionNodes(nodes: TreeNode[], connectionId: string): number {
 }
 
 test("connecting a grouped connection updates it in place instead of adding a root node", async () => {
-  const originalFetch = globalThis.fetch;
   const storage = installMemoryStorage();
   const layout: SidebarLayout = {
     groups: [{ id: "group-1", name: "Group", collapsed: false }],
     order: [{ type: "group", id: "group-1", connectionIds: [] }],
   };
 
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-    if (url === "/api/connection/list") {
-      return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
+  const restoreTauri = installTauriInvokeStub(async (cmd, args) => {
+    if (cmd === "load_connections") {
+      return [];
     }
-    if (url === "/api/layout/sidebar") {
-      if (init?.method === "POST") {
-        return new Response("null", { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      return new Response(JSON.stringify(layout), { status: 200, headers: { "Content-Type": "application/json" } });
+    if (cmd === "load_sidebar_layout") {
+      return layout;
     }
-    if (url === "/api/connection/save") {
-      return new Response("null", { status: 200, headers: { "Content-Type": "application/json" } });
+    if (cmd === "save_sidebar_layout") {
+      return null;
     }
-    if (url === "/api/connection/connect") {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      return new Response(JSON.stringify(body.config.id), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "save_connections") {
+      return null;
     }
-    return new Response("null", { status: 200, headers: { "Content-Type": "application/json" } });
-  }) as typeof fetch;
+    if (cmd === "connect_db") {
+      return (args.config as ConnectionConfig).id;
+    }
+    return null;
+  });
 
   try {
     setActivePinia(createPinia());
@@ -92,7 +99,7 @@ test("connecting a grouped connection updates it in place instead of adding a ro
     assert.deepEqual(store.treeNodes[0].children?.map((node) => node.id), ["conn-1"]);
     assert.equal(countConnectionNodes(store.treeNodes, "conn-1"), 1);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     storage.restore();
   }
 });

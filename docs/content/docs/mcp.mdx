@@ -209,7 +209,7 @@ AI Agent → MCP Server → HTTP localhost → DBX backend → Tauri event → F
 
 ### Supported Databases
 
-MCP query support in desktop local mode is implemented for PostgreSQL, MySQL, and compatible databases. Web mode delegates to the DBX web backend configured by `DBX_WEB_URL`. UI integration such as opening a table supports all database types that the running DBX desktop app can open.
+MCP query support is implemented for PostgreSQL, MySQL, and compatible databases. UI integration such as opening a table supports all database types that the running DBX desktop app can open.
 
 ### SQL Safety
 
@@ -225,12 +225,9 @@ MCP query execution is intentionally conservative:
 
 Set `DBX_MCP_ALLOW_WRITES=1` to allow write statements. Set `DBX_MCP_ALLOW_DANGEROUS_SQL=1` only in controlled environments where destructive SQL is expected.
 
-### Desktop And Web Mode
+### Desktop Bridge
 
-| Mode | How It Is Selected | Notes |
-|---|---|---|
-| Desktop local mode | Default | Reads DBX desktop connection storage and can call desktop-only UI bridge tools |
-| Web mode | Set `DBX_WEB_URL` | Sends requests to the DBX web backend instead of reading local desktop storage |
+MCP tools always run against the DBX desktop app on your machine. Query tools read local desktop storage directly, while UI tools such as `dbx_open_table` and `dbx_execute_and_show` call the desktop bridge — the local HTTP interface exposed by the running DBX app.
 
 ## FAQ
 
@@ -246,9 +243,6 @@ Set `DBX_MCP_ALLOW_WRITES=1` to allow write statements. Set `DBX_MCP_ALLOW_DANGE
   </Accordion>
   <Accordion title="Query timeout">
     MCP Server has a 30-second query timeout. Consider adding indexes or simplifying your query. You can also ask the AI to use `dbx_describe_table` first to understand the schema, then generate an optimized query.
-  </Accordion>
-  <Accordion title="How to use MCP with Docker?">
-    DBX deployed via Docker also supports MCP. The MCP Server reads connection configs from inside the Docker container. Make sure the MCP Server can access DBX's config directory.
   </Accordion>
 </Accordions>
 

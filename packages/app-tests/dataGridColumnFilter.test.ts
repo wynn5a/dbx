@@ -5,29 +5,36 @@ import {
   buildColumnValueFilterCondition,
 } from "../../apps/desktop/src/lib/dataGridColumnFilter.ts";
 
-function installFilterFetchMock() {
-  globalThis.fetch = (async (input, init) => {
-    if (String(input) !== "/api/query/build-data-grid-column-value-filter-condition") {
-      return new Response("unexpected request", { status: 500 });
-    }
-    const body = JSON.parse(String(init?.body ?? "{}"));
-    const options = body.options;
-    const quote =
-      options.databaseType === "mysql"
-        ? (name: string) => `\`${name}\``
-        : options.databaseType === "sqlserver"
-          ? (name: string) => `[${name}]`
-          : (name: string) => `"${name}"`;
-    const text = String(options.rawValue ?? "").trim();
-    const result = /^null$/i.test(text)
-      ? `${quote(options.columnName)} IS NULL`
-      : `${quote(options.columnName)} = ${/^\d+$/.test(text) ? text : `'${text}'`}`;
-    return new Response(JSON.stringify(result), { status: 200, headers: { "Content-Type": "application/json" } });
-  }) as typeof fetch;
+function installFilterInvokeMock() {
+  (globalThis as any).window = {
+    __TAURI_INTERNALS__: {
+      invoke: async (cmd: string, args?: Record<string, unknown>) => {
+        if (cmd !== "build_data_grid_column_value_filter_condition") {
+          throw new Error("unexpected command: " + cmd);
+        }
+        const options = (args ?? {}).options as {
+          databaseType?: string;
+          columnName: string;
+          rawValue?: string;
+        };
+        const quote =
+          options.databaseType === "mysql"
+            ? (name: string) => `\`${name}\``
+            : options.databaseType === "sqlserver"
+              ? (name: string) => `[${name}]`
+              : (name: string) => `"${name}"`;
+        const text = String(options.rawValue ?? "").trim();
+        const result = /^null$/i.test(text)
+          ? `${quote(options.columnName)} IS NULL`
+          : `${quote(options.columnName)} = ${/^\d+$/.test(text) ? text : `'${text}'`}`;
+        return result;
+      },
+    },
+  };
 }
 
 test("builds a numeric server-side column filter from typed text", async () => {
-  installFilterFetchMock();
+  installFilterInvokeMock();
   const condition = await buildColumnValueFilterCondition({
     databaseType: "mysql",
     columnName: "id",
@@ -39,7 +46,7 @@ test("builds a numeric server-side column filter from typed text", async () => {
 });
 
 test("quotes text server-side column filters and appends them to existing WHERE input", async () => {
-  installFilterFetchMock();
+  installFilterInvokeMock();
   const condition = await buildColumnValueFilterCondition({
     databaseType: "postgres",
     columnName: "status",
@@ -52,7 +59,7 @@ test("quotes text server-side column filters and appends them to existing WHERE 
 });
 
 test("builds IS NULL for typed NULL filters", async () => {
-  installFilterFetchMock();
+  installFilterInvokeMock();
   const condition = await buildColumnValueFilterCondition({
     databaseType: "sqlserver",
     columnName: "archived_at",

@@ -53,6 +53,20 @@ async function waitFor(predicate: () => boolean, timeoutMs = 1000) {
   }
 }
 
+function installTauriInvokeStub(router: (cmd: string, args: Record<string, unknown>) => Promise<unknown>) {
+  const originalWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    setTimeout: (handler: (...args: unknown[]) => void, timeout?: number) => setTimeout(handler, timeout),
+    __TAURI_INTERNALS__: {
+      invoke: async (cmd: string, args?: Record<string, unknown>) => router(cmd, args ?? {}),
+    },
+  };
+  return () => {
+    if (originalWindow === undefined) Reflect.deleteProperty(globalThis as any, "window");
+    else (globalThis as any).window = originalWindow;
+  };
+}
+
 test("setErrorResult stops loading and shows the error result", () => {
   setActivePinia(createPinia());
   const store = useQueryStore();
@@ -137,84 +151,68 @@ test("normalizes unquoted Oracle query identifiers before loading editable metad
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
   const columnRequests: Array<{ schema: string | null; table: string | null }> = [];
 
   connectionStore.addEphemeralConnection(oracleConn("oracle-1"));
 
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-    if (url === "/api/query/execute-multi") {
-      return new Response(
-        JSON.stringify([
-          {
-            columns: ["ID", "NAME"],
-            rows: [[1, "Ada"]],
-            affected_rows: 0,
-            execution_time_ms: 1,
-          },
-        ]),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+  const restoreTauri = installTauriInvokeStub(async (cmd, args) => {
+    if (cmd === "execute_multi") {
+      return [
+        {
+          columns: ["ID", "NAME"],
+          rows: [[1, "Ada"]],
+          affected_rows: 0,
+          execution_time_ms: 1,
+        },
+      ];
     }
-    if (url === "/api/query/analyze-editability") {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      assert.equal(body.sql, "select id, name from users");
-      return new Response(
-        JSON.stringify({
-          editable: true,
-          analysis: {
-            schema: undefined,
-            schemaQuoted: false,
-            tableName: "users",
-            tableNameQuoted: false,
-            tableAlias: undefined,
-            selectStar: false,
-            columns: [
-              { sourceName: "id", sourceNameQuoted: false, resultName: "id", expression: "id" },
-              { sourceName: "name", sourceNameQuoted: false, resultName: "name", expression: "name" },
-            ],
-          },
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+    if (cmd === "analyze_editable_query_editability") {
+      assert.equal(args.sql, "select id, name from users");
+      return {
+        editable: true,
+        analysis: {
+          schema: undefined,
+          schemaQuoted: false,
+          tableName: "users",
+          tableNameQuoted: false,
+          tableAlias: undefined,
+          selectStar: false,
+          columns: [
+            { sourceName: "id", sourceNameQuoted: false, resultName: "id", expression: "id" },
+            { sourceName: "name", sourceNameQuoted: false, resultName: "name", expression: "name" },
+          ],
+        },
+      };
     }
-    if (url.startsWith("/api/schema/columns?")) {
-      const params = new URL(url, "http://localhost").searchParams;
-      columnRequests.push({ schema: params.get("schema"), table: params.get("table") });
-      return new Response(
-        JSON.stringify([
-          {
-            name: "ID",
-            data_type: "NUMBER",
-            is_nullable: false,
-            column_default: null,
-            is_primary_key: true,
-            extra: null,
-            comment: "identifier",
-          },
-          {
-            name: "NAME",
-            data_type: "VARCHAR2",
-            is_nullable: true,
-            column_default: null,
-            is_primary_key: false,
-            extra: null,
-            comment: "display name",
-          },
-        ]),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+    if (cmd === "get_columns") {
+      columnRequests.push({ schema: (args.schema as string) ?? null, table: (args.table as string) ?? null });
+      return [
+        {
+          name: "ID",
+          data_type: "NUMBER",
+          is_nullable: false,
+          column_default: null,
+          is_primary_key: true,
+          extra: null,
+          comment: "identifier",
+        },
+        {
+          name: "NAME",
+          data_type: "VARCHAR2",
+          is_nullable: true,
+          column_default: null,
+          is_primary_key: false,
+          extra: null,
+          comment: "display name",
+        },
+      ];
     }
-    if (url === "/api/query/prepare-pagination-plan") {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      return new Response(JSON.stringify({ sqlToExecute: body.options.sql, useAgentResultSession: false }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "prepare_query_pagination_execution_plan") {
+      const options = args.options as { sql: string };
+      return { sqlToExecute: options.sql, useAgentResultSession: false };
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     const tabId = store.createTab("oracle-1", "ORCL", "Query 1", "query", "app");
@@ -228,7 +226,7 @@ test("normalizes unquoted Oracle query identifiers before loading editable metad
     assert.deepEqual(tab?.querySourceColumns, ["ID", "NAME"]);
     assert.equal(tab?.queryEditabilityReason, undefined);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -238,15 +236,13 @@ test("evicting cached tab results releases multi-result payloads and sessions", 
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
   let executeCount = 0;
   const closedSessions: string[] = [];
 
   connectionStore.addEphemeralConnection(conn("conn-1"));
 
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-    if (url === "/api/query/execute-multi") {
+  const restoreTauri = installTauriInvokeStub(async (cmd, args) => {
+    if (cmd === "execute_multi") {
       executeCount++;
       const results: QueryResult[] = [
         {
@@ -263,37 +259,24 @@ test("evicting cached tab results releases multi-result payloads and sessions", 
           execution_time_ms: 1,
         },
       ];
-      return new Response(JSON.stringify(results), { status: 200, headers: { "Content-Type": "application/json" } });
+      return results;
     }
-    if (url === "/api/query/close-session") {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      closedSessions.push(body.sessionId);
-      return new Response(JSON.stringify(true), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "close_query_session") {
+      closedSessions.push(args.sessionId as string);
+      return true;
     }
-    if (url === "/api/query/analyze-editability") {
-      return new Response(JSON.stringify({ editable: false, reason: "complex-source" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "analyze_editable_query_editability") {
+      return { editable: false, reason: "complex-source" };
     }
-    if (url === "/api/query/prepare-pagination-plan") {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      return new Response(
-        JSON.stringify({
-          sqlToExecute: body.options.sql,
-          useAgentResultSession: false,
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+    if (cmd === "prepare_query_pagination_execution_plan") {
+      const options = args.options as { sql: string };
+      return {
+        sqlToExecute: options.sql,
+        useAgentResultSession: false,
+      };
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     const tabIds: string[] = [];
@@ -312,7 +295,7 @@ test("evicting cached tab results releases multi-result payloads and sessions", 
     assert.equal(evicted?.resultEvicted, true);
     assert.deepEqual(closedSessions, ["session-1"]);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -322,14 +305,12 @@ test("result cache eviction keeps recently accessed inactive tabs", async () => 
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
   let executeCount = 0;
 
   connectionStore.addEphemeralConnection(conn("conn-1"));
 
-  globalThis.fetch = (async (input) => {
-    const url = String(input);
-    if (url === "/api/query/execute-multi") {
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    if (cmd === "execute_multi") {
       executeCount++;
       const results: QueryResult[] = [
         {
@@ -340,28 +321,19 @@ test("result cache eviction keeps recently accessed inactive tabs", async () => 
           session_id: `session-${executeCount}`,
         },
       ];
-      return new Response(JSON.stringify(results), { status: 200, headers: { "Content-Type": "application/json" } });
+      return results;
     }
-    if (url === "/api/query/close-session") {
-      return new Response(JSON.stringify(true), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "close_query_session") {
+      return true;
     }
-    if (url === "/api/query/analyze-editability") {
-      return new Response(JSON.stringify({ editable: false, reason: "complex-source" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "analyze_editable_query_editability") {
+      return { editable: false, reason: "complex-source" };
     }
-    if (url === "/api/query/prepare-pagination-plan") {
-      return new Response(JSON.stringify({ sqlToExecute: "select 1", useAgentResultSession: false }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "prepare_query_pagination_execution_plan") {
+      return { sqlToExecute: "select 1", useAgentResultSession: false };
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     const tabIds: string[] = [];
@@ -385,17 +357,16 @@ test("result cache eviction keeps recently accessed inactive tabs", async () => 
     assert.equal(leastRecentlyUsed?.result, undefined);
     assert.equal(leastRecentlyUsed?.resultEvicted, true);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
 
 test("closing tabs clears removed result payloads before dropping tab references", async () => {
   const restoreStorage = installMemoryStorage();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    return new Response(JSON.stringify(true), { status: 200, headers: { "Content-Type": "application/json" } });
-  }) as typeof fetch;
+  const restoreTauri = installTauriInvokeStub(async () => {
+    return true;
+  });
   try {
     setActivePinia(createPinia());
     const store = useQueryStore();
@@ -423,17 +394,16 @@ test("closing tabs clears removed result payloads before dropping tab references
     assert.equal(closingTab.activeResultIndex, undefined);
     assert.equal(closingTab.resultSessionId, undefined);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
 
 test("closing database tabs removes browser tabs for that database only", async () => {
   const restoreStorage = installMemoryStorage();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    return new Response(JSON.stringify(true), { status: 200, headers: { "Content-Type": "application/json" } });
-  }) as typeof fetch;
+  const restoreTauri = installTauriInvokeStub(async () => {
+    return true;
+  });
 
   try {
     setActivePinia(createPinia());
@@ -473,17 +443,16 @@ test("closing database tabs removes browser tabs for that database only", async 
     assert.equal(structureTab.result, undefined);
     assert.equal(structureTab.resultSessionId, undefined);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
 
 test("closing connection tabs removes every tab for that connection only", async () => {
   const restoreStorage = installMemoryStorage();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    return new Response(JSON.stringify(true), { status: 200, headers: { "Content-Type": "application/json" } });
-  }) as typeof fetch;
+  const restoreTauri = installTauriInvokeStub(async () => {
+    return true;
+  });
 
   try {
     setActivePinia(createPinia());
@@ -520,17 +489,16 @@ test("closing connection tabs removes every tab for that connection only", async
     assert.equal(queryTab.result, undefined);
     assert.equal(queryTab.resultSessionId, undefined);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
 
 test("releasing connection tabs keeps SQL tabs and closes object tabs", async () => {
   const restoreStorage = installMemoryStorage();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    return new Response(JSON.stringify(true), { status: 200, headers: { "Content-Type": "application/json" } });
-  }) as typeof fetch;
+  const restoreTauri = installTauriInvokeStub(async () => {
+    return true;
+  });
 
   try {
     setActivePinia(createPinia());
@@ -580,17 +548,16 @@ test("releasing connection tabs keeps SQL tabs and closes object tabs", async ()
     assert.equal(dataTab.result, undefined);
     assert.equal(dataTab.resultSessionId, undefined);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
 
 test("releasing database tabs keeps SQL tabs and closes table tabs for that database only", async () => {
   const restoreStorage = installMemoryStorage();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    return new Response(JSON.stringify(true), { status: 200, headers: { "Content-Type": "application/json" } });
-  }) as typeof fetch;
+  const restoreTauri = installTauriInvokeStub(async () => {
+    return true;
+  });
 
   try {
     setActivePinia(createPinia());
@@ -625,17 +592,16 @@ test("releasing database tabs keeps SQL tabs and closes table tabs for that data
     assert.equal(queryTab.result, undefined);
     assert.equal(queryTab.resultSessionId, undefined);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
 
 test("disconnecting a connection closes every tab for that connection", async () => {
   const restoreStorage = installMemoryStorage();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    return new Response(JSON.stringify(true), { status: 200, headers: { "Content-Type": "application/json" } });
-  }) as typeof fetch;
+  const restoreTauri = installTauriInvokeStub(async () => {
+    return true;
+  });
 
   try {
     setActivePinia(createPinia());
@@ -661,7 +627,7 @@ test("disconnecting a connection closes every tab for that connection", async ()
       false,
     );
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -671,7 +637,6 @@ test("starting a new query clears the previous result payload immediately", asyn
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
 
   connectionStore.addEphemeralConnection(conn("conn-1"));
   const tabId = store.createTab("conn-1", "db", "Query");
@@ -684,28 +649,18 @@ test("starting a new query clears the previous result payload immediately", asyn
     execution_time_ms: 1,
   };
 
-  globalThis.fetch = (async (input) => {
-    const url = String(input);
-    if (url === "/api/query/prepare-pagination-plan") {
-      return new Response(JSON.stringify({ sqlToExecute: "select 1", useAgentResultSession: false }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    if (cmd === "prepare_query_pagination_execution_plan") {
+      return { sqlToExecute: "select 1", useAgentResultSession: false };
     }
-    if (url === "/api/query/execute-multi") {
-      return new Response(JSON.stringify([{ columns: ["new"], rows: [[1]], affected_rows: 0, execution_time_ms: 1 }]), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "execute_multi") {
+      return [{ columns: ["new"], rows: [[1]], affected_rows: 0, execution_time_ms: 1 }];
     }
-    if (url === "/api/query/analyze-editability") {
-      return new Response(JSON.stringify({ editable: false, reason: "complex-source" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "analyze_editable_query_editability") {
+      return { editable: false, reason: "complex-source" };
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     const execution = store.executeTabSql(tabId, "select 1");
@@ -714,7 +669,7 @@ test("starting a new query clears the previous result payload immediately", asyn
     await execution;
     assert.deepEqual(tab.result?.columns, ["new"]);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -724,7 +679,6 @@ test("grid refreshes can preserve the previous result while loading", async () =
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
 
   connectionStore.addEphemeralConnection(conn("conn-1"));
   const tabId = store.createTab("conn-1", "db", "Query");
@@ -738,31 +692,18 @@ test("grid refreshes can preserve the previous result while loading", async () =
   };
   tab.result = previousResult;
 
-  globalThis.fetch = (async (input) => {
-    const url = String(input);
-    if (url === "/api/query/prepare-pagination-plan") {
-      return new Response(JSON.stringify({ sqlToExecute: "select 1 order by name", useAgentResultSession: false }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    if (cmd === "prepare_query_pagination_execution_plan") {
+      return { sqlToExecute: "select 1 order by name", useAgentResultSession: false };
     }
-    if (url === "/api/query/execute-multi") {
-      return new Response(
-        JSON.stringify([{ columns: ["id", "name"], rows: [[2, "Grace"]], affected_rows: 0, execution_time_ms: 1 }]),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+    if (cmd === "execute_multi") {
+      return [{ columns: ["id", "name"], rows: [[2, "Grace"]], affected_rows: 0, execution_time_ms: 1 }];
     }
-    if (url === "/api/query/analyze-editability") {
-      return new Response(JSON.stringify({ editable: false, reason: "complex-source" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "analyze_editable_query_editability") {
+      return { editable: false, reason: "complex-source" };
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     const execution = store.executeTabSql(tabId, "select 1 order by name", {
@@ -774,7 +715,7 @@ test("grid refreshes can preserve the previous result while loading", async () =
     await execution;
     assert.deepEqual(tab.result?.rows, [[2, "Grace"]]);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -784,7 +725,6 @@ test("data tab execution preserves pagination offset metadata", async () => {
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
   let executeBody: any;
   let preparedPagination = false;
 
@@ -793,24 +733,17 @@ test("data tab execution preserves pagination offset metadata", async () => {
   const tab = store.tabs.find((item) => item.id === tabId);
   assert.ok(tab);
 
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-    if (url === "/api/query/prepare-pagination-plan") {
+  const restoreTauri = installTauriInvokeStub(async (cmd, args) => {
+    if (cmd === "prepare_query_pagination_execution_plan") {
       preparedPagination = true;
-      return new Response("unexpected pagination plan request", { status: 500 });
+      throw new Error("unexpected pagination plan request");
     }
-    if (url === "/api/query/execute-multi") {
-      executeBody = JSON.parse(String(init?.body ?? "{}"));
-      return new Response(
-        JSON.stringify([{ columns: ["id"], rows: [[101]], affected_rows: 0, execution_time_ms: 1 }]),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+    if (cmd === "execute_multi") {
+      executeBody = args;
+      return [{ columns: ["id"], rows: [[101]], affected_rows: 0, execution_time_ms: 1 }];
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     await store.executeTabSql(tabId, 'SELECT * FROM "users" LIMIT 100 OFFSET 100;', {
@@ -826,7 +759,7 @@ test("data tab execution preserves pagination offset metadata", async () => {
     assert.equal(tab.resultPageOffset, 100);
     assert.deepEqual(tab.result?.rows, [[101]]);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -836,7 +769,6 @@ test("activating an empty data tab waits for explicit execution", async () => {
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
   let executeBody: any;
 
   connectionStore.addEphemeralConnection(conn("conn-1"));
@@ -848,17 +780,13 @@ test("activating an empty data tab waits for explicit execution", async () => {
   tab.resultPageLimit = 50;
   tab.resultPageOffset = 50;
 
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-    if (url === "/api/query/execute-multi") {
-      executeBody = JSON.parse(String(init?.body ?? "{}"));
-      return new Response(JSON.stringify([{ columns: ["id"], rows: [[51]], affected_rows: 0, execution_time_ms: 1 }]), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+  const restoreTauri = installTauriInvokeStub(async (cmd, args) => {
+    if (cmd === "execute_multi") {
+      executeBody = args;
+      return [{ columns: ["id"], rows: [[51]], affected_rows: 0, execution_time_ms: 1 }];
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     await store.reloadEvictedTab(tabId);
@@ -868,7 +796,7 @@ test("activating an empty data tab waits for explicit execution", async () => {
     assert.equal(tab.resultPageLimit, 50);
     assert.equal(tab.resultPageOffset, 50);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -878,7 +806,6 @@ test("query result export fetches every paginated page", async () => {
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
   const preparedOffsets: number[] = [];
   const executedSqls: string[] = [];
   const timeoutSecs: unknown[] = [];
@@ -899,38 +826,30 @@ test("query result export fetches every paginated page", async () => {
     has_more: true,
   };
 
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-    if (url === "/api/query/prepare-pagination-plan") {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      const offset = Number(body.options.pagination.offset);
-      const limit = Number(body.options.pagination.limit);
+  const restoreTauri = installTauriInvokeStub(async (cmd, args) => {
+    if (cmd === "prepare_query_pagination_execution_plan") {
+      const options = args.options as { pagination: { offset: number; limit: number } };
+      const offset = Number(options.pagination.offset);
+      const limit = Number(options.pagination.limit);
       preparedOffsets.push(offset);
-      return new Response(
-        JSON.stringify({
-          sqlToExecute: `select id from users /* offset:${offset} */`,
-          pageSql: `select id from users /* offset:${offset} */`,
-          pageLimit: limit,
-          pageOffset: offset,
-          useAgentResultSession: false,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+      return {
+        sqlToExecute: `select id from users /* offset:${offset} */`,
+        pageSql: `select id from users /* offset:${offset} */`,
+        pageLimit: limit,
+        pageOffset: offset,
+        useAgentResultSession: false,
+      };
     }
-    if (url === "/api/query/execute-multi") {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      executedSqls.push(body.sql);
-      timeoutSecs.push(body.timeoutSecs);
-      const rows = String(body.sql).includes("offset:0")
+    if (cmd === "execute_multi") {
+      executedSqls.push(args.sql as string);
+      timeoutSecs.push(args.timeoutSecs);
+      const rows = String(args.sql).includes("offset:0")
         ? Array.from({ length: 10_000 }, (_, index) => [index + 1])
         : [[10_001], [10_002]];
-      return new Response(JSON.stringify([{ columns: ["id"], rows, affected_rows: 0, execution_time_ms: 1 }]), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return [{ columns: ["id"], rows, affected_rows: 0, execution_time_ms: 1 }];
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     const exported = await store.fetchTabResultForExport(tabId);
@@ -941,7 +860,7 @@ test("query result export fetches every paginated page", async () => {
     assert.equal(exported?.rows.length, 10_002);
     assert.deepEqual(exported?.rows.at(-1), [10_002]);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -951,7 +870,6 @@ test("table data export fetches every filtered page", async () => {
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
   const buildRequests: unknown[] = [];
   const executedSqls: string[] = [];
 
@@ -993,30 +911,22 @@ test("table data export fetches every filtered page", async () => {
     primaryKeys: ["id"],
   };
 
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-    if (url === "/api/query/build-table-select-sql") {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      buildRequests.push(body.options);
-      const { limit, offset } = body.options;
-      return new Response(
-        JSON.stringify(`SELECT * FROM "public"."users" WHERE (status = 'active') ORDER BY "id" DESC LIMIT ${limit} OFFSET ${offset ?? 0};`),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+  const restoreTauri = installTauriInvokeStub(async (cmd, args) => {
+    if (cmd === "build_table_select_sql") {
+      const options = args.options as { limit?: number; offset?: number };
+      buildRequests.push(options);
+      const { limit, offset } = options;
+      return `SELECT * FROM "public"."users" WHERE (status = 'active') ORDER BY "id" DESC LIMIT ${limit} OFFSET ${offset ?? 0};`;
     }
-    if (url === "/api/query/execute-multi") {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      executedSqls.push(body.sql);
-      const rows = String(body.sql).includes("OFFSET 0")
+    if (cmd === "execute_multi") {
+      executedSqls.push(args.sql as string);
+      const rows = String(args.sql).includes("OFFSET 0")
         ? Array.from({ length: 10_000 }, (_, index) => [index + 1, "active"])
         : [[10_001, "active"], [10_002, "active"]];
-      return new Response(JSON.stringify([{ columns: ["id", "status"], rows, affected_rows: 0, execution_time_ms: 1 }]), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+      return [{ columns: ["id", "status"], rows, affected_rows: 0, execution_time_ms: 1 }];
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     const exported = await store.fetchTabResultForExport(tabId);
@@ -1059,7 +969,7 @@ test("table data export fetches every filtered page", async () => {
     assert.equal(exported?.rows.length, 10_002);
     assert.deepEqual(exported?.rows.at(-1), [10_002, "active"]);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -1069,35 +979,27 @@ test("query execution finishes without waiting for metadata analysis", async () 
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
 
   connectionStore.addEphemeralConnection(conn("conn-1"));
   const tabId = store.createTab("conn-1", "db", "Query");
   const tab = store.tabs.find((item) => item.id === tabId);
   assert.ok(tab);
 
-  let resolveMetadata: ((value: Response) => void) | undefined;
-  globalThis.fetch = (async (input) => {
-    const url = String(input);
-    if (url === "/api/query/prepare-pagination-plan") {
-      return new Response(JSON.stringify({ sqlToExecute: "select id from users", useAgentResultSession: false }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+  let resolveMetadata: ((value: unknown) => void) | undefined;
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    if (cmd === "prepare_query_pagination_execution_plan") {
+      return { sqlToExecute: "select id from users", useAgentResultSession: false };
     }
-    if (url === "/api/query/execute-multi") {
-      return new Response(JSON.stringify([{ columns: ["id"], rows: [[1]], affected_rows: 0, execution_time_ms: 1 }]), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "execute_multi") {
+      return [{ columns: ["id"], rows: [[1]], affected_rows: 0, execution_time_ms: 1 }];
     }
-    if (url === "/api/query/analyze-editability") {
-      return new Promise<Response>((resolve) => {
+    if (cmd === "analyze_editable_query_editability") {
+      return new Promise<unknown>((resolve) => {
         resolveMetadata = resolve;
       });
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     await store.executeTabSql(tabId, "select id from users");
@@ -1106,15 +1008,10 @@ test("query execution finishes without waiting for metadata analysis", async () 
     assert.equal(tab.executionId, undefined);
     assert.deepEqual(tab.result?.columns, ["id"]);
 
-    resolveMetadata?.(
-      new Response(JSON.stringify({ editable: false, reason: "complex-source" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
+    resolveMetadata?.({ editable: false, reason: "complex-source" });
     await new Promise((resolve) => setTimeout(resolve, 0));
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -1124,35 +1021,24 @@ test("query execution is scoped to the tab client session", async () => {
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
 
   connectionStore.addEphemeralConnection(conn("conn-1"));
   const tabId = store.createTab("conn-1", "db", "Query");
   let executeBody: any;
 
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-    if (url === "/api/query/prepare-pagination-plan") {
-      return new Response(JSON.stringify({ sqlToExecute: "select 1", useAgentResultSession: false }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+  const restoreTauri = installTauriInvokeStub(async (cmd, args) => {
+    if (cmd === "prepare_query_pagination_execution_plan") {
+      return { sqlToExecute: "select 1", useAgentResultSession: false };
     }
-    if (url === "/api/query/execute-multi") {
-      executeBody = JSON.parse(String(init?.body ?? "{}"));
-      return new Response(JSON.stringify([{ columns: ["id"], rows: [[1]], affected_rows: 0, execution_time_ms: 1 }]), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "execute_multi") {
+      executeBody = args;
+      return [{ columns: ["id"], rows: [[1]], affected_rows: 0, execution_time_ms: 1 }];
     }
-    if (url === "/api/query/analyze-editability") {
-      return new Response(JSON.stringify({ editable: false, reason: "complex-source" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "analyze_editable_query_editability") {
+      return { editable: false, reason: "complex-source" };
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     await store.executeTabSql(tabId, "select 1");
@@ -1160,7 +1046,7 @@ test("query execution is scoped to the tab client session", async () => {
     assert.equal(executeBody.clientSessionId, tabId);
     assert.equal(executeBody.timeoutSecs, 30);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -1170,57 +1056,46 @@ test("query execution keeps automatically counting total rows in the background"
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
 
   connectionStore.addEphemeralConnection(conn("conn-1"));
   const tabId = store.createTab("conn-1", "db", "Query", "query", "public");
   const tab = store.tabs.find((item) => item.id === tabId);
   assert.ok(tab);
 
-  let resolveCount: ((value: Response) => void) | undefined;
+  let resolveCount: ((value: QueryResult) => void) | undefined;
   let countBody: any;
-  globalThis.fetch = (async (input, init) => {
-    const url = String(input);
-    if (url === "/api/query/prepare-pagination-plan") {
-      return new Response(
-        JSON.stringify({
-          sqlToExecute: "select id from users limit 100",
-          pageSql: "select id from users limit 100",
-          pageLimit: 100,
-          pageOffset: 0,
-          countSql: "select count(*) from users",
-          useAgentResultSession: false,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+  const restoreTauri = installTauriInvokeStub(async (cmd, args) => {
+    if (cmd === "prepare_query_pagination_execution_plan") {
+      return {
+        sqlToExecute: "select id from users limit 100",
+        pageSql: "select id from users limit 100",
+        pageLimit: 100,
+        pageOffset: 0,
+        countSql: "select count(*) from users",
+        useAgentResultSession: false,
+      };
     }
-    if (url === "/api/query/execute-multi") {
-      return new Response(
-        JSON.stringify([
-          {
-            columns: ["id"],
-            rows: Array.from({ length: 100 }, (_, index) => [index + 1]),
-            affected_rows: 0,
-            execution_time_ms: 1,
-          },
-        ]),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+    if (cmd === "execute_multi") {
+      return [
+        {
+          columns: ["id"],
+          rows: Array.from({ length: 100 }, (_, index) => [index + 1]),
+          affected_rows: 0,
+          execution_time_ms: 1,
+        },
+      ];
     }
-    if (url === "/api/query/execute") {
-      countBody = JSON.parse(String(init?.body ?? "{}"));
-      return new Promise<Response>((resolve) => {
+    if (cmd === "execute_query") {
+      countBody = args;
+      return new Promise<QueryResult>((resolve) => {
         resolveCount = resolve;
       });
     }
-    if (url === "/api/query/analyze-editability") {
-      return new Response(JSON.stringify({ editable: false, reason: "complex-source" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "analyze_editable_query_editability") {
+      return { editable: false, reason: "complex-source" };
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     await store.executeTabSql(tabId, "select id from users");
@@ -1231,21 +1106,16 @@ test("query execution keeps automatically counting total rows in the background"
     assert.equal(countBody.sql, "select count(*) from users");
     assert.equal(countBody.schema, "public");
 
-    resolveCount?.(
-      new Response(
-        JSON.stringify({
-          columns: ["count"],
-          rows: [[250]],
-          affected_rows: 0,
-          execution_time_ms: 1,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
+    resolveCount?.({
+      columns: ["count"],
+      rows: [[250]],
+      affected_rows: 0,
+      execution_time_ms: 1,
+    });
     await waitFor(() => tab.resultTotalRowCount === 250);
     assert.equal(tab.resultTotalRowCountLoading, false);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -1255,7 +1125,6 @@ test("paginated query execution keeps the previous total while refreshing it in 
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
 
   connectionStore.addEphemeralConnection(conn("conn-1"));
   const tabId = store.createTab("conn-1", "db", "Query", "query", "public");
@@ -1263,48 +1132,38 @@ test("paginated query execution keeps the previous total while refreshing it in 
   assert.ok(tab);
   tab.resultTotalRowCount = 250;
 
-  let resolveCount: ((value: Response) => void) | undefined;
-  globalThis.fetch = (async (input) => {
-    const url = String(input);
-    if (url === "/api/query/prepare-pagination-plan") {
-      return new Response(
-        JSON.stringify({
-          sqlToExecute: "select id from users limit 100 offset 100",
-          pageSql: "select id from users limit 100 offset 100",
-          pageLimit: 100,
-          pageOffset: 100,
-          countSql: "select count(*) from users",
-          useAgentResultSession: false,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+  let resolveCount: ((value: QueryResult) => void) | undefined;
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    if (cmd === "prepare_query_pagination_execution_plan") {
+      return {
+        sqlToExecute: "select id from users limit 100 offset 100",
+        pageSql: "select id from users limit 100 offset 100",
+        pageLimit: 100,
+        pageOffset: 100,
+        countSql: "select count(*) from users",
+        useAgentResultSession: false,
+      };
     }
-    if (url === "/api/query/execute-multi") {
-      return new Response(
-        JSON.stringify([
-          {
-            columns: ["id"],
-            rows: Array.from({ length: 100 }, (_, index) => [index + 101]),
-            affected_rows: 0,
-            execution_time_ms: 1,
-          },
-        ]),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+    if (cmd === "execute_multi") {
+      return [
+        {
+          columns: ["id"],
+          rows: Array.from({ length: 100 }, (_, index) => [index + 101]),
+          affected_rows: 0,
+          execution_time_ms: 1,
+        },
+      ];
     }
-    if (url === "/api/query/execute") {
-      return new Promise<Response>((resolve) => {
+    if (cmd === "execute_query") {
+      return new Promise<QueryResult>((resolve) => {
         resolveCount = resolve;
       });
     }
-    if (url === "/api/query/analyze-editability") {
-      return new Response(JSON.stringify({ editable: false, reason: "complex-source" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "analyze_editable_query_editability") {
+      return { editable: false, reason: "complex-source" };
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     await store.executeTabSql(tabId, "select id from users", {
@@ -1316,21 +1175,16 @@ test("paginated query execution keeps the previous total while refreshing it in 
     assert.equal(tab.resultTotalRowCount, 250);
     assert.equal(tab.resultTotalRowCountLoading, true);
 
-    resolveCount?.(
-      new Response(
-        JSON.stringify({
-          columns: ["count"],
-          rows: [[275]],
-          affected_rows: 0,
-          execution_time_ms: 1,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
+    resolveCount?.({
+      columns: ["count"],
+      rows: [[275]],
+      affected_rows: 0,
+      execution_time_ms: 1,
+    });
     await waitFor(() => tab.resultTotalRowCount === 275);
     assert.equal(tab.resultTotalRowCountLoading, false);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });
@@ -1340,36 +1194,25 @@ test("multi statement execution shows the first result set by default", async ()
   setActivePinia(createPinia());
   const connectionStore = useConnectionStore();
   const store = useQueryStore();
-  const originalFetch = globalThis.fetch;
 
   connectionStore.addEphemeralConnection(conn("conn-1"));
   const tabId = store.createTab("conn-1", "db", "Query");
 
-  globalThis.fetch = (async (input) => {
-    const url = String(input);
-    if (url === "/api/query/prepare-pagination-plan") {
-      return new Response(JSON.stringify({ sqlToExecute: "set @id = 1; select @id", useAgentResultSession: false }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    if (cmd === "prepare_query_pagination_execution_plan") {
+      return { sqlToExecute: "set @id = 1; select @id", useAgentResultSession: false };
     }
-    if (url === "/api/query/execute-multi") {
-      return new Response(
-        JSON.stringify([
-          { columns: [], rows: [], affected_rows: 0, execution_time_ms: 1 },
-          { columns: ["@id"], rows: [[1]], affected_rows: 0, execution_time_ms: 1 },
-        ]),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
+    if (cmd === "execute_multi") {
+      return [
+        { columns: [], rows: [], affected_rows: 0, execution_time_ms: 1 },
+        { columns: ["@id"], rows: [[1]], affected_rows: 0, execution_time_ms: 1 },
+      ];
     }
-    if (url === "/api/query/analyze-editability") {
-      return new Response(JSON.stringify({ editable: false, reason: "complex-source" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+    if (cmd === "analyze_editable_query_editability") {
+      return { editable: false, reason: "complex-source" };
     }
-    return new Response("unexpected request", { status: 500 });
-  }) as typeof fetch;
+    throw new Error("unexpected command: " + cmd);
+  });
 
   try {
     await store.executeTabSql(tabId, "set @id = 1; select @id");
@@ -1382,7 +1225,7 @@ test("multi statement execution shows the first result set by default", async ()
     assert.equal(isReactive(tab?.result?.rows[0]), false);
     assert.equal(tab?.results?.every((result) => !isReactive(result.rows)), true);
   } finally {
-    globalThis.fetch = originalFetch;
+    restoreTauri();
     restoreStorage();
   }
 });

@@ -93,30 +93,34 @@ test("recently selected completion items receive a ranking boost", () => {
 });
 
 test("completion metadata refresh is deduplicated and local lookups rank the current schema first", async () => {
-  const originalFetch = globalThis.fetch;
   const storage = installMemoryStorage();
   const { schemas, tablesBySchema } = largeCatalogFixture();
   let schemaCalls = 0;
   let tableCalls = 0;
 
-  globalThis.fetch = (async (input) => {
-    const url = new URL(String(input), "http://localhost");
-    if (url.pathname === "/api/schema/schemas") {
-      schemaCalls++;
-      return Response.json(schemas);
-    }
-    if (url.pathname === "/api/schema/tables") {
-      tableCalls++;
-      const schema = url.searchParams.get("schema") ?? "";
-      const filter = (url.searchParams.get("filter") ?? "").toLowerCase();
-      const limit = Number(url.searchParams.get("limit") || "0") || undefined;
-      const tables = (tablesBySchema.get(schema) ?? [])
-        .filter((table) => !filter || table.name.toLowerCase().includes(filter))
-        .slice(0, limit);
-      return Response.json(tables);
-    }
-    return Response.json(null);
-  }) as typeof fetch;
+  const originalWindow = (globalThis as any).window;
+  (globalThis as any).window = {
+    __TAURI_INTERNALS__: {
+      invoke: async (cmd: string, args?: Record<string, unknown>) => {
+        const invokeArgs = args ?? {};
+        if (cmd === "list_schemas") {
+          schemaCalls++;
+          return schemas;
+        }
+        if (cmd === "list_tables") {
+          tableCalls++;
+          const schema = (invokeArgs.schema as string) ?? "";
+          const filter = ((invokeArgs.filter as string) ?? "").toLowerCase();
+          const limit = Number(invokeArgs.limit || 0) || undefined;
+          const tables = (tablesBySchema.get(schema) ?? [])
+            .filter((table) => !filter || table.name.toLowerCase().includes(filter))
+            .slice(0, limit);
+          return tables;
+        }
+        return null;
+      },
+    },
+  };
 
   try {
     setActivePinia(createPinia());
@@ -136,7 +140,8 @@ test("completion metadata refresh is deduplicated and local lookups rank the cur
     assert.equal(localTables.length, 5);
     assert.equal(localTables[0].schema, "schema_011");
   } finally {
-    globalThis.fetch = originalFetch;
+    if (originalWindow === undefined) Reflect.deleteProperty(globalThis as any, "window");
+    else (globalThis as any).window = originalWindow;
     storage.restore();
   }
 });

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/dbx-core", "crates/dbx-web"]
+members = ["src-tauri", "crates/dbx-core"]
 
 [patch.crates-io]
 tokio-postgres = { git = "https://github.com/t8y2/tokio-postgres-gaussdb.git", branch = "master" }
@@ -30,6 +30,6 @@ debug = false
 
 # Workspace crates keep line tables (file:line in panics/backtraces) without the
 # full DWARF that bloats artifacts. Use `debug = true` here if you need a stepping
-# debugger on dbx-core/dbx-web/src-tauri.
+# debugger on dbx-core/src-tauri.
 [profile.dev]
 debug = "line-tables-only"

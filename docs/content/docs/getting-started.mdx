@@ -1,17 +1,17 @@
 ---
 title: Getting Started
-description: Install DBX, create your first connection, and understand the desktop, Docker, and source workflows.
+description: Install the DBX desktop app, create your first connection, and understand the desktop and source workflows.
 ---
 
 This guide gets you through three things:
 
-1. Install DBX or start the Docker version
+1. Install the DBX desktop app
 2. Create and test your first database connection
 3. Run DBX from source when you want to contribute or debug locally
 
 ## Choose An Install Method
 
-<Tabs groupId="platform" items={['macOS', 'Windows', 'Linux', 'Docker']}>
+<Tabs groupId="platform" items={['macOS', 'Windows', 'Linux']}>
   <Tab value="macOS">
     Download the `.dmg` installer from [GitHub Releases](https://github.com/wynn5a/dbx/releases) and drag DBX into Applications.
   </Tab>
@@ -32,28 +32,18 @@ This guide gets you through three things:
     chmod +x DBX*.AppImage
     ```
   </Tab>
-  <Tab value="Docker">
-    Docker is for self-hosting DBX on a server and opening it from a browser. Build and run it from source with the compose file shipped in the repository:
-
-    ```bash
-    git clone https://github.com/wynn5a/dbx.git
-    cd dbx
-    docker compose -f deploy/docker-compose.yml up -d --build
-    ```
-
-    Then open `http://localhost:4224`. The web password is set via `DBX_PASSWORD` in `deploy/docker-compose.yml` — change it before exposing the server.
-  </Tab>
 </Tabs>
 
-## Desktop Or Docker
+## Desktop App Overview
 
-| Mode | Best For | Backend Path | Storage |
-|---|---|---|---|
-| Desktop | Daily local work, local files, native windows, DBX UI opened from MCP | Tauri commands calling the Rust core | Local app data directory |
-| Docker / Web | Self-hosted access from a server or browser | HTTP routes calling the same Rust core | Docker volume or server data directory |
+| Aspect | Description |
+|---|---|
+| Best For | Daily local work, local files, native windows, DBX UI opened from MCP |
+| Backend Path | Tauri commands calling the Rust core |
+| Storage | Local app data directory |
 
 <Callout type="info">
-The core database features are shared, but desktop-only integrations such as opening DBX windows from MCP require the desktop app to be running.
+The DBX MCP server talks to the desktop app, so keep DBX running while you use MCP tools such as opening DBX windows from your AI assistant.
 </Callout>
 
 ## Create Your First Connection
@@ -120,11 +110,11 @@ Connection passwords, SSH passwords, SSH key passphrases, and connection strings
 
 | Symptom | Check |
 |---|---|
-| Timeout | Host, port, firewall, security group, VPN, Docker host reachability, or private network access |
+| Timeout | Host, port, firewall, security group, VPN, or private network access |
 | Authentication failed | Username, password, auth mode, SSL requirement, remote login permission |
 | Connected but no tables | Default database, schema, permissions, metadata read access, visible database filter |
-| File database cannot open | File path, file permissions, mounted Docker volume, or unsupported file extension |
-| Private database unreachable | Configure SSH tunnel, proxy, VPN, or run Docker on a machine that can reach the database |
+| File database cannot open | File path, file permissions, or unsupported file extension |
+| Private database unreachable | Configure SSH tunnel, proxy, VPN, or run DBX on a machine that can reach the database |
 
 ## Run From Source
 
@@ -161,13 +151,6 @@ git clone https://github.com/wynn5a/dbx.git
 cd dbx
 pnpm install
 pnpm dev:tauri
-```
-
-For the web version:
-
-```bash
-pnpm dev:web
-pnpm dev:backend
 ```
 
 ### Build Desktop Packages

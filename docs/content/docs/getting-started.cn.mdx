@@ -1,17 +1,17 @@
 ---
 title: 快速开始
-description: 安装 DBX、创建第一个连接，并了解桌面版、Docker 版和源码运行方式。
+description: 安装 DBX 桌面版、创建第一个连接，并了解桌面版和源码运行方式。
 ---
 
 本页帮助你完成三件事：
 
-1. 安装 DBX 或启动 Docker 版本
+1. 安装 DBX 桌面版
 2. 创建并测试第一个数据库连接
 3. 在需要参与开发或本地调试时从源码运行 DBX
 
 ## 选择安装方式
 
-<Tabs groupId="platform" items={['macOS', 'Windows', 'Linux', 'Docker']}>
+<Tabs groupId="platform" items={['macOS', 'Windows', 'Linux']}>
   <Tab value="macOS">
     从 [GitHub Releases](https://github.com/wynn5a/dbx/releases) 下载 `.dmg` 安装包，并将 DBX 拖入「应用程序」。
   </Tab>
@@ -32,28 +32,18 @@ description: 安装 DBX、创建第一个连接，并了解桌面版、Docker �
     chmod +x DBX*.AppImage
     ```
   </Tab>
-  <Tab value="Docker">
-    Docker 版本适合部署在服务器上，并通过浏览器访问。使用仓库自带的 compose 文件从源码构建并运行：
-
-    ```bash
-    git clone https://github.com/wynn5a/dbx.git
-    cd dbx
-    docker compose -f deploy/docker-compose.yml up -d --build
-    ```
-
-    启动后访问 `http://localhost:4224`。Web 访问密码由 `deploy/docker-compose.yml` 中的 `DBX_PASSWORD` 设置，对外暴露前请先修改。
-  </Tab>
 </Tabs>
 
-## 桌面版还是 Docker
+## 桌面版概览
 
-| 模式 | 适合场景 | 后端路径 | 存储位置 |
-|---|---|---|---|
-| 桌面版 | 本机日常工作、本地文件、原生窗口、从 MCP 打开 DBX 界面 | Tauri 命令调用 Rust core | 本机应用数据目录 |
-| Docker / Web | 服务器自托管、浏览器访问 | HTTP 路由调用同一套 Rust core | Docker volume 或服务器数据目录 |
+| 项目 | 说明 |
+|---|---|
+| 适合场景 | 本机日常工作、本地文件、原生窗口、从 MCP 打开 DBX 界面 |
+| 后端路径 | Tauri 命令调用 Rust core |
+| 存储位置 | 本机应用数据目录 |
 
 <Callout type="info">
-核心数据库能力保持一致，但通过 MCP 打开桌面窗口等集成需要 DBX 桌面版正在运行。
+DBX 的 MCP server 与桌面版通信，使用 MCP 工具（例如从 AI 助手打开 DBX 窗口）时请保持 DBX 桌面版正在运行。
 </Callout>
 
 ## 创建第一个连接
@@ -120,11 +110,11 @@ description: 安装 DBX、创建第一个连接，并了解桌面版、Docker �
 
 | 现象 | 检查项 |
 |---|---|
-| 连接超时 | 主机、端口、防火墙、安全组、VPN、Docker 主机网络或内网访问权限 |
+| 连接超时 | 主机、端口、防火墙、安全组、VPN 或内网访问权限 |
 | 认证失败 | 用户名、密码、认证方式、SSL 要求、账号是否允许远程登录 |
 | 能连接但看不到表 | 默认数据库、Schema、权限、元数据读取权限、可见数据库过滤 |
-| 文件数据库打不开 | 文件路径、文件权限、Docker volume 挂载、文件扩展名是否支持 |
-| 内网数据库无法访问 | 配置 SSH 隧道、代理、VPN，或让 Docker 部署机器能访问目标数据库 |
+| 文件数据库打不开 | 文件路径、文件权限、文件扩展名是否支持 |
+| 内网数据库无法访问 | 配置 SSH 隧道、代理、VPN，或换用一台能访问目标数据库的机器运行 DBX |
 
 ## 从源码运行
 
@@ -161,13 +151,6 @@ git clone https://github.com/wynn5a/dbx.git
 cd dbx
 pnpm install
 pnpm dev:tauri
-```
-
-Web 版本：
-
-```bash
-pnpm dev:web
-pnpm dev:backend
 ```
 
 ### 构建桌面安装包

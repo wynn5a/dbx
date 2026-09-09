@@ -42,7 +42,6 @@ import {
   Server,
   Settings,
   Shield,
-  ShieldCheck,
   Sparkles,
   SquareChevronRight,
   SquareTerminal,
@@ -712,7 +711,6 @@ function setSidebarActivation(value: "single" | "double") {
 }
 
 const activeSettingsTab = ref("editor");
-const isWeb = !isTauriRuntime();
 const displayedAppVersion = computed(() => (props.appVersion ? `v${props.appVersion}` : ""));
 type SettingsCategory =
   | "editor"
@@ -756,37 +754,9 @@ const settingsCategoryNav = computed<SettingsCategoryNavItem[]>(() => [
   { value: "data", label: t("settings.dataTab"), icon: Database, subtitleKey: "settings.dataSubtitle" },
   { value: "shortcuts", label: t("settings.shortcutsTab"), icon: Keyboard, subtitleKey: "settings.shortcutsSubtitle" },
   { value: "snippets", label: t("settings.snippetsTab"), icon: Braces, subtitleKey: "settings.snippetsDescription" },
-  ...(isWeb
-    ? []
-    : [
-        {
-          value: "sync" as const,
-          label: t("settings.syncTab"),
-          icon: Cloud,
-          subtitleKey: "settings.syncWebDavDescription",
-        },
-      ]),
+  { value: "sync" as const, label: t("settings.syncTab"), icon: Cloud, subtitleKey: "settings.syncWebDavDescription" },
   { value: "ai", label: t("settings.aiTab"), icon: Sparkles, subtitleKey: "settings.aiSubtitle" },
-  ...(isWeb
-    ? []
-    : [
-        {
-          value: "mcp" as const,
-          label: t("settings.mcpTab"),
-          icon: PackageSearch,
-          subtitleKey: "settings.mcpDescription",
-        },
-      ]),
-  ...(isWeb
-    ? [
-        {
-          value: "security" as const,
-          label: t("settings.securityTab"),
-          icon: ShieldCheck,
-          subtitleKey: "auth.changePasswordDescription",
-        },
-      ]
-    : []),
+  { value: "mcp" as const, label: t("settings.mcpTab"), icon: PackageSearch, subtitleKey: "settings.mcpDescription" },
   { value: "about", label: t("settings.aboutTab"), icon: Info, subtitleKey: "settings.aboutDescription" },
 ]);
 const activeCategoryMeta = computed(
@@ -1091,22 +1061,11 @@ async function downloadWebDavSnapshot() {
   });
 }
 
-const oldPassword = ref("");
-const newPassword = ref("");
-const confirmNewPassword = ref("");
-const passwordMessage = ref("");
-const passwordError = ref(false);
-const changingPassword = ref(false);
-
 watch(
   () => props.open,
   async (open) => {
     if (open) {
       activeSettingsTab.value = props.initialTab || "editor";
-      passwordMessage.value = "";
-      oldPassword.value = "";
-      newPassword.value = "";
-      confirmNewPassword.value = "";
       await settingsStore.initAiConfig();
       await settingsStore.initDesktopSettings();
       editShowTrayIcon.value = settingsStore.desktopSettings.show_tray_icon;
@@ -1114,7 +1073,7 @@ watch(
       webdavPassword.value = "";
       await refreshWebDavPasswordStatus();
       syncAiEditState();
-      if (!isWeb && activeSettingsTab.value === "mcp") void refreshMcpStatus();
+      if (activeSettingsTab.value === "mcp") void refreshMcpStatus();
     }
   },
   { immediate: true },
@@ -1134,41 +1093,6 @@ watch(activeSettingsTab, (tab) => {
 onMounted(() => {
   void refreshWebDavPasswordStatus();
 });
-
-async function changePassword() {
-  if (newPassword.value !== confirmNewPassword.value) {
-    passwordMessage.value = t("auth.passwordMismatch");
-    passwordError.value = true;
-    return;
-  }
-  changingPassword.value = true;
-  passwordMessage.value = "";
-  try {
-    const res = await fetch("/api/auth/change-password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ old_password: oldPassword.value, new_password: newPassword.value }),
-    });
-    if (res.ok) {
-      passwordMessage.value = t("auth.passwordChanged");
-      passwordError.value = false;
-      oldPassword.value = "";
-      newPassword.value = "";
-      confirmNewPassword.value = "";
-    } else if (res.status === 401) {
-      passwordMessage.value = t("auth.oldPasswordWrong");
-      passwordError.value = true;
-    } else {
-      passwordMessage.value = t("auth.changePasswordFailed");
-      passwordError.value = true;
-    }
-  } catch {
-    passwordMessage.value = t("auth.connectFailed");
-    passwordError.value = true;
-  } finally {
-    changingPassword.value = false;
-  }
-}
 
 // ---------- AI Settings ----------
 const aiProviderOptions = Object.values(AI_PROVIDER_PRESETS);
@@ -1850,7 +1774,7 @@ watch(
                   {{ t("settings.systemSection") }}
                 </div>
                 <div :class="dsSettingGroup">
-                  <div v-if="!isWeb" :class="dsSettingRow">
+                  <div :class="dsSettingRow">
                     <div class="min-w-0">
                       <div class="flex items-center gap-2">
                         <Menu class="h-3.5 w-3.5 shrink-0 text-[var(--ds-text-2)]" />
@@ -1883,7 +1807,7 @@ watch(
                       class="shrink-0"
                     />
                   </div>
-                  <div v-if="!isWeb" class="flex flex-col gap-2.5 px-3.5 py-3">
+                  <div class="flex flex-col gap-2.5 px-3.5 py-3">
                     <div class="flex items-center justify-between gap-4">
                       <div class="min-w-0">
                         <div class="flex items-center gap-2">
@@ -2966,7 +2890,7 @@ watch(
               </div>
             </section>
 
-            <section v-else-if="activeSettingsTab === 'mcp' && !isWeb" class="flex flex-col gap-5 py-2">
+            <section v-else-if="activeSettingsTab === 'mcp'" class="flex flex-col gap-5 py-2">
               <div
                 class="flex items-center justify-between gap-4 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-hover)] px-3 py-2.5"
               >
@@ -3141,39 +3065,6 @@ watch(
               <div class="flex items-center gap-2 text-xs text-[var(--ds-text-3)]">
                 <Terminal class="h-3.5 w-3.5" />
                 <span>{{ t("settings.mcpDetectionTiming") }} {{ t("settings.mcpNpmBoundary") }}</span>
-              </div>
-            </section>
-
-            <section v-else-if="activeSettingsTab === 'security' && isWeb" class="flex flex-col gap-5 py-2">
-              <div class="space-y-3">
-                <Input
-                  v-model="oldPassword"
-                  type="password"
-                  :placeholder="t('auth.oldPassword')"
-                  class="h-9"
-                  autocomplete="off"
-                />
-                <Input
-                  v-model="newPassword"
-                  type="password"
-                  :placeholder="t('auth.newPassword')"
-                  class="h-9"
-                  autocomplete="off"
-                />
-                <Input
-                  v-model="confirmNewPassword"
-                  type="password"
-                  :placeholder="t('auth.confirmPassword')"
-                  class="h-9"
-                  autocomplete="off"
-                />
-                <p
-                  v-if="passwordMessage"
-                  class="text-xs"
-                  :class="passwordError ? 'text-[var(--ds-red)]' : 'text-[var(--ds-green)]'"
-                >
-                  {{ passwordMessage }}
-                </p>
               </div>
             </section>
 
@@ -3369,7 +3260,7 @@ watch(
       </DialogFooter>
 
       <DialogFooter
-        v-else-if="activeSettingsTab === 'mcp' && !isWeb"
+        v-else-if="activeSettingsTab === 'mcp'"
         class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3"
       >
         <Button variant="outline" @click="emit('update:open', false)">
@@ -3384,21 +3275,6 @@ watch(
         <Button variant="outline" @click="openExternalUrl('https://dbxio.com/cn/docs/mcp')">
           <ExternalLink class="mr-1 h-3 w-3" />
           {{ t("settings.mcpGuide") }}
-        </Button>
-      </DialogFooter>
-
-      <DialogFooter
-        v-else-if="activeSettingsTab === 'security' && isWeb"
-        class="mx-0 mb-0 shrink-0 rounded-none border-t border-[var(--ds-border)] bg-transparent px-4 py-3"
-      >
-        <Button variant="outline" @click="emit('update:open', false)">
-          {{ t("common.close") }}
-        </Button>
-        <Button
-          :disabled="changingPassword || !oldPassword || !newPassword || !confirmNewPassword"
-          @click="changePassword"
-        >
-          {{ t("auth.changePassword") }}
         </Button>
       </DialogFooter>
 

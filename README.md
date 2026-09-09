@@ -1,5 +1,5 @@
 <div align="center">
-  <p style="font-size: 18px; white-space: nowrap;"><strong>40+ databases in 15 MB. Desktop & Docker self-hosting, with built-in AI assistant.</strong></p>
+  <p style="font-size: 18px; white-space: nowrap;"><strong>40+ databases in 15 MB. Native desktop app with built-in AI assistant.</strong></p>
 
   <p>
     <a href="https://github.com/wynn5a/dbx/releases"><img src="https://img.shields.io/github/downloads/wynn5a/dbx/total?style=for-the-badge&color=blue" /></a>
@@ -72,8 +72,8 @@
       <p>DBX speaks the Model Context Protocol. Claude Code, Cursor, Windsurf, and other AI coding agents can query your databases through connections you already set up. One config, everywhere.</p>
     </td>
     <td>
-      <h3>🌐 Desktop + Docker + Web</h3>
-      <p>Native app on macOS, Windows, and Linux. Self-host via Docker for team access. Web version for browser-only environments. Same feature set. Same connections.</p>
+      <h3>🌐 Native Desktop App</h3>
+      <p>Native app on macOS, Windows, and Linux. Same feature set. Same connections.</p>
     </td>
   </tr>
 </table>
@@ -150,29 +150,11 @@ Add to your `.mcp.json`:
 
 Works with Claude Code, Cursor, Windsurf, and any MCP-compatible agent. Supports listing connections, browsing tables, executing SQL, and opening tables directly in DBX's UI.
 
-DBX also provides a dedicated CLI package for terminal, script, and Codex workflows:
-
-```bash
-npm install -g @dbx-app/cli
-dbx connections list --json
-dbx query local "select 1" --json
-```
-
-See the [MCP server README](packages/mcp-server/README.md) and [CLI README](packages/cli/README.md) for details.
+See the [MCP server README](packages/mcp-server/README.md) for details.
 
 ## Install
 
 Download the latest release from the [Releases](https://github.com/wynn5a/dbx/releases/latest) page (`.dmg` for macOS, `.msi` for Windows, `.deb` / `.AppImage` for Linux).
-
-## Self-Hosted (Docker)
-
-DBX provides a web version that can be deployed via Docker. Build and run it from source with the ready-to-use compose file at `deploy/docker-compose.yml`:
-
-```bash
-docker compose -f deploy/docker-compose.yml up -d --build
-```
-
-Open `http://localhost:4224` in your browser. The web password is set via `DBX_PASSWORD` in `deploy/docker-compose.yml` — change it before exposing the server.
 
 ## Getting Started
 
@@ -203,13 +185,6 @@ No additional dependencies required.
 ```bash
 pnpm install
 pnpm dev:tauri
-```
-
-Web version:
-
-```bash
-pnpm dev:web       # frontend
-pnpm dev:backend   # backend
 ```
 
 [dbx-agents](https://github.com/t8y2/dbx-agents) contains driver development projects.
@@ -258,7 +233,7 @@ Yes. The desktop app works fully offline. For air-gapped driver installs, downlo
 
 <details>
 <summary><strong>How is DBX different from DBeaver / TablePlus / Beekeeper Studio?</strong></summary>
-DBX is 15 MB with no runtime dependencies (no Java, no Python). It includes AI and MCP natively — not as plugins. It supports 40+ databases across desktop, Docker, and web from a single codebase.
+DBX is 15 MB with no runtime dependencies (no Java, no Python). It includes AI and MCP natively — not as plugins. It supports 40+ databases from a single codebase.
 </details>
 
 <details>

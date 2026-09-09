@@ -32,13 +32,13 @@ const backend: Backend = {
 };
 
 test("creates an MCP server without starting stdio transport", () => {
-  const server = createDbxMcpServer(backend, { isWebMode: true });
+  const server = createDbxMcpServer(backend);
 
   assert.equal(typeof server.connect, "function");
 });
 
 test("MCP server metadata version matches package metadata", () => {
-  const server = createDbxMcpServer(backend, { isWebMode: true });
+  const server = createDbxMcpServer(backend);
 
   assert.equal((server as any).server._serverInfo.version, DBX_MCP_PACKAGE_VERSION);
 });
@@ -63,7 +63,7 @@ test("execute query scopes the connection to the requested database", async () =
       return { columns: ["total"], rows: [{ total: 1 }], row_count: 1 };
     },
   };
-  const server = createDbxMcpServer(scopedBackend, { isWebMode: true });
+  const server = createDbxMcpServer(scopedBackend);
 
   await (server as any)._registeredTools.dbx_execute_query.handler({
     connection_name: "local",
@@ -83,7 +83,7 @@ test("execute query runs safe multi-statement SQL one statement at a time", asyn
       return { columns: ["value"], rows: [{ value: executed.length }], row_count: 1 };
     },
   };
-  const server = createDbxMcpServer(scopedBackend, { isWebMode: true });
+  const server = createDbxMcpServer(scopedBackend);
 
   const result = await (server as any)._registeredTools.dbx_execute_query.handler({
     connection_name: "local",
@@ -96,7 +96,7 @@ test("execute query runs safe multi-statement SQL one statement at a time", asyn
 });
 
 test("execute query reports the blocked statement number for unsafe multi-statement SQL", async () => {
-  const server = createDbxMcpServer(backend, { isWebMode: true });
+  const server = createDbxMcpServer(backend);
 
   const result = await (server as any)._registeredTools.dbx_execute_query.handler({
     connection_name: "local",
@@ -120,7 +120,7 @@ test("mongodb list tables returns collections from the selected database", async
       return [{ name: "projects", type: "COLLECTION" }];
     },
   };
-  const server = createDbxMcpServer(scopedBackend, { isWebMode: true });
+  const server = createDbxMcpServer(scopedBackend);
 
   const result = await (server as any)._registeredTools.dbx_list_tables.handler({
     connection_name: "local",
@@ -156,7 +156,7 @@ test("mongodb describe table returns inferred document fields", async () => {
       },
     ],
   };
-  const server = createDbxMcpServer(scopedBackend, { isWebMode: true });
+  const server = createDbxMcpServer(scopedBackend);
 
   const result = await (server as any)._registeredTools.dbx_describe_table.handler({
     connection_name: "local",
@@ -179,7 +179,7 @@ test("mongodb execute query formats shell-style find results", async () => {
       row_count: 1,
     }),
   };
-  const server = createDbxMcpServer(scopedBackend, { isWebMode: true });
+  const server = createDbxMcpServer(scopedBackend);
 
   const result = await (server as any)._registeredTools.dbx_execute_query.handler({
     connection_name: "local",
@@ -193,7 +193,7 @@ test("mongodb execute query formats shell-style find results", async () => {
 });
 
 test("connection lookup failures include a stable MCP error code", async () => {
-  const server = createDbxMcpServer(backend, { isWebMode: true });
+  const server = createDbxMcpServer(backend);
 
   const result = await (server as any)._registeredTools.dbx_list_tables.handler({
     connection_name: "missing",
@@ -214,7 +214,7 @@ test("add connection accepts H2 file paths without a port", async () => {
       return { id: "h2-file", ...config };
     },
   };
-  const server = createDbxMcpServer(scopedBackend, { isWebMode: true });
+  const server = createDbxMcpServer(scopedBackend);
 
   const result = await (server as any)._registeredTools.dbx_add_connection.handler({
     name: "h2-local",
@@ -231,7 +231,7 @@ test("add connection accepts H2 file paths without a port", async () => {
 });
 
 test("SQL safety failures include a stable MCP error code", async () => {
-  const server = createDbxMcpServer(backend, { isWebMode: true });
+  const server = createDbxMcpServer(backend);
 
   const result = await (server as any)._registeredTools.dbx_execute_query.handler({
     connection_name: "local",
@@ -250,7 +250,7 @@ test("query exceptions include a stable MCP error code", async () => {
       throw new Error("database timeout");
     },
   };
-  const server = createDbxMcpServer(scopedBackend, { isWebMode: true });
+  const server = createDbxMcpServer(scopedBackend);
 
   const result = await (server as any)._registeredTools.dbx_execute_query.handler({
     connection_name: "local",
@@ -267,7 +267,7 @@ test("desktop bridge failures include a stable MCP error code", async () => {
   process.env.HOME = dir;
 
   try {
-    const server = createDbxMcpServer(backend, { isWebMode: false });
+    const server = createDbxMcpServer(backend);
     const result = await (server as any)._registeredTools.dbx_open_table.handler({
       connection_name: "local",
       table: "users",
@@ -293,7 +293,7 @@ test("mongodb execute-and-show blocks aggregate write stages before desktop brid
     ...backend,
     findConnection: async () => mongoConnection,
   };
-  const server = createDbxMcpServer(scopedBackend, { isWebMode: false });
+  const server = createDbxMcpServer(scopedBackend);
 
   try {
     const result = await (server as any)._registeredTools.dbx_execute_and_show.handler({
