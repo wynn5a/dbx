@@ -332,13 +332,14 @@ impl AppState {
         database: Option<&str>,
         client_session_id: Option<&str>,
     ) -> Result<String, String> {
-        let db_type = {
+        let config_hint = {
             let configs = self.configs.read().await;
-            configs.get(connection_id).map(|c| c.db_type)
+            configs.get(connection_id).cloned()
         };
+        let db_type = config_hint.as_ref().map(|c| c.db_type);
 
         let base_pool_key = base_pool_key_for(db_type, connection_id, database, false);
-        let pool_key = session_scoped_pool_key_for(db_type, base_pool_key, client_session_id);
+        let pool_key = session_scoped_pool_key_for(config_hint.as_ref(), base_pool_key, client_session_id);
 
         let conns = self.connections.read().await;
         if conns.contains_key(&pool_key) {
@@ -667,12 +668,13 @@ impl AppState {
         database: Option<&str>,
         client_session_id: Option<&str>,
     ) -> Result<String, String> {
-        let db_type = {
+        let config_hint = {
             let configs = self.configs.read().await;
-            configs.get(connection_id).map(|c| c.db_type)
+            configs.get(connection_id).cloned()
         };
+        let db_type = config_hint.as_ref().map(|c| c.db_type);
         let base_pool_key = base_pool_key_for(db_type, connection_id, database, true);
-        let pool_key = session_scoped_pool_key_for(db_type, base_pool_key, client_session_id);
+        let pool_key = session_scoped_pool_key_for(config_hint.as_ref(), base_pool_key, client_session_id);
         if self.uses_forwarded_transport(connection_id).await {
             self.remove_connection_pools(connection_id).await;
             self.reset_connection_transport(connection_id).await;
@@ -699,12 +701,13 @@ impl AppState {
         let Some(session) = session else {
             return Ok(false);
         };
-        let db_type = {
+        let config_hint = {
             let configs = self.configs.read().await;
-            configs.get(connection_id).map(|c| c.db_type)
+            configs.get(connection_id).cloned()
         };
+        let db_type = config_hint.as_ref().map(|c| c.db_type);
         let base_pool_key = base_pool_key_for(db_type, connection_id, database, false);
-        let pool_key = session_scoped_pool_key_for(db_type, base_pool_key.clone(), Some(&session));
+        let pool_key = session_scoped_pool_key_for(config_hint.as_ref(), base_pool_key.clone(), Some(&session));
         if pool_key == base_pool_key {
             return Ok(false);
         }
@@ -978,14 +981,28 @@ pub(crate) fn config_for_pool_key<'a>(
 }
 
 fn session_scoped_pool_key_for(
-    db_type: Option<DatabaseType>,
+    config: Option<&ConnectionConfig>,
     base_pool_key: String,
     client_session_id: Option<&str>,
 ) -> String {
-    if matches!(db_type, Some(DatabaseType::DuckDb)) {
+    let shares_base_pool = match config {
+        Some(config) => matches!(config.db_type, DatabaseType::DuckDb) || is_memory_sqlite_config(config),
+        None => false,
+    };
+    if shares_base_pool {
         return base_pool_key;
     }
     session_scoped_pool_key(base_pool_key, client_session_id)
+}
+
+/// Whether this config's pool must stay on the shared base connection instead
+/// of per-tab session pools. In-memory SQLite holds its data only inside its
+/// single connection, so a session-scoped pool would open a separate empty
+/// database — hiding a tab's tables from the schema tree and dropping them
+/// when the tab closes. Must match the predicate `db::sqlite` uses to pick
+/// `open_in_memory`, or the pool key and the actual connection would disagree.
+fn is_memory_sqlite_config(config: &ConnectionConfig) -> bool {
+    matches!(config.db_type, DatabaseType::Sqlite) && db::sqlite::is_memory_database_path(&config.host)
 }
 
 fn clone_pool_kind(pool: &PoolKind) -> PoolKind {
@@ -2148,6 +2165,66 @@ mod tests {
         let conns = state.connections.read().await;
         assert!(conns.contains_key("duckdb-conn"));
         assert!(!conns.contains_key("duckdb-conn:session:tab-1"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn sqlite_memory_client_session_reuses_base_pool() {
+        // In-memory SQLite lives only inside its single connection: a
+        // session-scoped pool would open a separate empty database, so a tab's
+        // tables would never reach the schema tree and would vanish with the
+        // tab. Tabs must share the base pool, like DuckDB does.
+        let (state, dir) = test_app_state().await;
+        let config = sqlite_config("mem-conn", ":memory:");
+        state.configs.write().await.insert(config.id.clone(), config);
+
+        let base_pool_key = state.get_or_create_pool("mem-conn", Some("main")).await.unwrap();
+        let tab_pool_key = state.get_or_create_pool_for_session("mem-conn", Some("main"), Some("tab-1")).await.unwrap();
+        assert_eq!(tab_pool_key, base_pool_key, "an in-memory SQLite tab must share the base pool");
+
+        let handle = {
+            let conns = state.connections.read().await;
+            match conns.get(&base_pool_key) {
+                Some(PoolKind::Sqlite(handle)) => handle.clone(),
+                Some(_) => panic!("expected a sqlite pool under {base_pool_key}"),
+                None => panic!("pool {base_pool_key} missing after connect"),
+            }
+        };
+        db::sqlite::execute_query(&handle, "CREATE TABLE memory_tab (id INTEGER PRIMARY KEY);").await.unwrap();
+        let rows = db::sqlite::execute_query(
+            &handle,
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_tab';",
+        )
+        .await
+        .unwrap();
+        assert_eq!(rows.rows.len(), 1, "a table created from a tab must be visible through the base pool");
+
+        assert!(!state.close_client_session_pool("mem-conn", Some("main"), "tab-1").await.unwrap());
+        let conns = state.connections.read().await;
+        assert!(conns.contains_key("mem-conn"), "closing a tab must not drop the shared in-memory database");
+        assert!(!conns.contains_key("mem-conn:session:tab-1"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn sqlite_file_client_session_keeps_its_own_pool() {
+        let (state, dir) = test_app_state().await;
+        let db_path = dir.join("file.sqlite");
+        std::fs::File::create(&db_path).unwrap();
+        let config = sqlite_config("file-conn", &db_path.to_string_lossy());
+        state.configs.write().await.insert(config.id.clone(), config);
+
+        let base_pool_key = state.get_or_create_pool("file-conn", Some("main")).await.unwrap();
+        let tab_pool_key =
+            state.get_or_create_pool_for_session("file-conn", Some("main"), Some("tab-1")).await.unwrap();
+        assert_ne!(tab_pool_key, base_pool_key, "file-backed SQLite keeps per-tab session pools");
+
+        assert!(state.close_client_session_pool("file-conn", Some("main"), "tab-1").await.unwrap());
+        let conns = state.connections.read().await;
+        assert!(conns.contains_key("file-conn"));
+        assert!(!conns.contains_key("file-conn:session:tab-1"));
 
         let _ = std::fs::remove_dir_all(dir);
     }
