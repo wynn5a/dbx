@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::sync::Mutex;
 
 const CONNECTION_DEEP_LINK_PREFIX: &str = "dbx://connection/new";
 
@@ -9,22 +8,15 @@ pub fn pending_open_connection_links(state: tauri::State<'_, DeepLinkOpenState>)
 }
 
 #[derive(Default)]
-pub struct DeepLinkOpenState {
-    pending: Mutex<Vec<String>>,
-}
+pub struct DeepLinkOpenState(super::pending_open::PendingOpenState);
 
 impl DeepLinkOpenState {
-    pub fn push(&self, links: Vec<String>) {
-        if links.is_empty() {
-            return;
-        }
-        if let Ok(mut pending) = self.pending.lock() {
-            pending.extend(links);
-        }
+    pub fn push(&self, items: Vec<String>) {
+        self.0.push(items);
     }
 
-    fn drain(&self) -> Vec<String> {
-        self.pending.lock().map(|mut pending| pending.drain(..).collect()).unwrap_or_default()
+    pub(super) fn drain(&self) -> Vec<String> {
+        self.0.drain()
     }
 }
 

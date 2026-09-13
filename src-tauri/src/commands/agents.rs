@@ -132,10 +132,15 @@ pub async fn import_agents_from_zip(
     state: State<'_, Arc<AppState>>,
     path: String,
 ) -> Result<u32, String> {
-    let am = &state.agent_manager;
+    let am = state.inner().clone();
     let zip_path = std::path::PathBuf::from(&path);
     let app_handle = app.clone();
-    let result = import_agents_from_zip_core(am, &zip_path, |event| emit_agent_progress(&app_handle, event))?;
+    // Offline ZIP import extracts full JREs — run it on the blocking pool.
+    let result = tokio::task::spawn_blocking(move || {
+        import_agents_from_zip_core(&am.agent_manager, &zip_path, |event| emit_agent_progress(&app_handle, event))
+    })
+    .await
+    .map_err(|err| err.to_string())??;
     let count = result.drivers_installed.len() as u32;
     emit_agent_progress(&app, AgentProgressEvent::step("done"));
     Ok(count)
@@ -147,7 +152,10 @@ pub async fn import_agent_jar_cmd(
     db_type: String,
     path: String,
 ) -> Result<(), String> {
-    import_agent_jar(&state.agent_manager, &db_type, std::path::Path::new(&path))
+    let am = state.inner().clone();
+    tokio::task::spawn_blocking(move || import_agent_jar(&am.agent_manager, &db_type, std::path::Path::new(&path)))
+        .await
+        .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]

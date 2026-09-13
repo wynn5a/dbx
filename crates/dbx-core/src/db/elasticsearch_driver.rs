@@ -1028,10 +1028,7 @@ fn is_keyword_boundary_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_'
 }
 
-fn next_char_at(query: &str, index: usize) -> Option<char> {
-    query.get(index..)?.chars().next()
-}
-
+use crate::sql::next_char_at;
 fn parse_sql_response(body: &serde_json::Value, start: std::time::Instant) -> Option<crate::types::QueryResult> {
     let columns = body.get("columns")?.as_array()?;
     let rows = body.get("rows")?.as_array()?;

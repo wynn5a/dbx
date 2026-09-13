@@ -3,8 +3,8 @@ use dbx_core::agent_manager::{
     JreInfo, DEFAULT_JRE_KEY,
 };
 use dbx_core::agent_service::{
-    build_agent_list, github_url_to_r2_path, import_agent_jar, import_agents_from_zip, is_app_version_compatible,
-    jre_needs_install, local_agent_jar_candidates, replace_download, uninstall_agent_driver, AgentProgressEvent,
+    build_agent_list, github_url_to_r2_path, import_agent_jar, import_agents_from_zip, jre_needs_install,
+    local_agent_jar_candidates, replace_download, uninstall_agent_driver, AgentProgressEvent,
 };
 
 fn test_manager(name: &str) -> AgentManager {
@@ -19,7 +19,6 @@ fn registry_with_driver(db_type: &str, version: &str, jre: &str) -> AgentRegistr
         DriverInfo {
             version: version.to_string(),
             label: db_type.to_string(),
-            min_app_version: "0.1.0".to_string(),
             jre: jre.to_string(),
             jar: ArtifactInfo { url: format!("https://example.com/dbx-agent-{db_type}.jar"), size: 42 },
         },
@@ -221,13 +220,6 @@ fn test_path(name: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn accepts_current_app_when_min_version_is_not_newer() {
-    assert!(is_app_version_compatible("0.5.13", "0.5.13"));
-    assert!(is_app_version_compatible("0.5.12", "0.5.13"));
-    assert!(!is_app_version_compatible("0.5.14", "0.5.13"));
-}
-
-#[test]
 fn atomic_replace_moves_download_into_place() {
     let dir = test_path("atomic");
     std::fs::create_dir_all(&dir).unwrap();
@@ -330,7 +322,6 @@ fn write_offline_driver_zip(path: &std::path::Path, db_type: &str, version: &str
             db_type: {
                 "version": version,
                 "label": db_type,
-                "min_app_version": "0.1.0",
                 "jre": DEFAULT_JRE_KEY,
                 "jar": { "url": format!("https://example.com/dbx-agent-{db_type}.jar"), "size": 3 }
             }

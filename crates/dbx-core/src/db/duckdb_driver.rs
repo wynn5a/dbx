@@ -46,13 +46,7 @@ fn validate_duckdb_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn is_network_path(path: &str) -> bool {
-    path.starts_with("\\\\") || path.starts_with("//") || path.contains("wsl.localhost") || path.contains("wsl$")
-}
-
-pub fn is_memory_database_path(path: &str) -> bool {
-    path.trim().eq_ignore_ascii_case(":memory:")
-}
+use super::file_validator::{is_memory_database_path, is_network_path};
 
 /// Closes a DuckDB connection, releasing the file lock.
 ///

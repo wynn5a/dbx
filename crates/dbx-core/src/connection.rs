@@ -16,7 +16,6 @@ use crate::db;
 use crate::db::agent_driver::AgentMethod;
 use crate::db::proxy_tunnel::ProxyTunnelManager;
 use crate::db::ssh_tunnel::TunnelManager;
-use crate::external;
 use crate::models::connection::{
     parse_jdbc_host_port, parse_mongo_first_host, rewrite_jdbc_url_host, ConnectionConfig, DatabaseType,
 };
@@ -52,7 +51,6 @@ pub enum PoolKind {
     SqlServer(Arc<tokio::sync::Mutex<db::sqlserver::SqlServerClient>>),
     Elasticsearch(db::elasticsearch_driver::EsClient),
     Agent(Arc<tokio::sync::Mutex<db::agent_driver::AgentDriverClient>>),
-    ExternalTabular(Arc<external::ExternalPool>),
     ExternalDriver { driver_id: String, config: Arc<ConnectionConfig>, session: Arc<PluginDriverSession> },
 }
 
@@ -1002,7 +1000,7 @@ fn session_scoped_pool_key_for(
 /// when the tab closes. Must match the predicate `db::sqlite` uses to pick
 /// `open_in_memory`, or the pool key and the actual connection would disagree.
 fn is_memory_sqlite_config(config: &ConnectionConfig) -> bool {
-    matches!(config.db_type, DatabaseType::Sqlite) && db::sqlite::is_memory_database_path(&config.host)
+    matches!(config.db_type, DatabaseType::Sqlite) && db::file_validator::is_memory_database_path(&config.host)
 }
 
 fn clone_pool_kind(pool: &PoolKind) -> PoolKind {
@@ -1037,7 +1035,6 @@ pub async fn close_pool_kind(pool: PoolKind) {
             let mut client = client.lock().await;
             let _ = client.disconnect().await;
         }
-        PoolKind::ExternalTabular(_) => {}
         PoolKind::ExternalDriver { .. } => {}
     }
 }
@@ -1132,7 +1129,7 @@ fn duckdb_paths_match(left: &str, right: &str) -> bool {
     let left = expand_tilde(left);
     let right = expand_tilde(right);
 
-    if db::duckdb_driver::is_memory_database_path(&left) || db::duckdb_driver::is_memory_database_path(&right) {
+    if db::file_validator::is_memory_database_path(&left) || db::file_validator::is_memory_database_path(&right) {
         return left.trim().eq_ignore_ascii_case(right.trim());
     }
 

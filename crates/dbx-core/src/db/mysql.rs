@@ -1424,9 +1424,7 @@ fn show_columns_sql(database: &str, table: &str, full: bool) -> String {
     }
 }
 
-fn query_result_row_limit(max_rows: Option<usize>) -> usize {
-    max_rows.unwrap_or(crate::query::MAX_ROWS).max(1)
-}
+use crate::query::query_result_row_limit;
 
 /// Upper bound on the health-check ping. A *cleanly* closed socket errors
 /// almost instantly, but a half-open socket (RDS idle-kill, laptop sleep,

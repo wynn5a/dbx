@@ -1731,17 +1731,6 @@ pub async fn execute_on_pool_with_max_rows(
             .await
             .map_err(|e| e.to_string())?
         }
-        PoolKind::ExternalTabular(ext_pool) => {
-            let con = ext_pool.cache.clone();
-            let sql = sql.to_string();
-            drop(connections);
-            tokio::task::spawn_blocking(move || {
-                let con = con.lock().map_err(|e| e.to_string())?;
-                crate::query::duckdb_execute_with_max_rows(&con, &sql, max_rows)
-            })
-            .await
-            .map_err(|e| e.to_string())?
-        }
         _ => Err("Unsupported database type for transfer".to_string()),
     }
 }
@@ -1773,19 +1762,6 @@ pub async fn get_columns_for_transfer(
 
     if let Some(PoolKind::DuckDb(con)) = connections.get(pool_key) {
         let con = con.clone();
-        drop(connections);
-        let table = table.to_string();
-        let schema = schema.to_string();
-        return tokio::task::spawn_blocking(move || {
-            let con = con.lock().map_err(|e| e.to_string())?;
-            crate::schema::duckdb_query_columns_in_database(&con, "main", &schema, &table)
-        })
-        .await
-        .map_err(|e| e.to_string())?;
-    }
-
-    if let Some(PoolKind::ExternalTabular(ext_pool)) = connections.get(pool_key) {
-        let con = ext_pool.cache.clone();
         drop(connections);
         let table = table.to_string();
         let schema = schema.to_string();

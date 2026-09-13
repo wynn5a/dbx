@@ -177,7 +177,6 @@ pub struct JreInfo {
 pub struct DriverInfo {
     pub version: String,
     pub label: String,
-    pub min_app_version: String,
     pub jar: ArtifactInfo,
     #[serde(default = "default_jre_key")]
     pub jre: String,

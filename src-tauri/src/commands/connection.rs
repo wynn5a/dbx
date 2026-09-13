@@ -1,19 +1,20 @@
 use std::sync::Arc;
 use tauri::State;
 
-pub use dbx_core::agent_connection::{
+use dbx_core::agent_connection::{
     agent_connect_params, mongo_legacy_error_with_auth_hint, oracle_alternate_connect_config,
     oracle_auth_fallback_profiles, should_retry_oracle_with_10g_driver,
 };
-pub use dbx_core::connection::{
+pub use dbx_core::connection::AppState;
+use dbx_core::connection::{
     connect_bare_metadata_pool, connect_mysql_metadata_pool, connection_url_for_endpoint, metadata_connection_config,
-    probe_connection_endpoint, redacted_connection_url_for_endpoint, AppState, MysqlMode, PoolKind,
+    probe_connection_endpoint, redacted_connection_url_for_endpoint, MysqlMode, PoolKind,
 };
 use dbx_core::database_capabilities;
 use dbx_core::db;
 use dbx_core::db::agent_driver::AgentMethod;
 use dbx_core::models::connection::{rewrite_jdbc_url_host, ConnectionConfig, DatabaseType};
-pub use dbx_core::path_utils::expand_tilde;
+use dbx_core::path_utils::expand_tilde;
 
 fn mongo_legacy_connect_params(config: &ConnectionConfig, host: &str, port: u16) -> serde_json::Value {
     serde_json::json!({

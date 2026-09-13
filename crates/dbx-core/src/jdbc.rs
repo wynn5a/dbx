@@ -27,11 +27,65 @@ pub struct JdbcPluginStatus {
 
 // ---- JDBC Drivers ----
 
-pub fn list_jdbc_drivers(plugins_root: &Path) -> Result<Vec<JdbcDriverInfo>, String> {
-    list_jdbc_drivers_from_dir(&jdbc_drivers_dir(plugins_root))
+/// Filesystem scanning runs on the blocking pool; JAR directories can hold
+/// hundreds of files and the caller sits on the async runtime.
+pub async fn list_jdbc_drivers(plugins_root: PathBuf) -> Result<Vec<JdbcDriverInfo>, String> {
+    tokio::task::spawn_blocking(move || list_jdbc_drivers_from_dir(&jdbc_drivers_dir(&plugins_root)))
+        .await
+        .map_err(|err| err.to_string())?
 }
 
-pub fn import_jdbc_drivers(plugins_root: &Path, paths: &[String]) -> Result<Vec<JdbcDriverInfo>, String> {
+pub async fn import_jdbc_drivers(plugins_root: PathBuf, paths: Vec<String>) -> Result<Vec<JdbcDriverInfo>, String> {
+    tokio::task::spawn_blocking(move || import_jdbc_drivers_blocking(&plugins_root, &paths))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+pub async fn delete_jdbc_driver(plugins_root: PathBuf, path: String) -> Result<Vec<JdbcDriverInfo>, String> {
+    tokio::task::spawn_blocking(move || delete_jdbc_driver_blocking(&plugins_root, &path))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+// ---- JDBC Plugin ----
+
+pub async fn get_jdbc_plugin_status(plugins_root: PathBuf) -> Result<JdbcPluginStatus, String> {
+    jdbc_plugin_status_from_dir(plugins_root.join("jdbc")).await
+}
+
+pub async fn install_jdbc_plugin(plugins_root: PathBuf) -> Result<JdbcPluginStatus, String> {
+    let bytes = download_jdbc_plugin_zip().await?;
+    let plugin_dir = plugins_root.join("jdbc");
+    let zip_dir = plugin_dir.clone();
+    tokio::task::spawn_blocking(move || install_jdbc_plugin_zip(&bytes, &zip_dir))
+        .await
+        .map_err(|err| err.to_string())??;
+    jdbc_plugin_status_from_dir(plugin_dir).await
+}
+
+pub async fn install_jdbc_plugin_from_file(
+    plugins_root: PathBuf,
+    file_path: String,
+) -> Result<JdbcPluginStatus, String> {
+    let bytes =
+        tokio::task::spawn_blocking(move || std::fs::read(&file_path).map_err(|e| format!("Failed to read file: {e}")))
+            .await
+            .map_err(|err| err.to_string())??;
+    let plugin_dir = plugins_root.join("jdbc");
+    let zip_dir = plugin_dir.clone();
+    tokio::task::spawn_blocking(move || install_jdbc_plugin_zip(&bytes, &zip_dir))
+        .await
+        .map_err(|err| err.to_string())??;
+    jdbc_plugin_status_from_dir(plugin_dir).await
+}
+
+pub async fn uninstall_jdbc_plugin(plugins_root: PathBuf) -> Result<JdbcPluginStatus, String> {
+    tokio::task::spawn_blocking(move || uninstall_jdbc_plugin_blocking(&plugins_root))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+fn import_jdbc_drivers_blocking(plugins_root: &Path, paths: &[String]) -> Result<Vec<JdbcDriverInfo>, String> {
     let drivers_dir = jdbc_drivers_dir(plugins_root);
     std::fs::create_dir_all(&drivers_dir).map_err(|err| err.to_string())?;
 
@@ -58,7 +112,7 @@ pub fn import_jdbc_drivers(plugins_root: &Path, paths: &[String]) -> Result<Vec<
     list_jdbc_drivers_from_dir(&drivers_dir)
 }
 
-pub fn delete_jdbc_driver(plugins_root: &Path, path: &str) -> Result<Vec<JdbcDriverInfo>, String> {
+fn delete_jdbc_driver_blocking(plugins_root: &Path, path: &str) -> Result<Vec<JdbcDriverInfo>, String> {
     let drivers_dir = jdbc_drivers_dir(plugins_root);
     let drivers_dir = drivers_dir.canonicalize().map_err(|err| err.to_string())?;
     let target = PathBuf::from(path).canonicalize().map_err(|err| err.to_string())?;
@@ -69,27 +123,7 @@ pub fn delete_jdbc_driver(plugins_root: &Path, path: &str) -> Result<Vec<JdbcDri
     list_jdbc_drivers_from_dir(&drivers_dir)
 }
 
-// ---- JDBC Plugin ----
-
-pub async fn get_jdbc_plugin_status(plugins_root: &Path) -> Result<JdbcPluginStatus, String> {
-    jdbc_plugin_status_from_dir(&plugins_root.join("jdbc")).await
-}
-
-pub async fn install_jdbc_plugin(plugins_root: &Path) -> Result<JdbcPluginStatus, String> {
-    let bytes = download_jdbc_plugin_zip().await?;
-    let plugin_dir = plugins_root.join("jdbc");
-    install_jdbc_plugin_zip(&bytes, &plugin_dir)?;
-    jdbc_plugin_status_from_dir(&plugin_dir).await
-}
-
-pub async fn install_jdbc_plugin_from_file(plugins_root: &Path, file_path: &str) -> Result<JdbcPluginStatus, String> {
-    let bytes = std::fs::read(file_path).map_err(|e| format!("Failed to read file: {e}"))?;
-    let plugin_dir = plugins_root.join("jdbc");
-    install_jdbc_plugin_zip(&bytes, &plugin_dir)?;
-    jdbc_plugin_status_from_dir(&plugin_dir).await
-}
-
-pub fn uninstall_jdbc_plugin(plugins_root: &Path) -> Result<JdbcPluginStatus, String> {
+fn uninstall_jdbc_plugin_blocking(plugins_root: &Path) -> Result<JdbcPluginStatus, String> {
     let plugin_dir = plugins_root.join("jdbc");
     for entry in ["manifest.json", "bin", "lib"] {
         let path = plugin_dir.join(entry);
@@ -102,33 +136,10 @@ pub fn uninstall_jdbc_plugin(plugins_root: &Path) -> Result<JdbcPluginStatus, St
             std::fs::remove_file(path).map_err(|err| err.to_string())?;
         }
     }
-    // synchronous version: check local manifest only, no network call
+    // local manifest only, no network call
     let manifest_path = plugin_dir.join("manifest.json");
-    let manifest = match std::fs::read_to_string(&manifest_path) {
-        Ok(raw) => Some(serde_json::from_str::<PluginManifest>(&raw).map_err(|err| err.to_string())?),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-        Err(err) => return Err(err.to_string()),
-    };
+    let manifest = read_plugin_manifest(&manifest_path)?;
     Ok(build_plugin_status(&manifest, None, &plugin_dir))
-}
-
-// ---- System Fonts ----
-
-pub fn list_system_fonts() -> Vec<String> {
-    let source = font_kit::source::SystemSource::new();
-    match source.all_families() {
-        Ok(families) => {
-            use std::collections::BTreeSet;
-            families
-                .into_iter()
-                .map(|family| family.trim().to_string())
-                .filter(|family| !family.is_empty())
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect()
-        }
-        Err(_) => vec![],
-    }
 }
 
 // ---- Internal helpers ----
@@ -137,15 +148,21 @@ fn jdbc_drivers_dir(plugins_root: &Path) -> PathBuf {
     plugins_root.join("jdbc").join("drivers")
 }
 
-async fn jdbc_plugin_status_from_dir(plugin_dir: &Path) -> Result<JdbcPluginStatus, String> {
+fn read_plugin_manifest(manifest_path: &Path) -> Result<Option<PluginManifest>, String> {
+    match std::fs::read_to_string(manifest_path) {
+        Ok(raw) => serde_json::from_str::<PluginManifest>(&raw).map(Some).map_err(|err| err.to_string()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+async fn jdbc_plugin_status_from_dir(plugin_dir: PathBuf) -> Result<JdbcPluginStatus, String> {
     let manifest_path = plugin_dir.join("manifest.json");
-    let manifest = match std::fs::read_to_string(&manifest_path) {
-        Ok(raw) => Some(serde_json::from_str::<PluginManifest>(&raw).map_err(|err| err.to_string())?),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-        Err(err) => return Err(err.to_string()),
-    };
+    let manifest = tokio::task::spawn_blocking(move || read_plugin_manifest(&manifest_path))
+        .await
+        .map_err(|err| err.to_string())??;
     let latest = latest_jdbc_plugin().await;
-    Ok(build_plugin_status(&manifest, latest.as_ref(), plugin_dir))
+    Ok(build_plugin_status(&manifest, latest.as_ref(), &plugin_dir))
 }
 
 fn build_plugin_status(

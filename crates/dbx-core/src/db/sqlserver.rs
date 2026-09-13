@@ -1,4 +1,3 @@
-use crate::query::MAX_ROWS;
 use crate::sql::starts_with_executable_sql_keyword;
 use crate::types::{ColumnInfo, DatabaseInfo, ForeignKeyInfo, IndexInfo, QueryResult, TableInfo, TriggerInfo};
 use futures::{FutureExt, TryStreamExt};
@@ -55,9 +54,7 @@ fn sqlserver_endpoint(host: &str) -> SqlServerEndpoint<'_> {
     SqlServerEndpoint { host: host.trim(), instance_name: None }
 }
 
-fn query_result_row_limit(max_rows: Option<usize>) -> usize {
-    max_rows.unwrap_or(MAX_ROWS).max(1)
-}
+use crate::query::query_result_row_limit;
 
 pub async fn connect(
     host: &str,
@@ -496,14 +493,7 @@ fn next_char(sql: &str, index: usize) -> char {
     sql[index..].chars().next().unwrap_or('\0')
 }
 
-fn next_char_at(sql: &str, index: usize) -> Option<char> {
-    if index >= sql.len() {
-        None
-    } else {
-        sql[index..].chars().next()
-    }
-}
-
+use crate::sql::next_char_at;
 fn push_sqlserver_result_set(results: &mut Vec<QueryResult>, result: Option<SqlServerResultSet>, start: Instant) {
     if let Some(result) = result {
         if result.rows.is_empty() && result.columns.is_empty() {

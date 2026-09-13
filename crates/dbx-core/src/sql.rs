@@ -561,12 +561,9 @@ fn next_char(sql: &str, index: usize) -> char {
     sql[index..].chars().next().unwrap_or('\0')
 }
 
-fn next_char_at(sql: &str, index: usize) -> Option<char> {
-    if index >= sql.len() {
-        None
-    } else {
-        sql[index..].chars().next()
-    }
+pub(crate) fn next_char_at(sql: &str, index: usize) -> Option<char> {
+    // `get` returns None on non-char-boundary indices instead of panicking.
+    sql.get(index..)?.chars().next()
 }
 
 fn next_char_len(sql: &str, index: usize) -> usize {

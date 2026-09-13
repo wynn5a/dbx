@@ -615,14 +615,7 @@ fn next_char(sql: &str, index: usize) -> char {
     sql[index..].chars().next().unwrap_or('\0')
 }
 
-fn next_char_at(sql: &str, index: usize) -> Option<char> {
-    if index >= sql.len() {
-        None
-    } else {
-        sql[index..].chars().next()
-    }
-}
-
+use crate::sql::next_char_at;
 fn build_derived_column_aliases(result_columns: &[String]) -> Vec<String> {
     let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     result_columns

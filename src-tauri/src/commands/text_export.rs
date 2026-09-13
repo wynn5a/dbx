@@ -17,13 +17,21 @@ impl QueryResultTextExportRequest {
 }
 
 #[tauri::command]
-pub fn export_query_result_json(request: QueryResultTextExportRequest) -> Result<(), String> {
-    let content = format_json(&request.data())?;
-    std::fs::write(&request.file_path, format!("\u{FEFF}{content}")).map_err(|err| err.to_string())
+pub async fn export_query_result_json(request: QueryResultTextExportRequest) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let content = format_json(&request.data())?;
+        std::fs::write(&request.file_path, format!("\u{FEFF}{content}")).map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 #[tauri::command]
-pub fn export_query_result_markdown(request: QueryResultTextExportRequest) -> Result<(), String> {
-    let content = format_markdown(&request.data());
-    std::fs::write(&request.file_path, format!("\u{FEFF}{content}")).map_err(|err| err.to_string())
+pub async fn export_query_result_markdown(request: QueryResultTextExportRequest) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let content = format_markdown(&request.data());
+        std::fs::write(&request.file_path, format!("\u{FEFF}{content}")).map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }

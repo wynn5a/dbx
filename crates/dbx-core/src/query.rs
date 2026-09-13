@@ -64,7 +64,7 @@ pub struct QueryExecutionOptions {
     pub execution_id: Option<String>,
 }
 
-fn query_result_row_limit(max_rows: Option<usize>) -> usize {
+pub(crate) fn query_result_row_limit(max_rows: Option<usize>) -> usize {
     max_rows.unwrap_or(MAX_ROWS).max(1)
 }
 
@@ -758,29 +758,6 @@ pub async fn do_execute(
             .await
             .map(|result| normalize_query_result_for_js(truncate_result_with_max_rows(result, max_rows)))
         }
-        PoolKind::ExternalTabular(ext_pool) => {
-            if !starts_with_duckdb_result_sql_keyword(sql) {
-                return Err("External data sources are read-only. Only SELECT queries are supported.".to_string());
-            }
-            let con = ext_pool.cache.clone();
-            if let Some(ref execution_id) = options.execution_id {
-                let interrupt_handle = con.lock().map_err(|e| e.to_string())?.interrupt_handle();
-                state.running_queries.register_interrupt(execution_id, move || {
-                    interrupt_handle.interrupt();
-                });
-            }
-            let sql = sql.to_string();
-            let max_rows = options.max_rows;
-            drop(connections);
-            wait_for_query_opt(cancel_token, query_timeout, async move {
-                let task = tokio::task::spawn_blocking(move || {
-                    let con = con.lock().map_err(|e| e.to_string())?;
-                    duckdb_execute_with_max_rows(&con, &sql, max_rows)
-                });
-                task.await.map_err(|e| e.to_string())?
-            })
-            .await
-        }
         PoolKind::ExternalDriver { config, session, .. } => {
             let config = config.clone();
             let session = session.clone();
@@ -1341,7 +1318,6 @@ pub async fn execute_statements_in_transaction(
             | PoolKind::Redis(_)
             | PoolKind::MongoDb(_)
             | PoolKind::Elasticsearch(_)
-            | PoolKind::ExternalTabular(_)
             | PoolKind::ExternalDriver { .. } => TxPath::None,
         })
     };

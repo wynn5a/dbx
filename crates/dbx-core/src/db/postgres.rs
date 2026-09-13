@@ -1650,9 +1650,7 @@ pub(crate) fn pg_quote_ident(ident: &str) -> String {
     format!("\"{}\"", ident.replace('"', "\"\""))
 }
 
-fn query_result_row_limit(max_rows: Option<usize>) -> usize {
-    max_rows.unwrap_or(crate::query::MAX_ROWS).max(1)
-}
+use crate::query::query_result_row_limit;
 
 pub async fn execute_query(pool: &Pool, sql: &str) -> Result<QueryResult, String> {
     execute_query_with_max_rows(pool, sql, None).await

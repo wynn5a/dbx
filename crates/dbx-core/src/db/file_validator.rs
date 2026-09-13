@@ -2,6 +2,16 @@ use std::path::Path;
 
 use crate::path_utils::expand_tilde;
 
+/// Matches UNC/SMB and WSL network-style paths, which skip local existence checks.
+pub(crate) fn is_network_path(path: &str) -> bool {
+    path.starts_with("\\\\") || path.starts_with("//") || path.contains("wsl.localhost") || path.contains("wsl$")
+}
+
+/// True for in-memory databases (`:memory:`), which must not hit the filesystem.
+pub(crate) fn is_memory_database_path(path: &str) -> bool {
+    path.trim().eq_ignore_ascii_case(":memory:")
+}
+
 /// Validates a file path for database connections.
 ///
 /// Performs comprehensive checks including:

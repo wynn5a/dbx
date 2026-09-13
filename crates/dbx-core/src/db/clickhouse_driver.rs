@@ -4,7 +4,6 @@ use std::fs;
 use std::time::{Duration, Instant};
 
 use super::with_connection_timeout;
-use crate::query::MAX_ROWS;
 use crate::sql::starts_with_executable_sql_keyword;
 use crate::types::{ColumnInfo, DatabaseInfo, QueryResult, TableInfo};
 
@@ -142,9 +141,7 @@ async fn ch_query_with_limit(
     resp.json::<ChJsonResult>().await.map_err(|e| format!("ClickHouse parse error: {e}"))
 }
 
-fn query_result_row_limit(max_rows: Option<usize>) -> usize {
-    max_rows.unwrap_or(MAX_ROWS).max(1)
-}
+use crate::query::query_result_row_limit;
 
 fn limited_query_result(result: ChJsonResult, execution_time_ms: u128, max_rows: Option<usize>) -> QueryResult {
     let columns: Vec<String> = result.meta.iter().map(|c| c.name.clone()).collect();

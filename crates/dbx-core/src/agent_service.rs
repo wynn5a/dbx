@@ -129,10 +129,20 @@ pub fn find_local_agent_jar(db_type: &str) -> Option<PathBuf> {
 
 pub fn install_local_agent(am: &AgentManager, db_type: &str, source: PathBuf) -> Result<(), String> {
     let jar_path = am.driver_jar_path(db_type);
+    copy_agent_jar(source, jar_path)?;
+    mark_local_agent_installed(am, db_type)
+}
+
+/// The filesystem half of `install_local_agent`, kept separate so async
+/// callers can run it on the blocking pool.
+pub fn copy_agent_jar(source: PathBuf, jar_path: PathBuf) -> Result<(), String> {
     let parent = jar_path.parent().ok_or_else(|| format!("Invalid driver path: {}", jar_path.display()))?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     std::fs::copy(&source, &jar_path).map_err(|e| format!("Failed to copy local agent jar: {e}"))?;
+    Ok(())
+}
 
+pub fn mark_local_agent_installed(am: &AgentManager, db_type: &str) -> Result<(), String> {
     let mut local_state = am.load_state();
     local_state.installed_drivers.insert(
         db_type.to_string(),
@@ -213,14 +223,19 @@ pub async fn upgrade_all_agent_drivers(
 
 pub async fn uninstall_agent_driver(am: &AgentManager, db_type: &str) -> Result<(), String> {
     let jar_path = am.driver_jar_path(db_type);
-    if jar_path.exists() {
-        std::fs::remove_file(&jar_path).map_err(|err| err.to_string())?;
-    }
-    if let Some(driver_dir) = jar_path.parent() {
-        if driver_dir.exists() {
-            std::fs::remove_dir_all(driver_dir).map_err(|err| err.to_string())?;
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        if jar_path.exists() {
+            std::fs::remove_file(&jar_path).map_err(|err| err.to_string())?;
         }
-    }
+        if let Some(driver_dir) = jar_path.parent() {
+            if driver_dir.exists() {
+                std::fs::remove_dir_all(driver_dir).map_err(|err| err.to_string())?;
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|err| err.to_string())??;
     let mut local_state = am.load_state();
     local_state.installed_drivers.remove(db_type);
     am.save_state(&local_state)?;
@@ -240,9 +255,14 @@ pub async fn uninstall_agent_jre(am: &AgentManager, jre_key: &str) -> Result<(),
         return Err(format!("JRE {} 正在被以下驱动使用: {}，请先卸载这些驱动", jre_key, dependents.join(", ")));
     }
     let jre_dir = am.jre_dir(jre_key);
-    if jre_dir.exists() {
-        std::fs::remove_dir_all(&jre_dir).map_err(|err| format!("Failed to remove JRE: {err}"))?;
-    }
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        if jre_dir.exists() {
+            std::fs::remove_dir_all(&jre_dir).map_err(|err| format!("Failed to remove JRE: {err}"))?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|err| err.to_string())??;
     let mut local_state = am.load_state();
     local_state.jre_versions.remove(jre_key);
     am.save_state(&local_state)?;
@@ -277,17 +297,29 @@ pub async fn reinstall_agent_jre(
     )
     .await?;
     let jre_dir = am.jre_dir(jre_key);
-    if jre_dir.exists() {
-        std::fs::remove_dir_all(&jre_dir).map_err(|err| format!("Failed to remove old JRE: {err}"))?;
-    }
-    extract_tar_gz(&jre_archive, &jre_dir)?;
-    std::fs::remove_file(&jre_archive).ok();
+    extract_jre_archive(jre_archive, jre_dir).await?;
     let mut local_state = am.load_state();
     local_state.jre_versions.insert(jre_key.to_string(), jre_info.version.clone());
     am.save_state(&local_state)?;
     am.stop_daemons().await;
     progress(AgentProgressEvent::step("done"));
     Ok(())
+}
+
+/// Removes any existing JRE at `jre_dir`, extracts `jre_archive` into it, and
+/// deletes the archive. Runs on the blocking pool: extracting a JRE moves
+/// hundreds of megabytes.
+async fn extract_jre_archive(jre_archive: PathBuf, jre_dir: PathBuf) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        if jre_dir.exists() {
+            std::fs::remove_dir_all(&jre_dir).map_err(|err| format!("Failed to remove old JRE: {err}"))?;
+        }
+        extract_tar_gz(&jre_archive, &jre_dir)?;
+        std::fs::remove_file(&jre_archive).ok();
+        Ok(())
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 pub fn import_agents_from_zip(
@@ -320,7 +352,11 @@ async fn install_agent_driver_with_batch(
         }
         Err(registry_err) => {
             if let Some(local_jar) = find_local_agent_jar(db_type) {
-                install_local_agent(am, db_type, local_jar)?;
+                let jar_path = am.driver_jar_path(db_type);
+                tokio::task::spawn_blocking(move || copy_agent_jar(local_jar, jar_path))
+                    .await
+                    .map_err(|err| err.to_string())??;
+                mark_local_agent_installed(am, db_type)?;
                 am.stop_daemon_by_key(db_type).await;
                 progress(AgentProgressEvent::step("done"));
                 return Ok(());
@@ -340,7 +376,11 @@ async fn install_agent_driver_from_registry(
 ) -> Result<(), String> {
     let Some(driver) = registry.drivers.get(db_type) else {
         if let Some(local_jar) = find_local_agent_jar(db_type) {
-            install_local_agent(am, db_type, local_jar)?;
+            let jar_path = am.driver_jar_path(db_type);
+            tokio::task::spawn_blocking(move || copy_agent_jar(local_jar, jar_path))
+                .await
+                .map_err(|err| err.to_string())??;
+            mark_local_agent_installed(am, db_type)?;
             am.stop_daemon_by_key(db_type).await;
             progress(AgentProgressEvent::step("done"));
             return Ok(());
@@ -379,11 +419,7 @@ async fn install_agent_driver_from_registry(
         .await?;
         progress(AgentProgressEvent::transfer("jre-extract", 0, 0).with_batch(Some(db_type), current, total_drivers));
         let jre_dir = am.jre_dir(jre_key);
-        if jre_dir.exists() {
-            std::fs::remove_dir_all(&jre_dir).map_err(|err| format!("Failed to remove old JRE: {err}"))?;
-        }
-        extract_tar_gz(&jre_archive, &jre_dir)?;
-        std::fs::remove_file(&jre_archive).ok();
+        extract_jre_archive(jre_archive, jre_dir).await?;
     }
 
     let jar_path = am.driver_jar_path(db_type);
@@ -444,7 +480,16 @@ async fn download_with_progress(
     let cache_path = cached_download_path(am, url, total_size, dest);
     prune_download_cache(am).ok();
     if cached_download_is_valid(am, &cache_path, total_size) {
-        std::fs::copy(&cache_path, &tmp).map_err(|err| format!("Failed to copy cached download: {err}"))?;
+        // A cached JRE/driver can be hundreds of MB — copy it off the async runtime.
+        let cache_copy = cache_path.clone();
+        let tmp_copy = tmp.clone();
+        tokio::task::spawn_blocking(move || {
+            std::fs::copy(&cache_copy, &tmp_copy)
+                .map(|_| ())
+                .map_err(|err| format!("Failed to copy cached download: {err}"))
+        })
+        .await
+        .map_err(|err| err.to_string())??;
         progress(AgentProgressEvent::transfer(step, total_size, total_size).with_batch(
             db_type,
             current,
@@ -537,24 +582,6 @@ pub fn github_url_to_r2_path(github_url: &str, category: &str) -> String {
         "driver" => format!("agents/drivers/{filename}"),
         _ => format!("agents/{filename}"),
     }
-}
-
-pub fn ensure_driver_app_version(
-    db_type: &str,
-    driver: &crate::agent_manager::DriverInfo,
-    current_version: &str,
-) -> Result<(), String> {
-    if is_app_version_compatible(&driver.min_app_version, current_version) {
-        return Ok(());
-    }
-    Err(format!(
-        "{db_type} driver {} requires DBX {} or newer. Current DBX version is {}.",
-        driver.version, driver.min_app_version, current_version
-    ))
-}
-
-pub fn is_app_version_compatible(min_app_version: &str, current_version: &str) -> bool {
-    !crate::update::is_newer_version(min_app_version, current_version)
 }
 
 pub fn download_temp_path(dest: &std::path::Path) -> std::path::PathBuf {

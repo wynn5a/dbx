@@ -1,6 +1,5 @@
 mod commands;
 mod data_dir;
-mod models;
 mod window_state_guard;
 
 use commands::connection::AppState;

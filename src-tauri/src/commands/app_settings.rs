@@ -20,7 +20,7 @@ pub async fn save_desktop_settings(
     state.storage.save_desktop_settings(&settings).await?;
     apply_debug_log_level(settings.debug_logging_enabled);
     if let Err(err) = apply_desktop_settings(&app, &settings) {
-        eprintln!("Failed to apply desktop settings: {err}");
+        log::warn!("Failed to apply desktop settings: {err}");
     }
     Ok(())
 }

@@ -152,13 +152,7 @@ fn ensure_parent_dir(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn is_network_path(path: &str) -> bool {
-    path.starts_with("\\\\") || path.starts_with("//") || path.contains("wsl.localhost") || path.contains("wsl$")
-}
-
-pub fn is_memory_database_path(path: &str) -> bool {
-    path.trim().eq_ignore_ascii_case(":memory:")
-}
+use super::file_validator::{is_memory_database_path, is_network_path};
 
 #[cfg(test)]
 #[allow(clippy::items_after_test_module)]
@@ -505,9 +499,7 @@ pub async fn execute_query(pool: &SqliteHandle, sql: &str) -> Result<QueryResult
     execute_query_with_max_rows(pool, sql, None).await
 }
 
-fn query_result_row_limit(max_rows: Option<usize>) -> usize {
-    max_rows.unwrap_or(crate::query::MAX_ROWS).max(1)
-}
+use crate::query::query_result_row_limit;
 
 const SQLITE_FUNCTION_ALIASES: &[(&str, &str)] = &[("if", "IIF"), ("substring", "substr")];
 

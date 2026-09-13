@@ -1,4 +1,4 @@
 #[tauri::command]
-pub fn list_system_fonts() -> Result<Vec<String>, String> {
-    Ok(dbx_core::jdbc::list_system_fonts())
+pub async fn list_system_fonts() -> Result<Vec<String>, String> {
+    Ok(dbx_core::system_fonts::list_system_fonts().await)
 }

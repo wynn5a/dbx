@@ -171,9 +171,9 @@ pub fn start(app_handle: AppHandle, state: Arc<AppState>) {
 }
 
 fn find_config_by_name<'a>(
-    configs: &'a [crate::models::connection::ConnectionConfig],
+    configs: &'a [dbx_core::models::connection::ConnectionConfig],
     name: &str,
-) -> Option<&'a crate::models::connection::ConnectionConfig> {
+) -> Option<&'a dbx_core::models::connection::ConnectionConfig> {
     configs.iter().find(|c| c.name.eq_ignore_ascii_case(name))
 }
 
@@ -199,7 +199,7 @@ async fn respond_error(stream: &mut tokio::net::TcpStream, status: &str, message
 async fn resolve_connection(
     state: &Arc<AppState>,
     connection_name: &str,
-) -> Result<crate::models::connection::ConnectionConfig, String> {
+) -> Result<dbx_core::models::connection::ConnectionConfig, String> {
     let configs = state.storage.load_connections().await.map_err(|e| e.to_string())?;
     let config =
         find_config_by_name(&configs, connection_name).ok_or_else(|| "Connection not found".to_string())?.clone();
@@ -211,13 +211,50 @@ async fn resolve_connection(
     Ok(config)
 }
 
-fn check_visible_database(config: &crate::models::connection::ConnectionConfig, database: &str) -> Result<(), String> {
+fn check_visible_database(
+    config: &dbx_core::models::connection::ConnectionConfig,
+    database: &str,
+) -> Result<(), String> {
     if let Some(ref visible) = config.visible_databases {
         if !visible.is_empty() && !visible.iter().any(|v| v == database) {
             return Err(format!("Database '{}' is not in the visible databases list for this connection", database));
         }
     }
     Ok(())
+}
+
+/// Parses a request body, responding `400 Bad Request` and returning `None` on failure.
+async fn parse_request<T: serde::de::DeserializeOwned>(body: &str, stream: &mut tokio::net::TcpStream) -> Option<T> {
+    match serde_json::from_str(body) {
+        Ok(req) => Some(req),
+        Err(_) => {
+            respond_error(stream, "400 Bad Request", "Invalid JSON").await;
+            None
+        }
+    }
+}
+
+/// Resolves a connection plus its effective database, responding `404`/`403`
+/// and returning `None` when the connection is unknown or the database is hidden.
+async fn resolve_visible_connection(
+    state: &Arc<AppState>,
+    connection_name: &str,
+    database: Option<String>,
+    stream: &mut tokio::net::TcpStream,
+) -> Option<(dbx_core::models::connection::ConnectionConfig, String)> {
+    let config = match resolve_connection(state, connection_name).await {
+        Ok(c) => c,
+        Err(e) => {
+            respond_error(stream, "404 Not Found", &e).await;
+            return None;
+        }
+    };
+    let database = database.unwrap_or_else(|| config.database.clone().unwrap_or_default());
+    if let Err(e) = check_visible_database(&config, &database) {
+        respond_error(stream, "403 Forbidden", &e).await;
+        return None;
+    }
+    Some((config, database))
 }
 
 async fn resolve_mongo_pool_key(
@@ -304,26 +341,12 @@ async fn handle_execute_query(app: &AppHandle, state: &Arc<AppState>, body: &str
 }
 
 async fn handle_list_tables_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
-    let req: ListTablesRequest = match serde_json::from_str(body) {
-        Ok(r) => r,
-        Err(_) => {
-            respond_error(stream, "400 Bad Request", "Invalid JSON").await;
-            return;
-        }
-    };
-    let config = match resolve_connection(state, &req.connection_name).await {
-        Ok(c) => c,
-        Err(e) => {
-            respond_error(stream, "404 Not Found", &e).await;
-            return;
-        }
-    };
-    let database = req.database.unwrap_or_else(|| config.database.clone().unwrap_or_default());
-    let schema = req.schema.unwrap_or_default();
-    if let Err(e) = check_visible_database(&config, &database) {
-        respond_error(stream, "403 Forbidden", &e).await;
+    let Some(req) = parse_request::<ListTablesRequest>(body, stream).await else { return };
+    let Some((config, database)) = resolve_visible_connection(state, &req.connection_name, req.database, stream).await
+    else {
         return;
-    }
+    };
+    let schema = req.schema.unwrap_or_default();
     match dbx_core::schema::list_tables_core(state, &config.id, &database, &schema, None, None).await {
         Ok(tables) => respond_json(stream, &tables).await,
         Err(e) => respond_error(stream, "500 Internal Server Error", &e).await,
@@ -331,26 +354,12 @@ async fn handle_list_tables_data(state: &Arc<AppState>, body: &str, stream: &mut
 }
 
 async fn handle_describe_table_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
-    let req: DescribeTableRequest = match serde_json::from_str(body) {
-        Ok(r) => r,
-        Err(_) => {
-            respond_error(stream, "400 Bad Request", "Invalid JSON").await;
-            return;
-        }
-    };
-    let config = match resolve_connection(state, &req.connection_name).await {
-        Ok(c) => c,
-        Err(e) => {
-            respond_error(stream, "404 Not Found", &e).await;
-            return;
-        }
-    };
-    let database = req.database.unwrap_or_else(|| config.database.clone().unwrap_or_default());
-    let schema = req.schema.unwrap_or_default();
-    if let Err(e) = check_visible_database(&config, &database) {
-        respond_error(stream, "403 Forbidden", &e).await;
+    let Some(req) = parse_request::<DescribeTableRequest>(body, stream).await else { return };
+    let Some((config, database)) = resolve_visible_connection(state, &req.connection_name, req.database, stream).await
+    else {
         return;
-    }
+    };
+    let schema = req.schema.unwrap_or_default();
     match dbx_core::schema::get_columns_core(state, &config.id, &database, &schema, &req.table).await {
         Ok(columns) => respond_json(stream, &columns).await,
         Err(e) => respond_error(stream, "500 Internal Server Error", &e).await,
@@ -358,13 +367,7 @@ async fn handle_describe_table_data(state: &Arc<AppState>, body: &str, stream: &
 }
 
 async fn handle_mongo_list_collections_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
-    let req: ListTablesRequest = match serde_json::from_str(body) {
-        Ok(r) => r,
-        Err(_) => {
-            respond_error(stream, "400 Bad Request", "Invalid JSON").await;
-            return;
-        }
-    };
+    let Some(req) = parse_request::<ListTablesRequest>(body, stream).await else { return };
     let Some((pool_key, database)) = resolve_mongo_pool_key(state, &req.connection_name, req.database, stream).await
     else {
         return;
@@ -376,13 +379,7 @@ async fn handle_mongo_list_collections_data(state: &Arc<AppState>, body: &str, s
 }
 
 async fn handle_mongo_find_documents_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
-    let req: MongoFindDocumentsRequest = match serde_json::from_str(body) {
-        Ok(r) => r,
-        Err(_) => {
-            respond_error(stream, "400 Bad Request", "Invalid JSON").await;
-            return;
-        }
-    };
+    let Some(req) = parse_request::<MongoFindDocumentsRequest>(body, stream).await else { return };
     let Some((pool_key, database)) = resolve_mongo_pool_key(state, &req.connection_name, req.database, stream).await
     else {
         return;
@@ -405,13 +402,7 @@ async fn handle_mongo_find_documents_data(state: &Arc<AppState>, body: &str, str
 }
 
 async fn handle_mongo_aggregate_documents_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
-    let req: MongoAggregateDocumentsRequest = match serde_json::from_str(body) {
-        Ok(r) => r,
-        Err(_) => {
-            respond_error(stream, "400 Bad Request", "Invalid JSON").await;
-            return;
-        }
-    };
+    let Some(req) = parse_request::<MongoAggregateDocumentsRequest>(body, stream).await else { return };
     let Some((pool_key, database)) = resolve_mongo_pool_key(state, &req.connection_name, req.database, stream).await
     else {
         return;
@@ -432,13 +423,7 @@ async fn handle_mongo_aggregate_documents_data(state: &Arc<AppState>, body: &str
 }
 
 async fn handle_mongo_insert_documents_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
-    let req: MongoInsertDocumentsRequest = match serde_json::from_str(body) {
-        Ok(r) => r,
-        Err(_) => {
-            respond_error(stream, "400 Bad Request", "Invalid JSON").await;
-            return;
-        }
-    };
+    let Some(req) = parse_request::<MongoInsertDocumentsRequest>(body, stream).await else { return };
     let Some((pool_key, database)) = resolve_mongo_pool_key(state, &req.connection_name, req.database, stream).await
     else {
         return;
@@ -452,13 +437,7 @@ async fn handle_mongo_insert_documents_data(state: &Arc<AppState>, body: &str, s
 }
 
 async fn handle_mongo_update_documents_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
-    let req: MongoUpdateDocumentsRequest = match serde_json::from_str(body) {
-        Ok(r) => r,
-        Err(_) => {
-            respond_error(stream, "400 Bad Request", "Invalid JSON").await;
-            return;
-        }
-    };
+    let Some(req) = parse_request::<MongoUpdateDocumentsRequest>(body, stream).await else { return };
     let Some((pool_key, database)) = resolve_mongo_pool_key(state, &req.connection_name, req.database, stream).await
     else {
         return;
@@ -480,13 +459,7 @@ async fn handle_mongo_update_documents_data(state: &Arc<AppState>, body: &str, s
 }
 
 async fn handle_mongo_delete_documents_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
-    let req: MongoDeleteDocumentsRequest = match serde_json::from_str(body) {
-        Ok(r) => r,
-        Err(_) => {
-            respond_error(stream, "400 Bad Request", "Invalid JSON").await;
-            return;
-        }
-    };
+    let Some(req) = parse_request::<MongoDeleteDocumentsRequest>(body, stream).await else { return };
     let Some((pool_key, database)) = resolve_mongo_pool_key(state, &req.connection_name, req.database, stream).await
     else {
         return;
@@ -507,25 +480,11 @@ async fn handle_mongo_delete_documents_data(state: &Arc<AppState>, body: &str, s
 }
 
 async fn handle_execute_query_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
-    let req: ExecuteQueryRequest = match serde_json::from_str(body) {
-        Ok(r) => r,
-        Err(_) => {
-            respond_error(stream, "400 Bad Request", "Invalid JSON").await;
-            return;
-        }
-    };
-    let config = match resolve_connection(state, &req.connection_name).await {
-        Ok(c) => c,
-        Err(e) => {
-            respond_error(stream, "404 Not Found", &e).await;
-            return;
-        }
-    };
-    let database = req.database.unwrap_or_else(|| config.database.clone().unwrap_or_default());
-    if let Err(e) = check_visible_database(&config, &database) {
-        respond_error(stream, "403 Forbidden", &e).await;
+    let Some(req) = parse_request::<ExecuteQueryRequest>(body, stream).await else { return };
+    let Some((config, database)) = resolve_visible_connection(state, &req.connection_name, req.database, stream).await
+    else {
         return;
-    }
+    };
     match dbx_core::query::execute_sql_statement(state, &config.id, &database, &req.sql, req.schema.as_deref(), None)
         .await
     {

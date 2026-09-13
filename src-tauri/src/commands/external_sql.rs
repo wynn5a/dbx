@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use dbx_core::sql::decode_sql_file_bytes;
 
@@ -17,22 +16,15 @@ pub fn read_external_sql_file(path: String) -> Result<String, String> {
 }
 
 #[derive(Default)]
-pub struct ExternalSqlOpenState {
-    pending: Mutex<Vec<String>>,
-}
+pub struct ExternalSqlOpenState(super::pending_open::PendingOpenState);
 
 impl ExternalSqlOpenState {
-    pub fn push(&self, paths: Vec<String>) {
-        if paths.is_empty() {
-            return;
-        }
-        if let Ok(mut pending) = self.pending.lock() {
-            pending.extend(paths);
-        }
+    pub fn push(&self, items: Vec<String>) {
+        self.0.push(items);
     }
 
-    fn drain(&self) -> Vec<String> {
-        self.pending.lock().map(|mut pending| pending.drain(..).collect()).unwrap_or_default()
+    pub(super) fn drain(&self) -> Vec<String> {
+        self.0.drain()
     }
 }
 

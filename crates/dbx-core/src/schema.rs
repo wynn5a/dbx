@@ -260,9 +260,6 @@ async fn list_databases_once(state: &AppState, connection_id: &str) -> Result<Ve
     log::info!("[list_databases] connection_id={connection_id}");
     {
         let connections = state.connections.read().await;
-        if extract_pool!(&connections, connection_id, ExternalTabular).is_some() {
-            return Ok(vec![db::DatabaseInfo { name: "main".to_string() }]);
-        }
         if let Some(PoolKind::ExternalDriver { config, session, .. }) = connections.get(connection_id) {
             let config = config.clone();
             let session = session.clone();
@@ -417,16 +414,6 @@ async fn list_tables_once(
 
     {
         let connections = state.connections.read().await;
-        if let Some(ext_pool) = extract_pool!(&connections, &pool_key, ExternalTabular) {
-            drop(connections);
-            let cache = ext_pool.cache.clone();
-            return tokio::task::spawn_blocking(move || {
-                let con = cache.lock().map_err(|e| e.to_string())?;
-                duckdb_query_tables(&con)
-            })
-            .await
-            .map_err(|e| e.to_string())?;
-        }
         if let Some(PoolKind::ExternalDriver { config, session, .. }) = connections.get(&pool_key) {
             let config = config.clone();
             let session = session.clone();
@@ -943,28 +930,6 @@ async fn list_objects_once_unfiltered(
 
     {
         let connections = state.connections.read().await;
-        if let Some(ext_pool) = extract_pool!(&connections, &pool_key, ExternalTabular) {
-            drop(connections);
-            let cache = ext_pool.cache.clone();
-            return tokio::task::spawn_blocking(move || {
-                let con = cache.lock().map_err(|e| e.to_string())?;
-                Ok(duckdb_query_tables(&con)?
-                    .into_iter()
-                    .map(|table| db::ObjectInfo {
-                        name: table.name,
-                        object_type: table.table_type,
-                        schema: None,
-                        comment: table.comment,
-                        created_at: None,
-                        updated_at: None,
-                        parent_schema: table.parent_schema,
-                        parent_name: table.parent_name,
-                    })
-                    .collect())
-            })
-            .await
-            .map_err(|e| e.to_string())?;
-        }
         if let Some(PoolKind::ExternalDriver { config, session, .. }) = connections.get(&pool_key) {
             let config = config.clone();
             let session = session.clone();
@@ -1245,17 +1210,6 @@ pub async fn get_columns_core(
 
     {
         let connections = state.connections.read().await;
-        if let Some(ext_pool) = extract_pool!(&connections, &pool_key, ExternalTabular) {
-            drop(connections);
-            let cache = ext_pool.cache.clone();
-            let table = table.to_string();
-            return tokio::task::spawn_blocking(move || {
-                let con = cache.lock().map_err(|e| e.to_string())?;
-                duckdb_query_columns(&con, &table)
-            })
-            .await
-            .map_err(|e| e.to_string())?;
-        }
         if let Some(PoolKind::ExternalDriver { config, session, .. }) = connections.get(&pool_key) {
             let config = config.clone();
             let session = session.clone();
