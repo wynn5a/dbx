@@ -11,20 +11,35 @@ pub struct XlsxWorksheetData {
 }
 
 fn escape_xml(value: &str) -> String {
-    value
-        .chars()
-        .filter(|ch| {
-            let code = *ch as u32;
-            code == 9 || code == 10 || code == 13 || code >= 32
-        })
-        .flat_map(|ch| match ch {
-            '&' => "&amp;".chars().collect::<Vec<_>>(),
-            '<' => "&lt;".chars().collect::<Vec<_>>(),
-            '>' => "&gt;".chars().collect::<Vec<_>>(),
-            '"' => "&quot;".chars().collect::<Vec<_>>(),
-            _ => vec![ch],
-        })
-        .collect()
+    // Fast path: the overwhelmingly common case (plain text/number cells) has
+    // nothing to escape or strip — scan first, then allocate only if needed.
+    // The previous char-by-char flat_map allocated a Vec per character.
+    let needs_work = value.chars().any(|ch| match ch {
+        '&' | '<' | '>' | '"' => true,
+        _ => {
+            let code = ch as u32;
+            !(code == 9 || code == 10 || code == 13 || code >= 32)
+        }
+    });
+    if !needs_work {
+        return value.to_string();
+    }
+
+    let mut out = String::with_capacity(value.len() + 16);
+    for ch in value.chars() {
+        let code = ch as u32;
+        if !(code == 9 || code == 10 || code == 13 || code >= 32) {
+            continue;
+        }
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 fn column_name(index: usize) -> String {
@@ -146,21 +161,19 @@ fn worksheet_xml(data: &XlsxWorksheetData) -> String {
             .collect::<String>()
     );
 
-    let body_xml = data
-        .rows
-        .iter()
-        .enumerate()
-        .map(|(row_index, row)| {
-            let excel_row = row_index + 2;
-            let cells = data
-                .columns
-                .iter()
-                .enumerate()
-                .map(|(col_index, _)| cell_xml(row.get(col_index), excel_row - 1, col_index, None))
-                .collect::<String>();
-            format!("<row r=\"{excel_row}\">{cells}</row>")
-        })
-        .collect::<String>();
+    // Reserve up front so the sheet body grows without repeated reallocation:
+    // each cell costs roughly the tag frame plus the value text.
+    let mut body_xml = String::with_capacity(data.rows.len() * (data.columns.len() * 32 + 32) + 64);
+    for (row_index, row) in data.rows.iter().enumerate() {
+        let excel_row = row_index + 2;
+        let cells = data
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(col_index, _)| cell_xml(row.get(col_index), excel_row - 1, col_index, None))
+            .collect::<String>();
+        body_xml.push_str(&format!("<row r=\"{excel_row}\">{cells}</row>"));
+    }
 
     format!(
         concat!(
@@ -265,8 +278,22 @@ pub fn build_xlsx_workbook(data: &XlsxWorksheetData) -> Result<Vec<u8>, String> 
 
 #[cfg(test)]
 mod tests {
-    use super::{build_xlsx_workbook, XlsxWorksheetData};
+    use super::{build_xlsx_workbook, escape_xml, XlsxWorksheetData};
     use serde_json::json;
+
+    #[test]
+    fn escapes_and_strips_like_the_reference_implementation() {
+        // All five observable behaviors of the original char-by-char version:
+        // entity escaping, control-char stripping, and tab/newline carriage
+        // return preservation — for both the fast path and the rewrite path.
+        assert_eq!(escape_xml("plain text"), "plain text");
+        assert_eq!(escape_xml("a&b<c>d\"e"), "a&amp;b&lt;c&gt;d&quot;e");
+        assert_eq!(escape_xml("tab\tkept"), "tab\tkept");
+        assert_eq!(escape_xml("nl\nkept"), "nl\nkept");
+        assert_eq!(escape_xml("cr\rkept"), "cr\rkept");
+        assert_eq!(escape_xml("ctrl\u{0001}\u{001f}stripped"), "ctrlstripped");
+        assert_eq!(escape_xml("unicode保持 ✓"), "unicode保持 ✓");
+    }
 
     #[test]
     fn builds_xlsx_zip_with_sheet_data() {
