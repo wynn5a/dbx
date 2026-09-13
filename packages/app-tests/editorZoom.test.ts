@@ -1,47 +1,136 @@
-import { strict as assert } from "node:assert";
-import { test } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  EDITOR_MAX_FONT_SIZE,
+  EDITOR_MIN_FONT_SIZE,
   clampEditorFontSize,
   createEditorZoomCommitScheduler,
   fontSizeFromGestureScale,
   fontSizeFromWheelDelta,
-} from "../../apps/desktop/src/lib/editorZoom.ts";
+} from "../../apps/desktop/src/lib/editorZoom";
 
-test("clamps editor font size to supported bounds", () => {
-  assert.equal(clampEditorFontSize(8), 10);
-  assert.equal(clampEditorFontSize(30), 24);
-  assert.equal(clampEditorFontSize(13.257), 13.26);
+describe("clampEditorFontSize", () => {
+  it("clamps below the minimum and above the maximum", () => {
+    expect(clampEditorFontSize(2)).toBe(EDITOR_MIN_FONT_SIZE);
+    expect(clampEditorFontSize(1000)).toBe(EDITOR_MAX_FONT_SIZE);
+  });
+
+  it("passes through in-range values and rounds to 2 decimals", () => {
+    expect(clampEditorFontSize(13)).toBe(13);
+    expect(clampEditorFontSize(12.3456)).toBe(12.35);
+  });
 });
 
-test("maps trackpad pinch wheel delta to smooth font size changes", () => {
-  assert.ok(fontSizeFromWheelDelta(13, -120) > 13);
-  assert.ok(fontSizeFromWheelDelta(13, 120) < 13);
+describe("fontSizeFromWheelDelta", () => {
+  it("zooms in on negative delta and out on positive delta", () => {
+    expect(fontSizeFromWheelDelta(13, -100)).toBeGreaterThan(13);
+    expect(fontSizeFromWheelDelta(13, 100)).toBeLessThan(13);
+  });
+
+  it("clamps extreme deltas to the configured bounds", () => {
+    expect(fontSizeFromWheelDelta(13, -100000)).toBe(EDITOR_MAX_FONT_SIZE);
+    expect(fontSizeFromWheelDelta(13, 100000)).toBe(EDITOR_MIN_FONT_SIZE);
+  });
 });
 
-test("maps WebKit gesture scale from the gesture start font size", () => {
-  assert.equal(fontSizeFromGestureScale(13, 1.25), 16.25);
-  assert.equal(fontSizeFromGestureScale(13, 4), 24);
+describe("fontSizeFromGestureScale", () => {
+  it("scales relative to the gesture start size", () => {
+    expect(fontSizeFromGestureScale(13, 1)).toBe(13);
+    expect(fontSizeFromGestureScale(12, 1.5)).toBe(18);
+  });
+
+  it("clamps scaled values to the configured bounds", () => {
+    expect(fontSizeFromGestureScale(13, 10)).toBe(EDITOR_MAX_FONT_SIZE);
+    expect(fontSizeFromGestureScale(12, 0.1)).toBe(EDITOR_MIN_FONT_SIZE);
+  });
 });
 
-test("debounces editor zoom commits and keeps only the latest font size", async () => {
-  const committed: number[] = [];
-  const scheduler = createEditorZoomCommitScheduler((fontSize) => committed.push(fontSize), 10);
+describe("createEditorZoomCommitScheduler", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
-  scheduler.schedule(13.5);
-  scheduler.schedule(14.25);
+  it("commits a clamped/rounded value after the delay", () => {
+    vi.useFakeTimers();
+    const commits: number[] = [];
+    const scheduler = createEditorZoomCommitScheduler((size) => commits.push(size));
 
-  await new Promise((resolve) => setTimeout(resolve, 25));
+    scheduler.schedule(15.123);
+    expect(scheduler.hasPendingCommit()).toBe(true);
+    expect(commits).toEqual([]);
 
-  assert.deepEqual(committed, [14.25]);
-});
+    vi.advanceTimersByTime(160);
+    expect(commits).toEqual([15.12]);
+    expect(scheduler.hasPendingCommit()).toBe(false);
+  });
 
-test("flushes a pending editor zoom commit immediately", () => {
-  const committed: number[] = [];
-  const scheduler = createEditorZoomCommitScheduler((fontSize) => committed.push(fontSize), 50);
+  it("debounces rapid schedules to only the last value", () => {
+    vi.useFakeTimers();
+    const commits: number[] = [];
+    const scheduler = createEditorZoomCommitScheduler((size) => commits.push(size));
 
-  scheduler.schedule(15.75);
-  scheduler.flush();
+    scheduler.schedule(14);
+    scheduler.schedule(16);
+    vi.advanceTimersByTime(160);
 
-  assert.deepEqual(committed, [15.75]);
-  assert.equal(scheduler.hasPendingCommit(), false);
+    expect(commits).toEqual([16]);
+  });
+
+  it("flush commits immediately and cancels the pending timer", () => {
+    vi.useFakeTimers();
+    const commits: number[] = [];
+    const scheduler = createEditorZoomCommitScheduler((size) => commits.push(size));
+
+    scheduler.schedule(20);
+    scheduler.flush();
+    expect(commits).toEqual([20]);
+    expect(scheduler.hasPendingCommit()).toBe(false);
+
+    // The cancelled timer must not fire a second commit.
+    vi.advanceTimersByTime(160);
+    expect(commits).toEqual([20]);
+  });
+
+  it("flush(value) prefers the explicit argument", () => {
+    vi.useFakeTimers();
+    const commits: number[] = [];
+    const scheduler = createEditorZoomCommitScheduler((size) => commits.push(size));
+
+    scheduler.schedule(20);
+    scheduler.flush(18);
+    expect(commits).toEqual([18]);
+  });
+
+  it("flush with nothing pending and no argument does not commit", () => {
+    vi.useFakeTimers();
+    const commits: number[] = [];
+    const scheduler = createEditorZoomCommitScheduler((size) => commits.push(size));
+
+    scheduler.flush();
+    expect(commits).toEqual([]);
+  });
+
+  it("dispose cancels a pending commit", () => {
+    vi.useFakeTimers();
+    const commits: number[] = [];
+    const scheduler = createEditorZoomCommitScheduler((size) => commits.push(size));
+
+    scheduler.schedule(15);
+    scheduler.dispose();
+    vi.advanceTimersByTime(160);
+
+    expect(commits).toEqual([]);
+    expect(scheduler.hasPendingCommit()).toBe(false);
+  });
+
+  it("honors a custom delay", () => {
+    vi.useFakeTimers();
+    const commits: number[] = [];
+    const scheduler = createEditorZoomCommitScheduler((size) => commits.push(size), 50);
+
+    scheduler.schedule(15);
+    vi.advanceTimersByTime(49);
+    expect(commits).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(commits).toEqual([15]);
+  });
 });
