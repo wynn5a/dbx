@@ -93,13 +93,6 @@ watch(
         v-html="renderedNotes"
         @click="handleReleaseNotesClick"
       />
-      <p v-if="!isDesktop && updateInfo?.update_available" class="text-xs text-[var(--ds-text-3)]">
-        {{ t("updates.dockerUsersRun") }}
-        <code class="bg-[var(--ds-bg-canvas)] px-1 py-0.5 rounded text-[11px]"
-          >docker compose pull && docker compose up -d</code
-        >
-        {{ t("updates.toUpdate") }}
-      </p>
       <p
         v-if="isDesktop && updateInfo?.update_available && updateInfo.portable_mode"
         class="text-xs text-[var(--ds-text-3)]"

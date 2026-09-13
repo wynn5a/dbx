@@ -114,23 +114,6 @@ export function analyzeEditableQueryEditability(sql: string): QueryEditability {
   };
 }
 
-export function queryEditabilityMessageKey(reason: QueryEditabilityReason): string {
-  return {
-    "not-select": "grid.queryEditUnsupportedNotSelect",
-    cte: "grid.queryEditUnsupportedCte",
-    "set-operation": "grid.queryEditUnsupportedSetOperation",
-    aggregation: "grid.queryEditUnsupportedAggregation",
-    "external-source": "grid.queryEditUnsupportedExternalSource",
-    "complex-source": "grid.queryEditUnsupportedComplexSource",
-    "computed-columns": "grid.queryEditUnsupportedComputedColumns",
-    "no-table": "grid.queryEditUnsupportedNoTable",
-    "no-primary-key": "grid.queryEditUnsupportedNoPrimaryKey",
-    "primary-key-not-returned": "grid.queryEditUnsupportedPrimaryKeyNotReturned",
-    "aliased-columns": "grid.queryEditUnsupportedAliasedColumns",
-    "metadata-unavailable": "grid.queryEditUnsupportedMetadataUnavailable",
-  }[reason];
-}
-
 function parseSelectColumns(body: string): EditableQueryColumn[] {
   const cols: EditableQueryColumn[] = [];
   let depth = 0;

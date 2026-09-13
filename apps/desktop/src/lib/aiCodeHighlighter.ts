@@ -1,15 +1,11 @@
 import type { AppThemeAppearance } from "@/lib/appTheme";
+import { loadShikiHighlighter, SHIKI_THEMES, type ShikiHighlighter } from "@/lib/shikiCore";
 
 export type AiCodeHighlighter = (content: string, lang: string, appearance?: AppThemeAppearance) => string;
 
 interface AiShikiCodeHighlighterOptions {
   appearance: () => AppThemeAppearance;
 }
-
-const SHIKI_THEMES = {
-  dark: "github-dark",
-  light: "github-light",
-} as const;
 
 const SHIKI_LANGUAGES = [
   "bash",
@@ -63,8 +59,6 @@ const SHIKI_LANG_BY_AI_LABEL: Record<string, (typeof SHIKI_LANGUAGES)[number] | 
   ZSH: "shellscript",
 };
 
-type ShikiHighlighter = Awaited<ReturnType<typeof import("shiki/core").createHighlighterCore>>;
-
 let highlighterPromise: Promise<ShikiHighlighter> | undefined;
 
 export async function createAiShikiCodeHighlighter(options: AiShikiCodeHighlighterOptions): Promise<AiCodeHighlighter> {
@@ -83,34 +77,7 @@ function getAiShikiHighlighter(): Promise<ShikiHighlighter> {
 }
 
 async function loadAiShikiHighlighter(): Promise<ShikiHighlighter> {
-  const [
-    { createHighlighterCore },
-    { createJavaScriptRegexEngine },
-    githubDark,
-    githubLight,
-    bash,
-    css,
-    go,
-    html,
-    java,
-    javascript,
-    json,
-    markdown,
-    php,
-    python,
-    rust,
-    shellscript,
-    sql,
-    tsx,
-    typescript,
-    vue,
-    xml,
-    yaml,
-  ] = await Promise.all([
-    import("shiki/core"),
-    import("shiki/engine/javascript"),
-    import("shiki/themes/github-dark.mjs"),
-    import("shiki/themes/github-light.mjs"),
+  const langModules = await Promise.all([
     import("shiki/langs/bash.mjs"),
     import("shiki/langs/css.mjs"),
     import("shiki/langs/go.mjs"),
@@ -131,30 +98,7 @@ async function loadAiShikiHighlighter(): Promise<ShikiHighlighter> {
     import("shiki/langs/yaml.mjs"),
   ]);
 
-  return createHighlighterCore({
-    engine: createJavaScriptRegexEngine(),
-    langs: [
-      bash.default,
-      css.default,
-      go.default,
-      html.default,
-      java.default,
-      javascript.default,
-      json.default,
-      markdown.default,
-      php.default,
-      python.default,
-      rust.default,
-      shellscript.default,
-      sql.default,
-      tsx.default,
-      typescript.default,
-      vue.default,
-      xml.default,
-      yaml.default,
-    ],
-    themes: [githubDark.default, githubLight.default],
-  });
+  return loadShikiHighlighter(langModules.map((lang) => lang.default));
 }
 
 function resolveShikiLanguage(lang: string): (typeof SHIKI_LANGUAGES)[number] | "text" {

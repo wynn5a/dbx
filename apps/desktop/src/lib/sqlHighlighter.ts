@@ -1,17 +1,11 @@
 import type { AppThemeAppearance } from "@/lib/appTheme";
+import { loadShikiHighlighter, SHIKI_THEMES, type ShikiHighlighter } from "@/lib/shikiCore";
 
 export type SqlHighlighter = (content: string, appearance?: AppThemeAppearance) => string;
 
 interface ShikiSqlHighlighterOptions {
   appearance: () => AppThemeAppearance;
 }
-
-const SHIKI_THEMES = {
-  dark: "github-dark",
-  light: "github-light",
-} as const;
-
-type ShikiHighlighter = Awaited<ReturnType<typeof import("shiki/core").createHighlighterCore>>;
 
 let highlighterPromise: Promise<ShikiHighlighter> | undefined;
 
@@ -31,17 +25,6 @@ function getShikiSqlHighlighter(): Promise<ShikiHighlighter> {
 }
 
 async function loadShikiSqlHighlighter(): Promise<ShikiHighlighter> {
-  const [{ createHighlighterCore }, { createJavaScriptRegexEngine }, githubDark, githubLight, sql] = await Promise.all([
-    import("shiki/core"),
-    import("shiki/engine/javascript"),
-    import("shiki/themes/github-dark.mjs"),
-    import("shiki/themes/github-light.mjs"),
-    import("shiki/langs/sql.mjs"),
-  ]);
-
-  return createHighlighterCore({
-    engine: createJavaScriptRegexEngine(),
-    langs: [sql.default],
-    themes: [githubDark.default, githubLight.default],
-  });
+  const sql = await import("shiki/langs/sql.mjs");
+  return loadShikiHighlighter([sql.default]);
 }

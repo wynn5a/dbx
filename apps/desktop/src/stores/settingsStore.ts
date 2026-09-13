@@ -779,17 +779,6 @@ export const useSettingsStore = defineStore("settings", () => {
     return normalized;
   }
 
-  function deleteCustomColumnFormatter(id: string) {
-    const customColumnFormatters = { ...editorSettings.value.customColumnFormatters };
-    delete customColumnFormatters[id];
-    const columnFormatters = Object.fromEntries(
-      Object.entries(editorSettings.value.columnFormatters).filter(([, formatter]) => {
-        return formatter.kind !== "custom-ref" || formatter.formatterId !== id;
-      }),
-    );
-    updateEditorSettings({ customColumnFormatters, columnFormatters });
-  }
-
   return {
     aiConfig,
     isAiConfigLoaded,
@@ -803,6 +792,5 @@ export const useSettingsStore = defineStore("settings", () => {
     updateDesktopSettings,
     updateColumnFormatter,
     upsertCustomColumnFormatter,
-    deleteCustomColumnFormatter,
   };
 });

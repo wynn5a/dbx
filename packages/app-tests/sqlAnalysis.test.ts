@@ -6,7 +6,6 @@ import {
   analyzeEditableQuery,
   analyzeEditableQueryEditability,
   isBinaryType,
-  queryEditabilityMessageKey,
 } from "../../apps/desktop/src/lib/sqlAnalysis.ts";
 
 test("recognizes a simple single-table SELECT as editable", () => {
@@ -64,7 +63,6 @@ test("reports why joined query results are not editable", () => {
     editable: false,
     reason: "complex-source",
   });
-  assert.equal(queryEditabilityMessageKey(result.reason), "grid.queryEditUnsupportedComplexSource");
 });
 
 test("reports DuckDB external file scans as read-only external sources", () => {
@@ -74,7 +72,6 @@ test("reports DuckDB external file scans as read-only external sources", () => {
     editable: false,
     reason: "external-source",
   });
-  assert.equal(queryEditabilityMessageKey(result.reason), "grid.queryEditUnsupportedExternalSource");
 });
 
 test("reports computed result columns as unsafe to edit", () => {
