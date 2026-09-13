@@ -202,9 +202,6 @@ async function startExport() {
       toast(e?.message || String(e), 5000);
       return;
     }
-  } else {
-    // Web mode: use a temp path; the server will handle the file
-    filePath = `__web_export_${exportId.value}.sql`;
   }
 
   const request: api.DatabaseExportRequest = {

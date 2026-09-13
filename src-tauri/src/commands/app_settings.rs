@@ -41,17 +41,17 @@ pub async fn clear_native_debug_logs(app: AppHandle) -> Result<(), String> {
     if !log_dir.exists() {
         return Ok(());
     }
-    let entries = std::fs::read_dir(&log_dir).map_err(|e| e.to_string())?;
+    let mut entries = tokio::fs::read_dir(&log_dir).await.map_err(|e| e.to_string())?;
     let mut last_err: Option<String> = None;
-    for entry in entries.filter_map(|entry| entry.ok()) {
-        if !entry.metadata().map(|metadata| metadata.is_file()).unwrap_or(false) {
+    while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+        if !entry.metadata().await.map(|metadata| metadata.is_file()).unwrap_or(false) {
             continue;
         }
         let path = entry.path();
         // Truncate rather than delete: tauri-plugin-log holds the active file
         // open in append mode, so O_APPEND keeps writing from the new (empty)
         // end-of-file, and Windows refuses to delete a file that is in use.
-        if let Err(err) = std::fs::OpenOptions::new().write(true).truncate(true).open(&path) {
+        if let Err(err) = tokio::fs::OpenOptions::new().write(true).truncate(true).open(&path).await {
             log::warn!("[logs] failed to clear native log file {}: {}", path.display(), err);
             last_err = Some(format!("{}: {err}", path.display()));
         }
@@ -70,19 +70,17 @@ pub async fn load_native_debug_logs(app: AppHandle) -> Result<String, String> {
     if !log_dir.exists() {
         return Ok(format!("Native log dir does not exist yet: {}", log_dir.display()));
     }
-    let mut files = std::fs::read_dir(&log_dir)
-        .map_err(|e| e.to_string())?
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| {
-            let path = entry.path();
-            let metadata = entry.metadata().ok()?;
-            if !metadata.is_file() {
-                return None;
-            }
-            let modified = metadata.modified().ok()?;
-            Some((path, modified, metadata.len()))
-        })
-        .collect::<Vec<_>>();
+    let mut entries = tokio::fs::read_dir(&log_dir).await.map_err(|e| e.to_string())?;
+    let mut files = Vec::new();
+    while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+        let path = entry.path();
+        let Ok(metadata) = entry.metadata().await else { continue };
+        if !metadata.is_file() {
+            continue;
+        }
+        let Ok(modified) = metadata.modified() else { continue };
+        files.push((path, modified, metadata.len()));
+    }
     files.sort_by_key(|(_, modified, _)| *modified);
     files.reverse();
 
@@ -91,7 +89,7 @@ pub async fn load_native_debug_logs(app: AppHandle) -> Result<String, String> {
     for (path, _, len) in files.into_iter().take(MAX_FILES) {
         let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("unknown");
         output.push_str(&format!("\n===== {name} =====\n"));
-        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        let bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
         let start = if len > MAX_FILE_BYTES { bytes.len().saturating_sub(MAX_FILE_BYTES as usize) } else { 0 };
         if start > 0 {
             output.push_str("[truncated to last 512 KiB]\n");

@@ -236,7 +236,7 @@ MCP 工具始终面向本机的 DBX 桌面应用工作。查询类工具直接�
     检查 DBX 中该连接是否能正常连接。MCP Server 使用相同的连接配置和密码。确认数据库服务正在运行，网络可达。
   </Accordion>
   <Accordion title="dbx_open_table 报 'DBX is not running'">
-    需要先启动 DBX 桌面应用。UI 联动功能依赖 DBX 运行时的本地 HTTP 服务（端口 4224）。
+    需要先启动 DBX 桌面应用。UI 联动通过 DBX 的本地 HTTP bridge 完成：应用启动时自动选择空闲端口，并写入数据目录下的 `mcp-bridge-port` 文件。
   </Accordion>
   <Accordion title="连接名称找不到">
     连接名称匹配不区分大小写，但需要和 DBX 中配置的名称一致。用 `dbx_list_connections` 查看所有可用名称。

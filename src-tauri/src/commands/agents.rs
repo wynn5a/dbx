@@ -87,12 +87,6 @@ pub async fn uninstall_agent(state: State<'_, Arc<AppState>>, db_type: String) -
 }
 
 #[tauri::command]
-pub async fn check_jre_installed(state: State<'_, Arc<AppState>>, jre_key: Option<String>) -> Result<bool, String> {
-    let key = jre_key.as_deref().unwrap_or(DEFAULT_JRE_KEY);
-    Ok(state.agent_manager.is_jre_installed(key))
-}
-
-#[tauri::command]
 pub async fn get_agent_java_runtime_config(state: State<'_, Arc<AppState>>) -> Result<JavaRuntimeConfig, String> {
     Ok(state.agent_manager.load_state().java_runtime)
 }

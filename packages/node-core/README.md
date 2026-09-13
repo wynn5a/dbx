@@ -1,6 +1,6 @@
 # DBX Node Core
 
-Shared Node.js runtime utilities for DBX CLI and DBX MCP Server.
+Shared Node.js runtime utilities for the DBX MCP Server.
 
 This package reads DBX Desktop connection storage, redacts connection summaries, builds schema context, applies SQL safety rules, and executes supported direct database queries.
 
@@ -15,8 +15,10 @@ Direct execution currently supports:
 - PostgreSQL and Redshift
 - MySQL-compatible databases, including MySQL, Doris, and StarRocks
 - SQLite
+- rqlite
+- PostgreSQL-compatible databases, including GaussDB, KWDB, and openGauss
 
-Other DBX connection types can be routed through DBX Desktop bridge integrations used by the CLI and MCP server.
+Other DBX connection types can be routed through DBX Desktop bridge integrations used by the MCP server.
 
 ## Public Modules
 

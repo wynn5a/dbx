@@ -12,7 +12,7 @@ Helpful reports include:
 
 - Affected DBX version or commit.
 - Operating system and installation method.
-- The impacted component, such as desktop app, Docker service, CLI, MCP server, or JDBC plugin.
+- The impacted component, such as desktop app, MCP server, or JDBC plugin.
 - Steps to reproduce in a safe test environment.
 - Impact assessment and any known workaround.
 
@@ -24,7 +24,6 @@ Security-sensitive areas include:
 - Database credential handling.
 - SSH tunnel and proxy handling.
 - AI provider keys and OpenAI-compatible endpoint configuration.
-- MCP and CLI access to local DBX connections.
-- Docker web service authentication and data directory handling.
+- MCP access to local DBX connections.
 
 Please avoid testing against systems you do not own or have explicit permission to assess.

@@ -7,7 +7,7 @@ MCP server for [DBX](https://github.com/wynn5a/dbx) — lets AI agents (Claude C
 ## Features
 
 - **Zero config** — Automatically reads your DBX connections (including passwords from system keyring)
-- **8 tools** — List/add/remove connections, list tables, describe table, get schema context, execute SQL, open table in DBX UI
+- **9 tools** — List/add/remove connections, list tables, describe table, get schema context, execute SQL, open/execute tables in the DBX UI
 - **Connection pooling** — Reuses database connections across queries
 - **Direct execution** — PostgreSQL, MySQL, SQLite, and compatible databases (Doris, StarRocks, etc.) can run without opening DBX
 - **Writes enabled by default** — regular `INSERT` / `UPDATE` / `DELETE` statements work out of the box, while dangerous SQL stays blocked unless explicitly enabled
@@ -65,9 +65,6 @@ In Claude Code, just ask:
 - "Query the average salary from employees"
 - "Open the orders table in DBX"
 
-## CLI
-
-
 ## Tools
 
 | Tool | Description |
@@ -80,6 +77,7 @@ In Claude Code, just ask:
 | `dbx_get_schema_context` | Get compact table and column context for writing SQL |
 | `dbx_execute_query` | Execute a SQL query (max 100 rows) |
 | `dbx_open_table` | Open a table in DBX desktop app UI |
+| `dbx_execute_and_show` | Execute a SQL query and show the results in the DBX desktop UI (requires DBX running) |
 
 ## SQL Safety
 
@@ -115,12 +113,12 @@ The MCP server reads your database connections from DBX's SQLite database:
 
 The `dbx_open_table` tool communicates with the running DBX app to open tables directly in the UI. This requires DBX to be running. If DBX is not running, the tool will return an error message.
 
-PostgreSQL, MySQL, SQLite, Doris, StarRocks, and Redshift queries run directly from the MCP server. Other database types use the DBX desktop bridge for query, table, and column operations.
+PostgreSQL, MySQL, SQLite, Doris, StarRocks, Redshift, rqlite, GaussDB, KWDB, and openGauss queries run directly from the MCP server. Other database types use the DBX desktop bridge for query, table, and column operations.
 
 ## Requirements
 
 - [DBX](https://github.com/wynn5a/dbx) installed with at least one connection configured
-- Node.js 22.13.0 或更高版本
+- Node.js 22.13.0 or newer
 
 ## License
 
@@ -135,7 +133,7 @@ Apache-2.0
 ### 特性
 
 - **零配置** — 自动读取 DBX 的连接配置
-- **8 个工具** — 列出/添加/删除连接、列出表、查看表结构、获取 Schema 上下文、执行 SQL、在 DBX 中打开表
+- **9 个工具** — 列出/添加/删除连接、列出表、查看表结构、获取 Schema 上下文、执行 SQL、在 DBX 中打开表并执行展示
 - **连接池** — 跨查询复用数据库连接
 - **直接执行** — PostgreSQL、MySQL、SQLite 及兼容数据库（Doris、StarRocks 等）无需打开 DBX 即可查询
 - **默认允许常规写入** — `INSERT` / `UPDATE` / `DELETE` 可直接执行，危险语句仍需显式开启
@@ -179,11 +177,6 @@ npx @dbx-app/mcp-server
 - "查询最近 7 天的订单数量"
 - "打开 orders 表"
 
-### CLI
-
-
-命令详情见 [DBX CLI README](../cli/README.md)。
-
 ### 工具列表
 
 | 工具 | 说明 |
@@ -196,6 +189,7 @@ npx @dbx-app/mcp-server
 | `dbx_get_schema_context` | 获取适合 AI 写 SQL 的紧凑表结构上下文 |
 | `dbx_execute_query` | 执行 SQL 查询（最多返回 100 行） |
 | `dbx_open_table` | 在 DBX 桌面端打开指定表 |
+| `dbx_execute_and_show` | 在 DBX 桌面端执行 SQL 并展示结果（需要 DBX 正在运行） |
 
 ### SQL 安全
 
@@ -225,9 +219,9 @@ MCP Server 从 DBX 的 SQLite 数据库读取连接信息：
 
 `dbx_open_table` 工具通过本地 HTTP 接口与运行中的 DBX 应用通信，直接在 UI 中打开表。需要 DBX 正在运行。
 
-PostgreSQL、MySQL、SQLite、Doris、StarRocks、Redshift 查询可由 MCP Server 直接执行。其他数据库类型的查询、表列表、字段读取会走 DBX 桌面端 bridge。
+PostgreSQL、MySQL、SQLite、Doris、StarRocks、Redshift、rqlite、GaussDB、KWDB、openGauss 查询可由 MCP Server 直接执行。其他数据库类型的查询、表列表、字段读取会走 DBX 桌面端 bridge。
 
 ### 系统要求
 
 - 已安装 [DBX](https://github.com/wynn5a/dbx) 并配置了至少一个数据库连接
-- Node.js 22.13.0 or newer
+- Node.js 22.13.0 或更高版本

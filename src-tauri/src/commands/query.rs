@@ -542,21 +542,21 @@ pub async fn get_explain_info(
     let result: Result<serde_json::Value, String> = client.get_explain_info::<serde_json::Value>(params).await;
     match result {
         Ok(serde_json::Value::String(s)) => {
-            eprintln!("[get_explain_info] OK string, len={}", s.len());
+            log::debug!("[get_explain_info] OK string, len={}", s.len());
             Ok(s)
         }
         Ok(serde_json::Value::Object(obj)) => {
             let plan = obj.get("plan").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let has_stats = obj.get("has_actual_stats").and_then(|v| v.as_bool()).unwrap_or(false);
-            eprintln!("[get_explain_info] OK object, plan_len={}, has_actual_stats={}", plan.len(), has_stats);
+            log::debug!("[get_explain_info] OK object, plan_len={}, has_actual_stats={}", plan.len(), has_stats);
             Ok(plan)
         }
         Ok(val) => {
-            eprintln!("[get_explain_info] OK unexpected type: {:?}", val);
+            log::debug!("[get_explain_info] OK unexpected type: {:?}", val);
             Err(format!("Unexpected result type from getExplainInfo: {:?}", val))
         }
         Err(e) => {
-            eprintln!("[get_explain_info] error: {e}");
+            log::debug!("[get_explain_info] error: {e}");
             Err(e)
         }
     }

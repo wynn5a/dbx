@@ -23,7 +23,6 @@ log = "0.4"
 tauri = { version = "2.10.3", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tokio = { version = "1", features = ["full"] }
-uuid = { version = "1", features = ["v4", "serde"] }
 tauri-plugin-deep-link = "2"
 tauri-plugin-dialog = "2.7.0"
 tauri-plugin-fs = "2.5.0"
@@ -37,3 +36,6 @@ tokio-util = { version = "0.7", features = ["compat"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
 dbx-core = { path = "../crates/dbx-core" }
 tauri-plugin-clipboard-manager = "2.3.2"
+
+[dev-dependencies]
+uuid = { version = "1", features = ["v4", "serde"] }

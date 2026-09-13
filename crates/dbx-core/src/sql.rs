@@ -396,11 +396,6 @@ fn cursor_has_sql_after_cursor_on_line(sql: &str, cursor: usize) -> bool {
     sql[cursor..line_end].chars().any(|ch| !ch.is_whitespace())
 }
 
-#[allow(dead_code)]
-fn split_sql_statement_ranges(sql: &str) -> Vec<SqlStatementRange> {
-    split_sql_statement_ranges_with_options(sql, SqlParsingOptions::default())
-}
-
 fn split_sql_statement_ranges_with_options(sql: &str, options: SqlParsingOptions) -> Vec<SqlStatementRange> {
     let mut ranges = Vec::new();
     let mut start = 0;

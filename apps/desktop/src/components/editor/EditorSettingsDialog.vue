@@ -723,7 +723,6 @@ type SettingsCategory =
   | "sync"
   | "ai"
   | "mcp"
-  | "security"
   | "about";
 type SettingsCategoryNavItem = {
   value: SettingsCategory;

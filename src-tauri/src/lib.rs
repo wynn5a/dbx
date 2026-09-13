@@ -1,6 +1,5 @@
 mod commands;
 mod data_dir;
-mod db;
 mod models;
 mod window_state_guard;
 
@@ -40,6 +39,30 @@ fn should_setup_desktop_tray(target_os: &str, show_tray_icon: bool) -> bool {
 
 fn should_show_main_window_after_setup() -> bool {
     true
+}
+
+/// Startup storage failures are unrecoverable — the app cannot function
+/// without its database. Instead of panicking (a bare crash with, in release,
+/// `panic = "abort"` crash-reporter noise), show the reason in a dialog and
+/// exit cleanly. `blocking_show` must not run on the main thread (it
+/// dispatches to it), so the dialog lives on a helper thread.
+fn fatal_startup_error(app: &tauri::AppHandle, context: &str, error: String) -> ! {
+    log::error!("[startup] {context}: {error}");
+    let handle = app.clone();
+    let message = format!("{context}: {error}");
+    std::thread::spawn(move || {
+        use tauri_plugin_dialog::DialogExt;
+        handle
+            .dialog()
+            .message(message)
+            .title("DBX failed to start")
+            .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+            .blocking_show();
+        std::process::exit(1);
+    });
+    loop {
+        std::thread::park();
+    }
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -272,27 +295,12 @@ pub fn run() {
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(move |app| {
             let setup_start = Instant::now();
-            eprintln!("[STARTUP] plugins registered in {:?}", startup_begin.elapsed());
 
-            let default_data_dir =
-                app.path().app_data_dir().map_err(|e| e.to_string()).expect("Failed to resolve app data dir");
-            let data_dir = data_dir::resolve_data_dir(default_data_dir);
-            std::fs::create_dir_all(&data_dir).expect("Failed to create data dir");
-            let db_path = data_dir.join("dbx.db");
-
-            let t = Instant::now();
-            let storage = tauri::async_runtime::block_on(async {
-                let s = Storage::open(&db_path).await.expect("Failed to open storage");
-                eprintln!("[STARTUP]   Storage::open in {:?}", t.elapsed());
-                let t2 = Instant::now();
-                s.migrate_from_json(&data_dir).await.expect("Failed to migrate JSON data");
-                eprintln!("[STARTUP]   migrate_from_json in {:?}", t2.elapsed());
-                s
-            });
-            let desktop_settings = tauri::async_runtime::block_on(storage.load_desktop_settings()).unwrap_or_default();
             // Ensure the log dir exists before the plugin opens its file target.
             // The plugin writes to app_log_dir(); if the parent dir is missing,
             // every record fails to open with ENOENT ("No such file or directory").
+            // The logger is initialized before storage setup so early failures
+            // go through the same pipeline as everything else.
             if let Ok(log_dir) = app.path().app_log_dir() {
                 let _ = std::fs::create_dir_all(&log_dir);
             }
@@ -306,8 +314,35 @@ pub fn run() {
                     .level_for("sqlparser", log::LevelFilter::Info)
                     .build(),
             )?;
+            log::debug!("[STARTUP] plugins registered in {:?}", startup_begin.elapsed());
+
+            let app_handle = app.handle().clone();
+            let default_data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| e.to_string())
+                .unwrap_or_else(|e| fatal_startup_error(&app_handle, "Failed to resolve app data dir", e));
+            let data_dir = data_dir::resolve_data_dir(default_data_dir);
+            std::fs::create_dir_all(&data_dir)
+                .unwrap_or_else(|e| fatal_startup_error(&app_handle, "Failed to create data dir", e.to_string()));
+            let db_path = data_dir.join("dbx.db");
+
+            let t = Instant::now();
+            let storage = tauri::async_runtime::block_on(async {
+                let s = Storage::open(&db_path)
+                    .await
+                    .unwrap_or_else(|e| fatal_startup_error(&app_handle, "Failed to open storage", e));
+                log::debug!("[STARTUP]   Storage::open in {:?}", t.elapsed());
+                let t2 = Instant::now();
+                s.migrate_from_json(&data_dir)
+                    .await
+                    .unwrap_or_else(|e| fatal_startup_error(&app_handle, "Failed to migrate JSON data", e));
+                log::debug!("[STARTUP]   migrate_from_json in {:?}", t2.elapsed());
+                s
+            });
+            let desktop_settings = tauri::async_runtime::block_on(storage.load_desktop_settings()).unwrap_or_default();
             apply_debug_log_level(desktop_settings.debug_logging_enabled);
-            eprintln!("[STARTUP] storage ready in {:?}", t.elapsed());
+            log::debug!("[STARTUP] storage ready in {:?}", t.elapsed());
 
             let state = if data_dir::uses_custom_data_dir() {
                 Arc::new(AppState::new_with_plugin_and_agent_dir_and_app_version(
@@ -332,7 +367,11 @@ pub fn run() {
 
             let app_handle = app.handle().clone();
             commands::mcp_bridge::start(app_handle, state);
-            eprintln!("[STARTUP] setup complete in {:?} (total {:?})", setup_start.elapsed(), startup_begin.elapsed());
+            log::debug!(
+                "[STARTUP] setup complete in {:?} (total {:?})",
+                setup_start.elapsed(),
+                startup_begin.elapsed()
+            );
 
             #[cfg(not(target_os = "macos"))]
             {
@@ -556,7 +595,6 @@ pub fn run() {
             commands::agents::upgrade_all_agents,
             commands::agents::check_agent_update_blockers,
             commands::agents::uninstall_agent,
-            commands::agents::check_jre_installed,
             commands::agents::get_agent_java_runtime_config,
             commands::agents::set_agent_java_runtime_config,
             commands::agents::uninstall_jre,

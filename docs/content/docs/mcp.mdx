@@ -236,7 +236,7 @@ MCP tools always run against the DBX desktop app on your machine. Query tools re
     Check that the connection works in DBX first. The MCP Server uses the same config and credentials. Make sure the database is running and network-reachable.
   </Accordion>
   <Accordion title="dbx_open_table says 'DBX is not running'">
-    Start the DBX desktop app first. UI integration requires DBX's local HTTP service (port 4224).
+    Start the DBX desktop app first. UI integration goes through DBX's local HTTP bridge — the app picks a free port at startup and writes it to the `mcp-bridge-port` file in the DBX data directory.
   </Accordion>
   <Accordion title="Connection name not found">
     Connection name matching is case-insensitive but must match the name configured in DBX. Use `dbx_list_connections` to see all available names.

@@ -38,9 +38,8 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { useHistoryStore } from "@/stores/historyStore";
 import { useSettingsStore, type StructureEditorDensity } from "@/stores/settingsStore";
-import { useTheme } from "@/composables/useTheme";
+import { useSqlHighlighter } from "@/composables/useSqlHighlighter";
 import { useToast } from "@/composables/useToast";
-import { type SqlHighlighter, createShikiSqlHighlighter } from "@/lib/sqlHighlighter";
 import { copyToClipboard } from "@/lib/clipboard";
 import { isMacOS } from "@/lib/platform";
 import { queryTimeoutSecsForConnection } from "@/lib/queryTimeout";
@@ -62,7 +61,6 @@ import type { ForeignKeyInfo, TriggerInfo } from "@/types/database";
 import * as api from "@/lib/api";
 
 const { t } = useI18n();
-const { isDark } = useTheme();
 const store = useConnectionStore();
 const queryStore = useQueryStore();
 const historyStore = useHistoryStore();
@@ -70,17 +68,12 @@ const settingsStore = useSettingsStore();
 const { toast } = useToast();
 const rootRef = ref<HTMLElement>();
 
-const sqlHighlighter = ref<SqlHighlighter>();
-onMounted(async () => {
-  sqlHighlighter.value = await createShikiSqlHighlighter({
-    appearance: () => (isDark.value ? "dark" : "light"),
-  });
-});
+const { highlight } = useSqlHighlighter();
 
 const highlightedSql = computed(() => {
   if (!pendingStatements.value.length) return "";
   const sql = pendingStatements.value.join("\n");
-  return sqlHighlighter.value?.(sql) ?? sql;
+  return highlight(sql);
 });
 const previewSqlText = computed(() => pendingStatements.value.join("\n"));
 
@@ -1727,7 +1720,7 @@ defineExpose({ applyChanges, canApply, saving, isCreateMode, newTableName });
           <pre
             v-else
             class="m-0 min-h-0 flex-1 select-text whitespace-pre rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-input)] p-3 font-mono text-xs leading-5 text-[var(--ds-text-1)]"
-            v-html="ddlContent ? (sqlHighlighter?.(ddlContent) ?? ddlContent) : t('structureEditor.emptyReadonly')"
+            v-html="ddlContent ? highlight(ddlContent) : t('structureEditor.emptyReadonly')"
           ></pre>
         </div>
       </div>

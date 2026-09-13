@@ -10,7 +10,6 @@ pub mod agent_tools;
 pub mod ai;
 pub mod cloud_sync;
 pub mod connection;
-pub mod connection_secrets;
 pub mod csv_export;
 pub mod data_compare;
 pub mod data_grid_sql;

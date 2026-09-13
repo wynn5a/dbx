@@ -32,7 +32,7 @@ pnpm typecheck        # vue-tsc against apps/desktop/tsconfig.json
 pnpm test             # vitest run (whole suite)
 pnpm test -- <path>   # single test file, e.g. pnpm test -- packages/app-tests/dataGridSort.test.ts
 
-pnpm build            # build frontend (web/dist)
+pnpm build            # build frontend (root dist/)
 pnpm tauri build      # build desktop installer -> src-tauri/target/release/bundle/
 ```
 
@@ -47,7 +47,7 @@ cargo test -p dbx-core
 Node package changes:
 
 ```bash
-pnpm build:packages   # node-core, cli, mcp-server
+pnpm build:packages   # node-core, mcp-server
 pnpm test:packages
 pnpm publish:dry-run  # build + pack-check before publishing
 ```
@@ -76,7 +76,7 @@ Per-engine modules live in `crates/dbx-core/src/db/*.rs` (`mysql.rs`, `postgres.
 
 ### Driver metadata manifest — edit this first
 
-`crates/dbx-core/assets/database-drivers.manifest.json` is the **single source of truth** for each database's runtime mode (`native`/`file`/agent), MCP/CLI routing, capabilities, default port, and pool behavior. When adding or changing a database type, update the manifest first, then run:
+`crates/dbx-core/assets/database-drivers.manifest.json` is the **single source of truth** for each database's runtime mode (`native`/`file`/agent), MCP routing, capabilities, default port, and pool behavior. When adding or changing a database type, update the manifest first, then run:
 
 ```bash
 cargo test -p dbx-core --test database_capabilities

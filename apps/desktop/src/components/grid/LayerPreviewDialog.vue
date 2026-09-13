@@ -4,7 +4,6 @@ import { useI18n } from "vue-i18n";
 import { Camera, Loader2, Map, Maximize2, Minimize2, X } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import "leaflet/dist/leaflet.css";
 import type L from "leaflet";
 
 const props = defineProps<{
@@ -95,10 +94,8 @@ let _geojsonData: any = null;
 
 async function loadLeaflet(): Promise<typeof L> {
   if (!_L) {
-    console.log("[LayerPreview] dynamic import leaflet…");
-    const mod = await import("leaflet");
+    const [mod] = await Promise.all([import("leaflet"), import("leaflet/dist/leaflet.css")]);
     _L = mod.default as unknown as typeof L;
-    console.log("[LayerPreview] leaflet loaded, L.version =", (_L as any).version);
   }
   return _L;
 }
@@ -256,10 +253,7 @@ async function initMap() {
   if (placeholder) placeholder.remove();
 
   try {
-    console.log("[LayerPreview] container offset:", container.offsetWidth, "x", container.offsetHeight);
     const L = await loadLeaflet();
-    const rect = container.getBoundingClientRect();
-    console.log("[LayerPreview] container getBoundingClientRect:", rect.width, "x", rect.height);
 
     map = L.map(container, {
       zoomControl: true,
@@ -267,7 +261,6 @@ async function initMap() {
       center: [35, 110],
       zoom: 4,
     });
-    console.log("[LayerPreview] L.map created");
     map.invalidateSize();
 
     tileLayer = L.tileLayer(selectedBasemap.value.url, {
@@ -277,7 +270,6 @@ async function initMap() {
     }).addTo(map);
     // Sync ID ref
     selectedBasemapId.value = selectedBasemap.value.id;
-    console.log("[LayerPreview] tileLayer added");
     addGeoJsonToMap();
     parseLabelProperties(_geojsonData);
 
@@ -302,7 +294,6 @@ function addGeoJsonToMap() {
     console.warn("[LayerPreview] invalid geojson JSON");
     return;
   }
-  console.log("[LayerPreview] GeoJSON type:", _geojsonData.type, "features:", _geojsonData.features?.length);
 
   let data = _geojsonData;
   if (data.type === "Feature") data = { type: "FeatureCollection", features: [data] };
@@ -333,10 +324,8 @@ function addGeoJsonToMap() {
     .addTo(map);
 
   const bounds = geoLayer.getBounds();
-  console.log("[LayerPreview] geoLayer added, bounds:", bounds.toBBoxString(), "valid:", bounds.isValid());
   if (bounds.isValid()) {
     map.fitBounds(bounds, { padding: [30, 30], maxZoom: 18 });
-    console.log("[LayerPreview] fitBounds done, zoom:", map.getZoom());
   }
 }
 
@@ -418,11 +407,9 @@ async function saveAsImage() {
 watch(
   () => props.open,
   async (open) => {
-    console.log("[LayerPreview] open prop changed:", open);
     if (open) {
       await nextTick();
       if (!mapContainer.value) await nextTick();
-      console.log("[LayerPreview] after nextTick, mapContainer in DOM:", !!mapContainer.value);
       await initMap();
     } else {
       cleanupMap();
