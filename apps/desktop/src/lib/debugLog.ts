@@ -15,6 +15,14 @@ interface DebugLogEntry {
 let installed = false;
 let originalConsole: Partial<Record<DebugLogLevel, (...args: unknown[]) => void>> = {};
 
+// Buffering state: appending used to read+parse+stringify+write the whole
+// localStorage log for every event (each click, each API call, each console
+// line). Entries now live in memory and persist in one coalesced write.
+let enabledCache: boolean | null = null;
+let entriesCache: DebugLogEntry[] | null = null;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+const FLUSH_DELAY_MS = 500;
+
 function safeLocalStorageGet(key: string): string | null {
   try {
     return localStorage.getItem(key);
@@ -38,10 +46,31 @@ function safeLocalStorageRemove(key: string) {
 }
 
 export function isDebugLoggingEnabled(): boolean {
-  return safeLocalStorageGet(DEBUG_LOG_ENABLED_KEY) === "1";
+  if (enabledCache === null) {
+    enabledCache = safeLocalStorageGet(DEBUG_LOG_ENABLED_KEY) === "1";
+  }
+  return enabledCache;
 }
 
-function readEntries(): DebugLogEntry[] {
+export function flushDebugLogs() {
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (entriesCache !== null) {
+    safeLocalStorageSet(DEBUG_LOG_ENTRIES_KEY, JSON.stringify(entriesCache.slice(-MAX_DEBUG_LOG_ENTRIES)));
+  }
+}
+
+function scheduleFlush() {
+  if (flushTimer !== null) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flushDebugLogs();
+  }, FLUSH_DELAY_MS);
+}
+
+function readEntriesFromStorage(): DebugLogEntry[] {
   const raw = safeLocalStorageGet(DEBUG_LOG_ENTRIES_KEY);
   if (!raw) return [];
   try {
@@ -50,6 +79,13 @@ function readEntries(): DebugLogEntry[] {
   } catch {
     return [];
   }
+}
+
+function loadEntries(): DebugLogEntry[] {
+  if (entriesCache === null) {
+    entriesCache = readEntriesFromStorage();
+  }
+  return entriesCache;
 }
 
 function redactSensitiveText(value: string): string {
@@ -88,16 +124,20 @@ function formatArgs(args: unknown[]): string {
 
 export function appendDebugLog(level: DebugLogLevel, ...args: unknown[]) {
   if (!isDebugLoggingEnabled()) return;
-  const entries = readEntries();
+  const entries = loadEntries();
   entries.push({
     timestamp: new Date().toISOString(),
     level,
     message: formatArgs(args),
   });
-  safeLocalStorageSet(DEBUG_LOG_ENTRIES_KEY, JSON.stringify(entries.slice(-MAX_DEBUG_LOG_ENTRIES)));
+  if (entries.length > MAX_DEBUG_LOG_ENTRIES) {
+    entries.splice(0, entries.length - MAX_DEBUG_LOG_ENTRIES);
+  }
+  scheduleFlush();
 }
 
 export function setDebugLoggingEnabled(enabled: boolean) {
+  enabledCache = enabled;
   safeLocalStorageSet(DEBUG_LOG_ENABLED_KEY, enabled ? "1" : "0");
   if (enabled) {
     appendDebugLog("info", "[DBX][debug-log] enabled", {
@@ -107,10 +147,18 @@ export function setDebugLoggingEnabled(enabled: boolean) {
       language: navigator.language,
       online: navigator.onLine,
     });
+  } else {
+    // Persist whatever was buffered while logging was on.
+    flushDebugLogs();
   }
 }
 
 export async function clearDebugLogs() {
+  entriesCache = null;
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
   safeLocalStorageRemove(DEBUG_LOG_ENTRIES_KEY);
   await clearNativeDebugLogs();
 }
@@ -127,7 +175,7 @@ async function clearNativeDebugLogs(): Promise<void> {
 }
 
 export function getDebugLogText(): string {
-  const entries = readEntries();
+  const entries = loadEntries();
   const header = [
     `DBX debug log`,
     `Exported: ${new Date().toISOString()}`,
@@ -216,7 +264,11 @@ export function installDebugLogCapture() {
   window.addEventListener("online", () => appendDebugLog("info", "[window:online]"));
   window.addEventListener("offline", () => appendDebugLog("warn", "[window:offline]"));
   window.addEventListener("hashchange", () => appendDebugLog("info", "[window:hashchange]", location.hash));
+  // Persist buffered entries before the webview goes away — the coalesced
+  // timer flush may not have fired yet.
+  window.addEventListener("pagehide", flushDebugLogs);
   document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushDebugLogs();
     appendDebugLog("info", "[document:visibilitychange]", document.visibilityState);
   });
   document.addEventListener(
