@@ -2583,13 +2583,19 @@ function visibleDirtyColumns(row: boolean[]): boolean[] {
   return visibleColumnIndexes.value.map((index) => row[index] ?? false);
 }
 
-const visibleDisplayItems = computed<RowItem[]>(() =>
-  displayItems.value.map((item) => ({
+const allColumnsVisible = computed(() => visibleColumnIndexes.value.length === props.result.columns.length);
+
+const visibleDisplayItems = computed<RowItem[]>(() => {
+  // Fast path: with every column shown the projection copies each row onto
+  // itself, so share the materialized items instead of rebuilding
+  // rows×columns arrays on every cell edit.
+  if (allColumnsVisible.value) return displayItems.value;
+  return displayItems.value.map((item) => ({
     ...item,
     data: visibleRowData(item.data),
     isDirtyCol: visibleDirtyColumns(item.isDirtyCol),
-  })),
-);
+  }));
+});
 const exportContextCell = computed(() => {
   if (!contextCell.value) return null;
   const visibleCol = visibleColumnIndexes.value.indexOf(contextCell.value.col);
