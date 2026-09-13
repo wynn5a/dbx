@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
@@ -260,7 +262,10 @@ pub struct DriverStoreUsage {
 pub struct AgentManager {
     base_dir: PathBuf,
     app_version: String,
-    pub(crate) daemons: Mutex<std::collections::HashMap<String, AgentDriverClient>>,
+    /// One entry per installed agent driver. Each client sits in its own mutex so
+    /// calls to one daemon never serialize calls to another daemon; the outer map
+    /// mutex only guards lookup/insert.
+    pub(crate) daemons: Mutex<HashMap<String, Arc<Mutex<AgentDriverClient>>>>,
 }
 
 impl Default for AgentManager {

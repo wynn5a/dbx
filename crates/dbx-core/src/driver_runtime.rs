@@ -104,6 +104,7 @@ async fn collect_runtime_seeds(state: &AppState) -> Vec<RuntimeSeed> {
     {
         let daemons = state.agent_manager.daemons.lock().await;
         for (key, client) in daemons.iter() {
+            let client = client.lock().await;
             let last_error = non_empty(client.stderr_tail_snapshot());
             seeds.insert(
                 format!("agent:{key}"),
