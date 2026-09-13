@@ -20,7 +20,7 @@ function queryTab(overrides: Partial<QueryTab> = {}): QueryTab {
   };
 }
 
-test("result snapshots strip live session handles and clone result rows", () => {
+test("result snapshots strip live session handles and share result rows", () => {
   const tab = queryTab({
     result: {
       columns: ["id"],
@@ -46,8 +46,12 @@ test("result snapshots strip live session handles and clone result rows", () => 
   assert.equal(snapshot?.result?.session_id, undefined);
   assert.equal(snapshot?.results?.[0]?.session_id, undefined);
   assert.deepEqual(snapshot?.result?.rows, [[1]]);
-  tab.result!.rows[0]![0] = 2;
-  assert.deepEqual(snapshot?.result?.rows, [[1]]);
+  // Rows are shared, not cloned: the snapshot is built and encoded
+  // synchronously inside writeTabResultSnapshot and never mutated, so copying
+  // every row on eviction would only freeze large results. The identity here
+  // pins that contract (encode reads the live arrays before anything can
+  // mutate them).
+  assert.equal(snapshot?.result?.rows, tab.result!.rows);
 });
 
 test("result snapshots encode as binary columnar payloads and decode back to rows", () => {

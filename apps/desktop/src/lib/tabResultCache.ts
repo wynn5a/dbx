@@ -102,24 +102,13 @@ function openCacheDb(): Promise<IDBDatabase | null> {
   return dbPromise;
 }
 
-function clonePlain<T>(value: T): T {
-  const raw = toRaw(value);
-  if (typeof structuredClone === "function") return structuredClone(raw);
-  return JSON.parse(JSON.stringify(raw)) as T;
-}
-
 function stripSessionIds(result: QueryResult | undefined): QueryResult | undefined {
   if (!result) return undefined;
-  return {
-    columns: [...result.columns],
-    column_types: result.column_types ? [...result.column_types] : undefined,
-    rows: result.rows.map((row) => [...row]),
-    affected_rows: result.affected_rows,
-    execution_time_ms: result.execution_time_ms,
-    truncated: result.truncated,
-    session_id: undefined,
-    has_more: result.has_more,
-  };
+  // The snapshot is built and encoded synchronously (writeTabResultSnapshot
+  // encodes before its first await) and is only read, so the row arrays are
+  // shared instead of cloned — cloning every row froze eviction of large
+  // results.
+  return { ...result, session_id: undefined };
 }
 
 function stripResultSessionIds(results: QueryResult[] | undefined): QueryResult[] | undefined {
@@ -129,7 +118,10 @@ function stripResultSessionIds(results: QueryResult[] | undefined): QueryResult[
 function toColumnarResult(result: QueryResult | undefined): ColumnarQueryResult | undefined {
   if (!result) return undefined;
   const columnValues = result.columns.map((_, colIndex) => result.rows.map((row) => row[colIndex] ?? null));
-  return removeUndefinedFields({
+  // No inner removeUndefinedFields here: encodeTabResultSnapshot strips the
+  // whole envelope once, and this object is freshly built with no nested
+  // records — stripping here would walk every column array twice.
+  return {
     columns: [...result.columns],
     column_types: result.column_types ? [...result.column_types] : undefined,
     columnValues,
@@ -138,7 +130,7 @@ function toColumnarResult(result: QueryResult | undefined): ColumnarQueryResult 
     execution_time_ms: result.execution_time_ms,
     truncated: result.truncated,
     has_more: result.has_more,
-  });
+  };
 }
 
 function fromColumnarResult(result: ColumnarQueryResult | undefined): QueryResult | undefined {
@@ -263,7 +255,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function removeUndefinedFields<T>(value: T): T {
-  if (Array.isArray(value)) return value.map((item) => removeUndefinedFields(item)) as T;
+  if (Array.isArray(value)) {
+    // Arrays of primitives (columnar cell values, string lists) map onto
+    // themselves — copying them rebuilt the whole result grid on every encode.
+    // Records/arrays still recurse so undefined object fields get stripped.
+    if (!value.some((item) => item !== null && typeof item === "object")) return value;
+    return value.map((item) => removeUndefinedFields(item)) as T;
+  }
   if (!isRecord(value)) return value;
   return Object.fromEntries(
     Object.entries(value)
@@ -306,14 +304,17 @@ export function tabResultCacheKey(tabId: string): string {
 
 export function buildTabResultSnapshot(tab: QueryTab): TabResultSnapshot | undefined {
   if (!tab.result && !tab.results) return undefined;
+  // The snapshot is read-only (transpose + msgpack encode, synchronously), so
+  // the analysis/meta trees are shared raw instead of structuredClone'd — the
+  // clone doubled eviction cost for analysis-heavy tabs.
   return {
     result: stripSessionIds(tab.result),
     results: stripResultSessionIds(tab.results),
     activeResultIndex: tab.activeResultIndex,
-    queryAnalysis: tab.queryAnalysis ? clonePlain(tab.queryAnalysis) : undefined,
-    querySourceColumns: tab.querySourceColumns ? [...tab.querySourceColumns] : undefined,
+    queryAnalysis: toRaw(tab.queryAnalysis),
+    querySourceColumns: tab.querySourceColumns,
     queryEditabilityReason: tab.queryEditabilityReason,
-    tableMeta: tab.tableMeta ? clonePlain(tab.tableMeta) : undefined,
+    tableMeta: toRaw(tab.tableMeta),
     resultPageSql: tab.resultPageSql,
     resultPageLimit: tab.resultPageLimit,
     resultPageOffset: tab.resultPageOffset,
