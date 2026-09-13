@@ -128,7 +128,7 @@ SSH 隧道（密钥和密码认证）· 数据库和 AI 代理设置 · 断线�
 
 ### 精致 UI
 
-深色模式原生标题栏同步 · 9 种编辑器主题 · English、简体中文、Español · 布局偏好设置 · 内置自动更新
+深色模式原生标题栏同步 · 9 种编辑器主题 · English、简体中文、Español、Italiano、Português (Brasil)、繁體中文 · 布局偏好设置 · 内置自动更新
 
 ## AI 编程助手集成 (MCP)
 
@@ -160,9 +160,9 @@ npx @dbx-app/mcp-server
 
 ### 环境要求
 
-- [Node.js](https://nodejs.org/) >= 18
+- [Node.js](https://nodejs.org/) >= 22.13.0
 - [pnpm](https://pnpm.io/)
-- [Rust](https://www.rust-lang.org/tools/install) >= 1.77
+- [Rust](https://www.rust-lang.org/tools/install) >= 1.77.2
 
 #### 系统依赖
 
@@ -205,7 +205,7 @@ pnpm tauri build
 | 前端 | [Vue 3](https://vuejs.org/) + TypeScript |
 | UI | [shadcn-vue](https://www.shadcn-vue.com/) + Tailwind CSS |
 | 编辑器 | [CodeMirror 6](https://codemirror.net/) |
-| 后端 | Rust + [sqlx](https://github.com/launchbadge/sqlx) / [tiberius](https://github.com/prisma/tiberius) / [redis-rs](https://github.com/redis-rs/redis-rs) / [mongodb](https://github.com/mongodb/mongo-rust-driver) |
+| 后端 | Rust + [tokio-postgres](https://github.com/sfackler/rust-postgres) / [rusqlite](https://github.com/rusqlite/rusqlite) / [mysql_async](https://github.com/blackbeam/mysql_async) / [redis-rs](https://github.com/redis-rs/redis-rs) / [tiberius](https://github.com/prisma/tiberius) / [mongodb](https://github.com/mongodb/mongo-rust-driver) / [duckdb](https://github.com/duckdb/duckdb-rs) |
 
 ## 社区
 

@@ -128,7 +128,7 @@ SSH tunnel (key & password) · database and AI proxy settings · auto-reconnect 
 
 ### Polished UI
 
-Dark mode with native title bar sync · 9 editor themes · English, 简体中文 & Español · layout preferences · built-in auto-update
+Dark mode with native title bar sync · 9 editor themes · English, 简体中文, Español, Italiano, Português (Brasil) & 繁體中文 · layout preferences · built-in auto-update
 
 ## AI Agent Integration (MCP)
 
@@ -160,9 +160,9 @@ Download the latest release from the [Releases](https://github.com/wynn5a/dbx/re
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) >= 18
+- [Node.js](https://nodejs.org/) >= 22.13.0
 - [pnpm](https://pnpm.io/)
-- [Rust](https://www.rust-lang.org/tools/install) >= 1.77
+- [Rust](https://www.rust-lang.org/tools/install) >= 1.77.2
 
 #### System Dependencies
 
@@ -205,7 +205,7 @@ The installer will be in `src-tauri/target/release/bundle/`.
 | Frontend  | [Vue 3](https://vuejs.org/) + TypeScript                                                                                                                                                                         |
 | UI        | [shadcn-vue](https://www.shadcn-vue.com/) + Tailwind CSS                                                                                                                                                         |
 | Editor    | [CodeMirror 6](https://codemirror.net/)                                                                                                                                                                          |
-| Backend   | Rust + [sqlx](https://github.com/launchbadge/sqlx) / [tiberius](https://github.com/prisma/tiberius) / [redis-rs](https://github.com/redis-rs/redis-rs) / [mongodb](https://github.com/mongodb/mongo-rust-driver) |
+| Backend   | Rust + [tokio-postgres](https://github.com/sfackler/rust-postgres) / [rusqlite](https://github.com/rusqlite/rusqlite) / [mysql_async](https://github.com/blackbeam/mysql_async) / [redis-rs](https://github.com/redis-rs/redis-rs) / [tiberius](https://github.com/prisma/tiberius) / [mongodb](https://github.com/mongodb/mongo-rust-driver) / [duckdb](https://github.com/duckdb/duckdb-rs) |
 
 ## Community
 

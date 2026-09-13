@@ -41,14 +41,14 @@ Add to your project's `.mcp.json`:
 }
 ```
 
-Or for development (from source):
+Or for development (from source — after `pnpm install` and `pnpm build:packages` in the repo root):
 
 ```json
 {
   "mcpServers": {
     "dbx": {
-      "command": "npx",
-      "args": ["tsx", "packages/mcp-server/src/index.ts"],
+      "command": "pnpm",
+      "args": ["--filter", "@dbx-app/mcp-server", "start"],
       "cwd": "/path/to/dbx"
     }
   }

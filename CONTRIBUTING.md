@@ -16,7 +16,7 @@ Thanks for helping improve DBX. This repository contains the desktop app, Rust b
 Required tools:
 
 - Node.js `>=22.13.0`
-- pnpm `10.27.0`
+- pnpm `11.5.2`
 - Rust stable
 - Java 17, when working on JDBC plugin packaging
 
@@ -55,8 +55,8 @@ When adding or changing a database type, update `crates/dbx-core/assets/database
 
 ```bash
 cargo test -p dbx-core --test database_capabilities
-pnpm --filter @dbx-app/node-core exec tsx --test tests/driver-manifest.test.ts
-pnpm --filter @dbx-app/mcp-server exec tsx --test tests/driver-manifest.test.ts
+pnpm --filter @dbx-app/node-core exec vitest run tests/driver-manifest.test.ts
+pnpm --filter @dbx-app/mcp-server exec vitest run tests/driver-manifest.test.ts
 ```
 
 ## Pull Requests

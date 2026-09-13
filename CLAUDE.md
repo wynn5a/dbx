@@ -80,8 +80,8 @@ Per-engine modules live in `crates/dbx-core/src/db/*.rs` (`mysql.rs`, `postgres.
 
 ```bash
 cargo test -p dbx-core --test database_capabilities
-pnpm --filter @dbx-app/node-core exec tsx --test tests/driver-manifest.test.ts
-pnpm --filter @dbx-app/mcp-server exec tsx --test tests/driver-manifest.test.ts
+pnpm --filter @dbx-app/node-core exec vitest run tests/driver-manifest.test.ts
+pnpm --filter @dbx-app/mcp-server exec vitest run tests/driver-manifest.test.ts
 ```
 
 ## Frontend code organization
@@ -102,7 +102,6 @@ UI stack: shadcn-vue + reka-ui on Tailwind v4; SQL editor is CodeMirror 6; chart
 Frontend tests do **not** sit next to the code. `vitest.config.ts` includes:
 
 - `packages/app-tests/*.test.ts` — the main suite: one `<module>.test.ts` per `apps/desktop/src/lib/` module (140+ files). **New `lib/` logic gets its test here.**
-- `apps/desktop/src/**/*.spec.ts` — a small number of colocated specs (mostly `lib/__tests__/`).
 - `packages/node-core/tests/*.test.ts` and `docs/lib/*.test.ts`.
 
 Rust tests: `cargo test -p dbx-core`.

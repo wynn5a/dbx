@@ -1,4 +1,4 @@
-# DBX JDBC Plugin Prototype
+# DBX JDBC Plugin
 
 This is an optional sidecar plugin for DBX. It is not bundled with the main DBX app.
 
