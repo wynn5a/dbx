@@ -1,7 +1,5 @@
 export default {
-  app: {
-    name: "DBX",
-  },
+  app: {},
   toolbar: {
     cancelExecution: "Cancel execution",
     newConnection: "New Connection",
@@ -19,9 +17,9 @@ export default {
     themeLight: "Light",
     themeDark: "Dark",
     themeSystem: "Follow System",
-    sqlSaved: "SQL saved",
+
     sqlOpenFailed: "Failed to open file: {message}",
-    sqlSaveFailed: "Failed to save file: {message}",
+
     driverManager: "Driver Manager",
     updatableDriverCount: "Updatable driver count",
   },
@@ -42,10 +40,8 @@ export default {
     downloadFailed: "Update download failed: {error}",
     restart: "Exit & Restart",
     restartFailed: "Failed to restart app: {error}",
-    exitAndUpdate: "Exit & Update",
+
     reopenHint: "The app will relaunch to finish updating",
-    dockerUsersRun: "Docker users should run",
-    toUpdate: "to update",
   },
   sidebar: {
     connections: "CONNECTIONS",
@@ -58,7 +54,7 @@ export default {
     export: "Export Connections",
     collapse: "Collapse sidebar",
     expand: "Expand sidebar",
-    showMore: "Show {count} more...",
+
     filterByType: "Filter by type",
     searchScopeConnection: "Connection",
     searchScopeDatabase: "Database",
@@ -165,7 +161,6 @@ export default {
     postgresClientCertBrowse: "Choose client certificate",
     postgresClientKeyBrowse: "Choose client private key",
     connectionUrlOptional: "URL (optional)",
-    connectionUrlPlaceholder: "postgresql://user:pass{'@'}host:5432/db?sslmode=require",
     parseConnectionUrl: "Parse connection URL",
     parseConnectionUrlApplied: "Connection URL applied",
     parseConnectionUrlFailed: "Failed to parse connection URL: {message}",
@@ -234,7 +229,7 @@ export default {
     loadFailed: "Failed to load saved connections: {message}",
     sshTunnel: "SSH Tunnel / Proxy",
     advancedTab: "Advanced",
-    sshEnable: "Use SSH tunnel / proxy",
+
     sshHost: "SSH Host",
     sshUser: "SSH User",
     sshPassword: "SSH Password",
@@ -265,7 +260,7 @@ export default {
     idleTimeout: "Idle Timeout",
     unitSeconds: "seconds",
     proxy: "Proxy",
-    proxyEnable: "Connect database through proxy",
+
     proxyType: "Proxy Type",
     proxyHost: "Proxy Host",
     proxyUsername: "Proxy User",
@@ -282,12 +277,10 @@ export default {
     jdbcDriverBrowse: "Choose JDBC driver JAR",
     jdbcDocs: "View JDBC docs",
     jdbcPluginHint: "Install the DBX JDBC plugin first, then import the database vendor's JDBC driver JAR.",
-    dmCompatHint: "Requires DM8 ODBC driver installed on your system.",
-    dmDownload: "Download from Dameng",
+
     mongoLegacyHint:
       "MongoDB below 4.2 requires the MongoDB (Legacy) driver. If authentication fails and the user was created in admin, set Auth DB to admin.",
-    compatible: "Compatible",
-    mainstream: "Popular",
+
     color: "Color",
     colorNone: "No color",
     colorGreen: "Green",
@@ -400,7 +393,6 @@ export default {
     scrollLeft: "Scroll tabs left",
     scrollRight: "Scroll tabs right",
     openTabs: "Open tabs",
-    openDataTabs: "Open tables",
   },
   executionSummary: {
     empty: "No execution summary",
@@ -436,14 +428,13 @@ export default {
     noRows: "No data",
     noRowsDescription: "This result set has no records.",
     noSearchResults: "No matches",
-    noSearchResultsDescription: "Try a different keyword.",
     noFilteredRows: "No rows match the filter",
     noFilteredRowsDescription: "Adjust the search text or row status filter.",
     copy: "Copy",
     copyDdl: "Copy DDL",
     copyCell: "Copy Cell",
     copyRow: "Copy Row (JSON)",
-    copyColumnJson: "Copy Column (JSON)",
+
     copyRowInsert: "Copy as INSERT",
     copyRowInsertWithoutPrimaryKeys: "Copy as INSERT without Primary Keys",
     copyRowUpdate: "Copy as UPDATE",
@@ -476,9 +467,7 @@ export default {
     renderModeHint: "Switch between Canvas rendering and the DOM fallback grid.",
     filter: "Filter",
     filterBuilder: "Filters",
-    filterBuilderTitle: "Filters",
-    filterBuilderHint: "Build point-and-click conditions and combine them with the WHERE input.",
-    filterBuilderSummary: "{count} rules",
+
     filterBuilderAddRule: "Add rule",
     filterBuilderColumn: "Column",
     filterBuilderValue: "Value",
@@ -537,7 +526,7 @@ export default {
     showAllColumns: "Show all",
     viewOptions: "View options",
     hideNullColumns: "Hide NULL",
-    hideNullColumnsHint: "Toggle columns whose values are all NULL in the current result.",
+
     moreValues: "{count} more values, keep typing to narrow results",
     filterByValue: "Filter by This Value",
     filterExcludeValue: "Exclude This Value",
@@ -554,12 +543,11 @@ export default {
     clearSort: "Clear Sort",
     pasted: "Pasted!",
     search: "Search...",
-    searchOrWhere: "Search, or enter a WHERE clause...",
-    applyWhere: "Apply WHERE",
+
     filterRows: "Filter rows",
     filterAllRows: "All rows",
     filterChangedRows: "Changed",
-    page: "Page {page}",
+
     rowsPerPage: "Rows per page",
     customRowsPerPage: "Custom rows",
     applyPageSize: "Apply",
@@ -573,13 +561,13 @@ export default {
     cloneRows: "Clone {count} as New Rows",
     restoreRows: "Restore {count} Rows",
     copyRows: "Copy {count} Rows (JSON)",
-    copyColumnsJson: "Copy {count} Columns (JSON)",
+
     copyRowsInsert: "Copy {count} Rows as INSERT",
     copyRowsInsertWithoutPrimaryKeys: "Copy {count} Rows as INSERT without Primary Keys",
     copyRowsUpdate: "Copy {count} Rows as UPDATE",
     selectedRows: "{count} rows selected",
     restoreRow: "Restore Row",
-    statusClean: "Clean",
+
     statusNew: "New Items",
     statusEdited: "Updated Items",
     statusDeleted: "Deleted Items",
@@ -601,7 +589,7 @@ export default {
     columnDetailsFor: "{column} Column Details",
     columnsCount: "{count} columns",
     rowCount: "Rows",
-    rowsCount: "{count} rows",
+
     fieldIndex: "No.",
     cellValue: "Value",
     valueEditor: "Value Editor",
@@ -621,10 +609,10 @@ export default {
     nullValue: "NULL",
     noComment: "No comment",
     formattedJson: "Formatted JSON",
-    formattedValue: "Formatted Value",
+
     detailSearchPlaceholder: "Search field or value…",
     detailSearchNoMatch: "No matches",
-    rawValue: "Raw Value",
+
     largeValuePreviewHint: "Previewing first {count} characters. Copy still uses the full value.",
     copyValue: "Copy Value",
     downloadBinaryValue: "Download Value",
@@ -676,30 +664,11 @@ export default {
     transactionSaveHint: "Commit {count} pending change(s) in a transaction.",
     nonTransactionalSaveHint:
       "Save {count} pending change(s) one by one. If one fails, earlier successful changes will not be rolled back.",
-    keylessEditWarning: "No primary key",
-    keylessEditWarningHint:
-      "This table has no primary key. Updates and deletes use all original row values in the WHERE clause; exact duplicate rows may be affected together.",
+
     queryEditReady: "Editable",
     queryEditReadyHint:
       "This single-table result comes from “{table}”. You can edit, delete, or add rows, then use the pending-changes action to save.",
-    queryEditReadOnly: "Read-only result",
-    queryEditUnsupported: {
-      "not-select": "Only SELECT query results can be edited directly.",
-      cte: "Queries with WITH/CTE are not editable yet. Use a simple single-table SELECT.",
-      "set-operation": "UNION, INTERSECT, or EXCEPT results cannot be mapped safely back to source rows.",
-      aggregation: "DISTINCT, GROUP BY, HAVING, and aggregate results cannot be edited directly.",
-      "external-source":
-        "External files and table-function results cannot be written back directly. Import them into a database table before editing.",
-      "complex-source": "JOINs, multiple tables, and subqueries cannot be mapped safely to one source row.",
-      "computed-columns":
-        "Computed expressions or function results cannot be written back. Select raw column names instead.",
-      "no-table": "No editable source table was detected.",
-      "no-primary-key": "The target table has no primary key, so rows cannot be updated or deleted safely.",
-      "primary-key-not-returned":
-        "The result is missing the raw primary key column. Include it by its original column name.",
-      "aliased-columns": "Result columns use aliases or expressions. Select editable columns by their original names.",
-      "metadata-unavailable": "DBX could not load table metadata, so result editing is disabled.",
-    },
+
     sortUnsupported: "This SQL does not support full-result sorting. Try again with a single SELECT query.",
     truncatedHint: "Results truncated to {count} rows. Use the footer pagination or adjust rows per page.",
   },
@@ -717,7 +686,7 @@ export default {
     close: "Close",
     tooltip: "Export Progress",
     popoverTitle: "Exports",
-    noTasks: "No exports",
+
     clearFinished: "Clear finished",
     showMore: "Show {count} more",
     showLess: "Show less",
@@ -732,10 +701,9 @@ export default {
     quickConnections: "Quick Start",
     quickConnectionsHint: "Click a connection to open a query tab.",
     shortcuts: "Shortcuts",
-    shortcutsHint: "Start the next action from here.",
+
     tip: "You can also expand connections on the left and right-click databases or tables for more actions.",
-    tipSidebar: "Click a table on the left to view data",
-    tipExecute: "to execute query",
+
     fileOpened: "Opened {name}",
     mcpTitle: "AI Agent Integration",
     mcpDescription:
@@ -773,9 +741,9 @@ export default {
     title: "Explain Plan",
     tree: "Tree",
     summary: "Summary",
-    running: "Reading explain plan...",
+
     empty: "No explain plan",
-    nodeCount: "{count} nodes",
+
     node: "Node",
     relation: "Table",
     index: "Index",
@@ -898,7 +866,7 @@ export default {
   },
   ai: {
     placeholder: "Describe your query in natural language...",
-    settings: "AI Settings",
+
     noConfig: "AI is not configured. Please set up your AI provider in Settings > AI.",
     provider: "Provider",
     model: "Model",
@@ -911,18 +879,13 @@ export default {
     modelListUnsupported: "This provider does not support fetching a model list.",
     modelListEndpointRequired: "Enter an endpoint before loading models.",
     modelListApiKeyRequired: "Enter an API key before loading models.",
-    run: "Run",
-    readingSchema: "Reading schema",
-    noConnection: "No connection is available for this tab",
-    noSql: "No SQL to process",
-    sqlPreview: "SQL Preview",
+
     copySql: "Copy SQL",
     copyCode: "Copy Code",
     executeSql: "Execute SQL",
-    copyAll: "Copy All",
+
     copied: "Copied",
-    replace: "Replace Editor",
-    append: "Append to Editor",
+
     apply: "Apply to Editor",
     clear: "Clear Chat",
     welcome: "Tell me what you'd like to query, and I'll write the SQL",
@@ -948,19 +911,8 @@ export default {
       agent: "Auto-run safe queries when possible",
     },
     fixWithAi: "Fix with AI",
-    truncated: "Context truncated",
-    contextSummary: "{database} · {tables} tables",
-    autoSqlBlocked: "The AI-generated SQL looked too risky to auto-execute. Review it manually before running.",
-    agentSteps: {
-      generated: "SQL generated",
-      noSql: "No SQL found",
-      safe: "Safety passed",
-      needsConfirm: "Needs confirmation",
-      blocked: "Blocked",
-      autoExecute: "Ready to run",
-      notRequested: "Run not requested",
-      skipped: "Not run",
-    },
+
+    agentSteps: {},
     toolConfirm: {
       title: "Run this statement?",
       run: "Run",
@@ -979,22 +931,8 @@ export default {
         empty_sql: "Empty SQL",
       },
     },
-    agentOutcome: {
-      executed: "Executed",
-      failed: "Execution failed",
-      retrying: "Fixing ({attempt}/{max})",
-      exhausted: "Couldn't auto-fix",
-    },
-    agentStepTitles: {
-      riskCheck: "Risk check: {action} · {category} · {environment} · {reasons}",
-      blocked: "Execution was blocked by the risk policy. Review the SQL manually.",
-      requiresConfirmation: "This SQL requires confirmation before execution.",
-      askMode: "Ask mode does not auto-run SQL.",
-      unsupportedAction: "The current AI action does not auto-run SQL.",
-      noSql: "The response did not include an executable SQL code block.",
-      notRequested: "The user did not ask to run the SQL.",
-      skipped: "This step was not run.",
-    },
+    agentOutcome: {},
+    agentStepTitles: {},
     proxy: "Proxy",
     proxyEnable: "Send AI requests through proxy",
     proxyDescription: "Route assistant traffic through a local or corporate proxy.",
@@ -1004,8 +942,7 @@ export default {
     enableThinkingDescription: "Enable extended reasoning for models that support it.",
     proxyUrl: "Proxy URL",
     enableThinking: "Thinking",
-    enableThinkingOn: "Enabled",
-    enableThinkingOff: "Disabled",
+
     enableThinkingHint:
       "This option only takes effect on /chat/completions APIs and supported models. When disabled, it can significantly reduce token usage, but the quality of generated results may decrease slightly.",
     actions: {
@@ -1047,7 +984,7 @@ export default {
     refreshChildren: "Refresh",
     pin: "Pin",
     unpin: "Unpin",
-    refreshTab: "Refresh Data",
+
     renameTab: "Rename Tab",
     compactTabTitle: "Shorten Tab Titles",
     closeTab: "Close Tab",
@@ -1059,8 +996,7 @@ export default {
     setDefaultDatabase: "Set as Default Database",
     clearDefaultDatabase: "Clear Default Database",
     exportDatabase: "Export Database",
-    exportDatabaseSuccess: "Exported {count} tables, up to {limit} rows each",
-    exportDatabaseFailed: "Failed to export database: {message}",
+
     importData: "Import Data",
     exportData: "Export Data",
     exportStructure: "Export Structure",
@@ -1213,7 +1149,6 @@ export default {
     sequences: "Sequences",
     packages: "Packages",
     partitions: "Partitions",
-    objectBrowser: "Browse in Object Browser ({count})",
   },
   userAdmin: {
     title: "Users & Privileges",
@@ -1227,7 +1162,7 @@ export default {
     loadingUsers: "Loading users...",
     loadingGrants: "Loading grants...",
     emptyUsers: "No users found, or the current account cannot read the user list.",
-    pluginUnknown: "Authentication plugin unknown",
+
     grants: "Grants",
     noGrants: "No grants found",
     privilegeEditor: "Privilege Editor",
@@ -1287,7 +1222,7 @@ export default {
     cancelEdit: "Cancel",
     sourceSaved: "Source saved",
     sourceSaveFailed: "Failed to save source: {message}",
-    schemaColumn: "Schema",
+
     comment: "Comment",
     loadingSchemas: "Loading schemas...",
     schema: "Schema",
@@ -1303,15 +1238,13 @@ export default {
     batchDropSuccess: "Dropped {count} tables",
   },
   structureEditor: {
-    title: "Edit Table Structure",
     createTitle: "Create Table",
     editTabTitle: "Edit: {tableName}",
     tableName: "Table Name",
     refresh: "Refresh Structure",
     density: "Density",
     densityCompact: "Compact",
-    densityStandard: "Standard",
-    densityComfortable: "Comfortable",
+
     densityCozy: "Cozy",
     densityComfy: "Comfy",
     newTable: "New table",
@@ -1322,7 +1255,7 @@ export default {
     indexes: "Indexes",
     foreignKeys: "Foreign Keys",
     triggers: "Triggers",
-    ddl: "DDL",
+
     addColumn: "Add Column",
     addIndex: "Add Index",
     columnName: "Column",
@@ -1366,7 +1299,7 @@ export default {
     autoIncrement: "Auto Increment",
     onUpdateCurrentTimestamp: "Auto Update Time",
     identity: "Identity",
-    identityGeneration: "Generation",
+
     identitySeed: "Seed",
     identityIncrement: "Increment",
   },
@@ -1444,10 +1377,8 @@ export default {
     entries: "{count} entries",
     noExpiry: "no expiry",
     columnType: "Type",
-    columnKey: "Key",
     columnValue: "Value",
     columnSize: "Size",
-    columnTTL: "TTL",
     binaryStringReadonlyHint:
       "Binary string values are shown as escaped text in read-only mode; editing raw bytes is not supported.",
     selectedKeys: "Selected keys",
@@ -1462,12 +1393,8 @@ export default {
     commandLine: "Command line",
     selectKeyForDetail: "Select a key to view details",
     commandWelcome: "Welcome to the Redis command console",
-    commandPlaceholder: "Redis command, e.g. GET user:1",
-    commandPrefix: "CMD",
-    commandHint: "Enter a Redis command, e.g. SMEMBERS feature:flags",
     executeCommand: "Execute command",
     commandEmpty: "Enter a Redis command",
-    commandEmptyResult: "Run a Redis command to see the result",
     commandBlocked: "This Redis command is blocked for safety",
     createKey: "Create key",
     createKeyName: "Key",
@@ -1508,18 +1435,16 @@ export default {
     addField: "Add Field",
     deleteField: "Delete Field",
     field: "Field",
-    value: "Value",
+
     fieldPlaceholder: "Field name",
     emptyCollection: "Empty collection",
     selectDocument: "Select a document",
     readonlyId: "_id is read-only",
-    invalidJsonValue: "This cell is not a valid JSON value",
+
     duplicateField: "Duplicate field name: {field}",
     edit: "Edit",
     documentView: "Document View",
     tableView: "Table View",
-    filterPlaceholder: "Filter...",
-    sortPlaceholder: "Sort...",
   },
   history: {
     title: "History",
@@ -1621,20 +1546,16 @@ export default {
     batchSize: "Batch size",
     start: "Start Transfer",
     cancel: "Cancel",
-    progress: "Transferring...",
-    transferring: "Transferring {table}...",
+
     completed: "Transfer completed",
     completedWithErrors: "Completed with {count} failed table | Completed with {count} failed tables",
     failed: "Transfer failed",
     cancelled: "Transfer cancelled",
-    rowsTransferred: "{count} rows transferred",
-    tableProgress: "{current} / {total} tables",
-    noSqlConnections: "No SQL connections available",
-    selectTables: "Select tables to transfer",
+
     searchTables: "Search tables...",
     noTables: "No tables",
     selectSourceFirst: "Select source connection and database first",
-    tableError: "Table {table} failed: {error}",
+
     overallProgress: "Overall progress",
     dataTransfer: "Data Transfer",
   },
@@ -1742,12 +1663,11 @@ export default {
     previewLimitOption: "Preview {count}",
     compare: "Compare Data",
     summary: "Added {added}, removed {removed}, modified {modified}",
-    batchSummary:
-      "Compared {tables} tables: {different} different, {same} identical, {failed} failed; added {added}, removed {removed}, modified {modified}",
+
     comparingTable: "Comparing {current}/{total}: {table}",
     keyColumnsInline: "Key columns: {columns}",
     selectedInline: "Selected {selected}/{total}",
-    selectedSummary: "Selected: added {added}, removed {removed}, modified {modified}",
+
     selectAllKind: "Select all {kind}",
     clearKind: "Clear {kind}",
     clearSelection: "Clear all selections",
@@ -1906,14 +1826,14 @@ export default {
     snippetsBodyPlaceholder: "SELECT *\nFROM {table}\nLIMIT 100;",
     snippetsBodyHint:
       "Wrap a word in braces to make it a placeholder, e.g. {table}. When the snippet is inserted, the cursor selects the first placeholder.",
-    snippetsRestoreDefaults: "Restore Defaults",
+
     snippetsAddTitle: "Add Snippet",
     snippetsEditTitle: "Edit Snippet",
     snippetsDeleteTitle: "Delete Snippet",
     snippetsSearchPlaceholder: "Search snippets...",
     snippetsCount: "{count} total",
     snippetsNoResults: "No snippets found",
-    syncWebDavTitle: "WebDAV Sync",
+
     syncWebDavDescription: "Upload or restore a DBX snapshot from a WebDAV-compatible storage service.",
     syncEndpoint: "WebDAV URL",
     syncUsername: "Username",
@@ -1959,8 +1879,7 @@ export default {
     wordWrap: "Word wrap",
     wordWrapDescription: "Wrap long SQL lines within the editor width instead of scrolling horizontally.",
     confirmDangerousSqlExecution: "Confirm before dangerous SQL",
-    confirmDangerousSqlExecutionDescription:
-      "When disabled, ALTER, DROP, DELETE, TRUNCATE, and other dangerous SQL run without the warning dialog.",
+
     confirmDangerousSqlLead: "When disabled,",
     confirmDangerousSqlTrail: "and other destructive statements run without a confirmation dialog.",
     redisScanPageSize: "Redis scan count",
@@ -2155,7 +2074,7 @@ export default {
     localInstall: "Local install",
     runtimeDrivers: "Runtime",
     runtimeTitle: "Driver runtime",
-    runtimeHint: "Runtime metrics are collected only while this panel is open.",
+
     runtimeRunning: "Running",
     runtimeMemory: "Memory",
     runtimeHealth: "Health",
@@ -2198,7 +2117,7 @@ export default {
     tableLoadError: "Failed to load tables: {error}",
     noTables: "No tables found",
     export: "Export",
-    exporting: "Exporting...",
+
     currentTable: "Current: {table} ({current}/{total})",
     rowsExported: "{count} rows exported",
     exportSuccess: "Database exported successfully",

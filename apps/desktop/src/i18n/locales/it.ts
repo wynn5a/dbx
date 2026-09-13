@@ -1,7 +1,5 @@
 export default {
-  app: {
-    name: "DBX",
-  },
+  app: {},
   toolbar: {
     cancelExecution: "Annulla esecuzione",
     newConnection: "Nuova Connessione",
@@ -19,9 +17,9 @@ export default {
     themeLight: "Chiaro",
     themeDark: "Scuro",
     themeSystem: "Segui Sistema",
-    sqlSaved: "SQL salvato",
+
     sqlOpenFailed: "Impossibile aprire il file: {message}",
-    sqlSaveFailed: "Impossibile salvare il file: {message}",
+
     driverManager: "Gestione Driver",
     updatableDriverCount: "Driver aggiornabili",
   },
@@ -42,12 +40,11 @@ export default {
     downloadFailed: "Download dell'aggiornamento non riuscito: {error}",
     restart: "Esci e Riavvia",
     restartFailed: "Impossibile riavviare l'app: {error}",
-    exitAndUpdate: "Esci e Aggiorna",
+
     reopenHint: "L'applicazione si riavvierà per completare l'aggiornamento",
-    dockerUsersRun: "Gli utenti Docker dovrebbero eseguire",
-    toUpdate: "per aggiornare",
   },
   sidebar: {
+    sqlLibrary: "LIBRERIA SQL",
     connections: "CONNESSIONI",
     noConnections: "Nessuna connessione",
     import: "Importa Connessioni",
@@ -57,7 +54,7 @@ export default {
     export: "Esporta Connessioni",
     collapse: "Riduci barra laterale",
     expand: "Espandi barra laterale",
-    showMore: "Mostra altri {count}...",
+
     filterByType: "Filtra per tipo",
     searchScopeConnection: "Connessione",
     searchScopeDatabase: "Database",
@@ -68,6 +65,12 @@ export default {
     locateActiveTab: "Trova nella barra laterale",
   },
   savedSql: {
+    add: "Aggiungi alla Libreria SQL",
+    connection: "Connessione",
+    newFile: "Nuovo file SQL",
+    newFileDefault: "Nuova Query",
+    empty: "Nessun SQL salvato",
+    selectConnectionFirst: "Seleziona prima una connessione",
     saveToLibrary: "Salva nella Libreria SQL",
     save: "Salva",
     saved: "SQL salvato",
@@ -86,6 +89,18 @@ export default {
     deleteFileConfirm: "Eliminare “{name}”?",
   },
   connection: {
+    etcdEndpoints: "Endpoints",
+    etcdEndpointsHint: "Un endpoint per riga. Lascia vuoto per usare host e porta qui sopra.",
+    etcdCaCertPlaceholder: "/path/to/ca.crt",
+    etcdCaCertBrowse: "Scegli certificato CA",
+    etcdClientAuth: "Autenticazione Client",
+    etcdClientCertPlaceholder: "/path/to/client.crt",
+    etcdClientKeyPlaceholder: "/path/to/client.key",
+    etcdClientCertHint:
+      "Il certificato client e la chiave privata devono essere forniti insieme quando etcd richiede mTLS.",
+    etcdClientCertBrowse: "Scegli certificato client",
+    etcdClientKeyBrowse: "Scegli chiave privata client",
+    etcdClientCertPairRequired: "Il certificato client e la chiave privata devono essere forniti insieme.",
     title: "Nuova Connessione",
     name: "Nome",
     namePlaceholder: "Nome connessione, generato automaticamente se vuoto",
@@ -160,7 +175,6 @@ export default {
     postgresClientCertBrowse: "Scegli certificato client",
     postgresClientKeyBrowse: "Scegli chiave privata client",
     connectionUrlOptional: "URL (opzionale)",
-    connectionUrlPlaceholder: "postgresql://utente:password{'@'}host:5432/db?sslmode=require",
     parseConnectionUrl: "Analizza URL di connessione",
     parseConnectionUrlApplied: "URL di connessione applicato",
     parseConnectionUrlFailed: "Impossibile analizzare l'URL di connessione: {message}",
@@ -219,7 +233,7 @@ export default {
     loadFailed: "Impossibile caricare le connessioni salvate: {message}",
     sshTunnel: "Tunnel SSH / Proxy",
     advancedTab: "Avanzate",
-    sshEnable: "Usa tunnel SSH / proxy",
+
     sshHost: "Host SSH",
     sshUser: "Utente SSH",
     sshPassword: "Password SSH",
@@ -250,7 +264,7 @@ export default {
     idleTimeout: "Timeout Inattività",
     unitSeconds: "secondi",
     proxy: "Proxy",
-    proxyEnable: "Connetti database tramite proxy",
+
     proxyType: "Tipo Proxy",
     proxyHost: "Host Proxy",
     proxyUsername: "Utente Proxy",
@@ -269,12 +283,10 @@ export default {
     jdbcDocs: "Visualizza documentazione JDBC",
     jdbcPluginHint:
       "Installa prima il plugin DBX JDBC, quindi importa il file JAR del driver JDBC del fornitore del database.",
-    dmCompatHint: "Richiede il driver ODBC DM8 installato sul sistema.",
-    dmDownload: "Scarica da Dameng",
+
     mongoLegacyHint:
       "MongoDB precedente a 4.2 richiede il driver MongoDB (Legacy). Se l'autenticazione fallisce e l'utente è stato creato in admin, imposta DB di Autenticazione su admin.",
-    compatible: "Compatibile",
-    mainstream: "Popolare",
+
     color: "Colore",
     colorNone: "Nessun colore",
     colorGreen: "Verde",
@@ -368,6 +380,9 @@ export default {
     },
   },
   tabs: {
+    etcd: "etcd",
+    users: "Utenti e Privilegi",
+    executionSummary: "Riepilogo Esecuzione",
     sql: "SQL",
     table: "Tabella",
     tableData: "Dati Tabella",
@@ -384,7 +399,6 @@ export default {
     scrollLeft: "Scorri schede a sinistra",
     scrollRight: "Scorri schede a destra",
     openTabs: "Schede aperte",
-    openDataTabs: "Tabelle aperte",
   },
   chart: {
     title: "Grafico",
@@ -395,6 +409,8 @@ export default {
     noNumericData: "Nessun dato numerico disponibile per il grafico",
   },
   grid: {
+    dataUnavailableHintPrefix: "Premi ",
+    dataUnavailableHintSuffix: " oppure clicca su Aggiorna qui sotto per ricaricare.",
     rows: "{count} righe",
     totalRows: "Totale {count} righe",
     totalRowCount: "({count} in totale)",
@@ -407,14 +423,13 @@ export default {
     noRows: "Nessun dato",
     noRowsDescription: "Questo set di risultati non contiene record.",
     noSearchResults: "Nessuna corrispondenza",
-    noSearchResultsDescription: "Prova con un'altra parola chiave.",
     noFilteredRows: "Nessuna riga corrisponde al filtro",
     noFilteredRowsDescription: "Regola il testo di ricerca o il filtro dello stato della riga.",
     copy: "Copia",
     copyDdl: "Copia DDL",
     copyCell: "Copia Cella",
     copyRow: "Copia Riga (JSON)",
-    copyColumnJson: "Copia Colonna (JSON)",
+
     copyRowInsert: "Copia come INSERT",
     copyRowInsertWithoutPrimaryKeys: "Copia come INSERT senza Chiavi Primarie",
     copyRowUpdate: "Copia come UPDATE",
@@ -447,9 +462,7 @@ export default {
     renderModeHint: "Passa dal rendering Canvas al grid di fallback DOM.",
     filter: "Filtra",
     filterBuilder: "Filtri",
-    filterBuilderTitle: "Filtri",
-    filterBuilderHint: "Crea condizioni visive e combinale con l'input WHERE.",
-    filterBuilderSummary: "{count} regole",
+
     filterBuilderAddRule: "Aggiungi regola",
     filterBuilderColumn: "Colonna",
     filterBuilderValue: "Valore",
@@ -508,7 +521,7 @@ export default {
     showAllColumns: "Mostra tutte",
     viewOptions: "Opzioni visualizzazione",
     hideNullColumns: "Nascondi NULL",
-    hideNullColumnsHint: "Nascondi le colonne i cui valori sono tutti NULL nel risultato corrente.",
+
     moreValues: "altri {count} valori, continua a digitare per restringere i risultati",
     filterByValue: "Filtra per Questo Valore",
     filterExcludeValue: "Escludi Questo Valore",
@@ -525,12 +538,11 @@ export default {
     clearSort: "Rimuovi Ordinamento",
     pasted: "Incollato!",
     search: "Cerca...",
-    searchOrWhere: "Cerca o inserisci una clausola WHERE...",
-    applyWhere: "Applica WHERE",
+
     filterRows: "Filtra righe",
     filterAllRows: "Tutte le righe",
     filterChangedRows: "Modificate",
-    page: "Pagina {page}",
+
     rowsPerPage: "Righe per pagina",
     customRowsPerPage: "Righe personalizzate",
     applyPageSize: "Applica",
@@ -544,13 +556,13 @@ export default {
     cloneRows: "Clona {count} come Nuove Righe",
     restoreRows: "Ripristina {count} Righe",
     copyRows: "Copia {count} Righe (JSON)",
-    copyColumnsJson: "Copia {count} Colonne (JSON)",
+
     copyRowsInsert: "Copia {count} Righe come INSERT",
     copyRowsInsertWithoutPrimaryKeys: "Copia {count} Righe come INSERT senza Chiavi Primarie",
     copyRowsUpdate: "Copia {count} Righe come UPDATE",
     selectedRows: "{count} righe selezionate",
     restoreRow: "Ripristina Riga",
-    statusClean: "Pulito",
+
     statusNew: "Nuovi Elementi",
     statusEdited: "Elementi Aggiornati",
     statusDeleted: "Elementi Eliminati",
@@ -572,7 +584,7 @@ export default {
     columnDetailsFor: "Dettagli Colonna {column}",
     columnsCount: "{count} colonne",
     rowCount: "Righe",
-    rowsCount: "{count} righe",
+
     fieldIndex: "N.",
     cellValue: "Valore",
     valueEditor: "Editor dei Valori",
@@ -592,10 +604,10 @@ export default {
     nullValue: "NULL",
     noComment: "Nessun commento",
     formattedJson: "JSON Formattato",
-    formattedValue: "Valore Formattato",
+
     detailSearchPlaceholder: "Cerca campo o valore…",
     detailSearchNoMatch: "Nessun risultato",
-    rawValue: "Valore Grezzo",
+
     largeValuePreviewHint: "Anteprima dei primi {count} caratteri. La copia utilizzerà comunque il valore completo.",
     copyValue: "Copia Valore",
     downloadBinaryValue: "Scarica Valore",
@@ -645,36 +657,11 @@ export default {
     transactionSaveHint: "Applica {count} modifica/he in sospeso in una transazione.",
     nonTransactionalSaveHint:
       "Salva {count} modifica/he in sospeso una ad una. In caso di errore, le modifiche salvate in precedenza non saranno annullate.",
-    keylessEditWarning: "Nessuna chiave primaria",
-    keylessEditWarningHint:
-      "Questa tabella non ha chiavi primarie. Gli aggiornamenti e le eliminazioni utilizzano tutti i valori originali delle righe nella clausola WHERE; le righe duplicate esatte potrebbero essere influenzate contemporaneamente.",
+
     queryEditReady: "Modificabile",
     queryEditReadyHint:
       "Questo risultato a tabella singola proviene da “{table}”. Puoi modificare, eliminare o aggiungere righe, quindi utilizzare l'azione delle modifiche in sospeso per salvare.",
-    queryEditReadOnly: "Risultato in sola lettura",
-    queryEditUnsupported: {
-      "not-select": "Solo i risultati di query SELECT possono essere modificati direttamente.",
-      cte: "Le query con WITH/CTE non sono ancora modificabili. Usa una semplice SELECT a tabella singola.",
-      "set-operation":
-        "I risultati di UNION, INTERSECT o EXCEPT non possono essere mappati in sicurezza alle righe di origine.",
-      aggregation:
-        "I risultati di DISTINCT, GROUP BY, HAVING e aggregazioni non possono essere modificati direttamente.",
-      "external-source":
-        "I file esterni e i risultati di funzioni tabella non possono essere riscritti direttamente. Importali in una tabella di database prima di modificarli.",
-      "complex-source":
-        "JOIN, tabelle multiple e sottoquery non possono essere mappati in sicurezza ad una singola riga di origine.",
-      "computed-columns":
-        "Le espressioni calcolate o i risultati di funzioni non possono essere riscritti. Seleziona invece nomi di colonna grezzi.",
-      "no-table": "Nessuna tabella di origine modificabile rilevata.",
-      "no-primary-key":
-        "La tabella di destinazione non ha chiavi primarie, quindi le righe non possono essere aggiornate o eliminate in sicurezza.",
-      "primary-key-not-returned":
-        "Nel risultato manca la colonna della chiave primaria. Includila con il suo nome di colonna originale.",
-      "aliased-columns":
-        "Le colonne del risultato utilizzano alias o espressioni. Seleziona le colonne modificabili con i loro nomi originali.",
-      "metadata-unavailable":
-        "DBX non è riuscito a caricare i metadati della tabella, quindi la modifica del risultato è disabilitata.",
-    },
+
     sortUnsupported:
       "Questo SQL non supporta l'ordinamento sull'intero risultato. Riprova con una query SELECT semplice.",
     truncatedHint:
@@ -694,7 +681,7 @@ export default {
     close: "Chiudi",
     tooltip: "Stato Esportazione",
     popoverTitle: "Esportazioni",
-    noTasks: "Nessuna esportazione",
+
     clearFinished: "Cancella completate",
     showMore: "Mostra altri {count}",
     showLess: "Mostra meno",
@@ -709,10 +696,9 @@ export default {
     quickConnections: "Avvio Rapido",
     quickConnectionsHint: "Fai clic su una connessione per aprire una scheda query.",
     shortcuts: "Scorciatoie",
-    shortcutsHint: "Avvia la prossima azione da qui.",
+
     tip: "Puoi anche espandere le connessioni a sinistra e fare clic con il tasto destro su database o tabelle per altre azioni.",
-    tipSidebar: "Fai clic su una tabella a sinistra per visualizzarne i dati",
-    tipExecute: "per eseguire la query",
+
     fileOpened: "Aperto {name}",
     mcpTitle: "Integrazione Agente AI",
     mcpDescription:
@@ -751,9 +737,9 @@ export default {
     title: "Piano di Spiegazione",
     tree: "Albero",
     summary: "Riepilogo",
-    running: "Lettura del piano di spiegazione...",
+
     empty: "Nessun piano di spiegazione",
-    nodeCount: "{count} nodi",
+
     node: "Nodo",
     relation: "Tabella",
     index: "Indice",
@@ -881,7 +867,7 @@ export default {
   },
   ai: {
     placeholder: "Descrivi la tua query in linguaggio naturale...",
-    settings: "Impostazioni AI",
+
     noConfig: "L'AI non è configurata. Configura il tuo provider AI in Impostazioni > AI.",
     provider: "Provider",
     model: "Modello",
@@ -894,18 +880,13 @@ export default {
     modelListUnsupported: "Questo provider non supporta il recupero di un elenco di modelli.",
     modelListEndpointRequired: "Inserisci un endpoint prima di caricare i modelli.",
     modelListApiKeyRequired: "Inserisci una chiave API prima di caricare i modelli.",
-    run: "Esegui",
-    readingSchema: "Lettura schema",
-    noConnection: "Nessuna connessione disponibile per questa scheda",
-    noSql: "Nessun SQL da elaborare",
-    sqlPreview: "Anteprima SQL",
+
     copySql: "Copia SQL",
     copyCode: "Copia Codice",
     executeSql: "Esegui SQL",
-    copyAll: "Copia Tutto",
+
     copied: "Copiato",
-    replace: "Sostituisci Editor",
-    append: "Accoda all'Editor",
+
     apply: "Applica all'Editor",
     clear: "Cancella Chat",
     welcome: "Dimmi cosa vorresti interrogare e io scriverò il codice SQL",
@@ -931,20 +912,8 @@ export default {
       agent: "Esegui automaticamente le query sicure quando possibile",
     },
     fixWithAi: "Correggi con AI",
-    truncated: "Contesto troncato",
-    contextSummary: "{database} · {tables} tabelle",
-    autoSqlBlocked:
-      "L'SQL generato dall'AI è sembrato troppo rischioso per l'esecuzione automatica. Rivedilo manualmente prima di eseguirlo.",
-    agentSteps: {
-      generated: "SQL generato",
-      noSql: "Nessun SQL trovato",
-      safe: "Sicurezza superata",
-      needsConfirm: "Richiede conferma",
-      blocked: "Bloccato",
-      autoExecute: "Pronto per l'esecuzione",
-      notRequested: "Esecuzione non richiesta",
-      skipped: "Non eseguito",
-    },
+
+    agentSteps: {},
     toolConfirm: {
       title: "Eseguire questa istruzione?",
       run: "Esegui",
@@ -963,22 +932,8 @@ export default {
         empty_sql: "Istruzione vuota",
       },
     },
-    agentOutcome: {
-      executed: "Eseguito",
-      failed: "Esecuzione non riuscita",
-      retrying: "Correzione ({attempt}/{max})",
-      exhausted: "Correzione automatica non riuscita",
-    },
-    agentStepTitles: {
-      riskCheck: "Controllo rischi: {action} · {category} · {environment} · {reasons}",
-      blocked: "L'esecuzione è stata bloccata dalla politica dei rischi. Rivedi l'SQL manualmente.",
-      requiresConfirmation: "Questo SQL richiede una conferma prima dell'esecuzione.",
-      askMode: "La modalità Chiedi non esegue automaticamente l'SQL.",
-      unsupportedAction: "L'azione AI corrente non esegue automaticamente l'SQL.",
-      noSql: "La risposta non includeva un blocco di codice SQL eseguibile.",
-      notRequested: "L'utente non ha richiesto l'esecuzione dell'SQL.",
-      skipped: "Questo passaggio non è stato eseguito.",
-    },
+    agentOutcome: {},
+    agentStepTitles: {},
     proxy: "Proxy",
     proxyEnable: "Invia richieste AI tramite proxy",
     proxyDescription: "Instrada il traffico dell'assistente attraverso un proxy locale o aziendale.",
@@ -988,8 +943,7 @@ export default {
     enableThinkingDescription: "Abilita il ragionamento esteso per i modelli che lo supportano.",
     proxyUrl: "URL Proxy",
     enableThinking: "Pensiero (Thinking)",
-    enableThinkingOn: "Abilitato",
-    enableThinkingOff: "Disabilitato",
+
     enableThinkingHint:
       "Questa opzione ha effetto solo sulle API /chat/completions e sui modelli supportati. Quando è disabilitata, può ridurre notevolmente l'uso dei token, ma la qualità dei risultati generati potrebbe diminuire leggermente.",
     actions: {
@@ -1010,6 +964,8 @@ export default {
     },
   },
   contextMenu: {
+    userAdmin: "Utenti e Privilegi",
+    openUserAdmin: "Apri Utenti e Privilegi",
     openConnection: "Apri Connessione",
     closeConnection: "Chiudi Connessione",
     closeDatabaseConnection: "Chiudi Connessione Database",
@@ -1029,7 +985,7 @@ export default {
     refreshChildren: "Aggiorna",
     pin: "Fissa",
     unpin: "Sblocca",
-    refreshTab: "Aggiorna Dati",
+
     renameTab: "Rinomina Scheda",
     compactTabTitle: "Accorcia Titoli Schede",
     closeTab: "Chiudi Scheda",
@@ -1041,8 +997,7 @@ export default {
     setDefaultDatabase: "Imposta come Database Predefinito",
     clearDefaultDatabase: "Cancella Database Predefinito",
     exportDatabase: "Esporta Database",
-    exportDatabaseSuccess: "Esportate {count} tabelle, fino a {limit} righe ciascuna",
-    exportDatabaseFailed: "Impossibile esportare il database: {message}",
+
     importData: "Importa Dati",
     exportData: "Esporta Dati",
     exportStructure: "Esporta Struttura",
@@ -1185,6 +1140,7 @@ export default {
     loadFailed: "Impossibile caricare i database: {message}",
   },
   tree: {
+    userAdmin: "Utenti e Privilegi",
     savedSql: "Libreria SQL",
     defaultDatabase: "DB Predefinito",
     columns: "Colonne",
@@ -1198,7 +1154,6 @@ export default {
     sequences: "Sequenze",
     packages: "Pacchetti",
     partitions: "Partizioni",
-    objectBrowser: "Sfoglia in Esplora Oggetti ({count})",
   },
   objects: {
     all: "Tutti",
@@ -1225,7 +1180,7 @@ export default {
     cancelEdit: "Annulla",
     sourceSaved: "Sorgente salvato",
     sourceSaveFailed: "Impossibile salvare il sorgente: {message}",
-    schemaColumn: "Schema",
+
     comment: "Commento",
     loadingSchemas: "Caricamento schemi...",
     schema: "Schema",
@@ -1242,15 +1197,13 @@ export default {
     batchDropSuccess: "Eliminate {count} tabelle",
   },
   structureEditor: {
-    title: "Modifica Struttura Tabella",
     createTitle: "Crea Tabella",
     editTabTitle: "Modifica: {tableName}",
     tableName: "Nome Tabella",
     refresh: "Aggiorna Struttura",
     density: "Densità",
     densityCompact: "Compatta",
-    densityStandard: "Standard",
-    densityComfortable: "Comoda",
+
     densityCozy: "Media",
     densityComfy: "Ampia",
     newTable: "Nuova tabella",
@@ -1261,7 +1214,7 @@ export default {
     indexes: "Indici",
     foreignKeys: "Chiavi Esterne",
     triggers: "Trigger",
-    ddl: "DDL",
+
     addColumn: "Aggiungi Colonna",
     addIndex: "Aggiungi Indice",
     columnName: "Colonna",
@@ -1305,7 +1258,7 @@ export default {
     autoIncrement: "Auto Incremento",
     onUpdateCurrentTimestamp: "Aggiorna Ora Automaticamente",
     identity: "Identità",
-    identityGeneration: "Generazione",
+
     identitySeed: "Seed",
     identityIncrement: "Incremento",
   },
@@ -1364,10 +1317,8 @@ export default {
     entries: "{count} voci",
     noExpiry: "nessuna scadenza",
     columnType: "Tipo",
-    columnKey: "Chiave",
     columnValue: "Valore",
     columnSize: "Dimensione",
-    columnTTL: "TTL",
     binaryStringReadonlyHint:
       "I valori delle stringhe binarie sono mostrati come testo con escape in modalità sola lettura; la modifica dei byte grezzi non è supportata.",
     selectedKeys: "Chiavi selezionate",
@@ -1382,12 +1333,8 @@ export default {
     commandLine: "Console dei comandi",
     selectKeyForDetail: "Seleziona una chiave per visualizzare i dettagli",
     commandWelcome: "Benvenuto nella console comandi di Redis",
-    commandPlaceholder: "Comando Redis, es. GET user:1",
-    commandPrefix: "CMD",
-    commandHint: "Inserisci un comando Redis, es. SMEMBERS feature:flags",
     executeCommand: "Esegui comando",
     commandEmpty: "Inserisci un comando Redis",
-    commandEmptyResult: "Esegui un comando Redis per vedere il risultato",
     commandBlocked: "Questo comando Redis è bloccato per sicurezza",
     createKey: "Crea chiave",
     createKeyName: "Chiave",
@@ -1428,18 +1375,16 @@ export default {
     addField: "Aggiungi Campo",
     deleteField: "Elimina Campo",
     field: "Campo",
-    value: "Valore",
+
     fieldPlaceholder: "Nome campo",
     emptyCollection: "Collezione vuota",
     selectDocument: "Seleziona un documento",
     readonlyId: "_id è in sola lettura",
-    invalidJsonValue: "Questa cella non contiene un valore JSON valido",
+
     duplicateField: "Nome campo duplicato: {field}",
     edit: "Modifica",
     documentView: "Visualizzazione Documento",
     tableView: "Visualizzazione Tabella",
-    filterPlaceholder: "Filtra...",
-    sortPlaceholder: "Ordina...",
   },
   history: {
     title: "Cronologia",
@@ -1544,20 +1489,16 @@ export default {
     batchSize: "Dimensione lotto",
     start: "Avvia Trasferimento",
     cancel: "Annulla",
-    progress: "Trasferimento in corso...",
-    transferring: "Trasferimento di {table}...",
+
     completed: "Trasferimento completato",
     completedWithErrors: "Completato con {count} tabella non riuscita | Completato con {count} tabelle non riuscite",
     failed: "Trasferimento non riuscito",
     cancelled: "Trasferimento annullato",
-    rowsTransferred: "{count} righe trasferite",
-    tableProgress: "{current} / {total} tabelle",
-    noSqlConnections: "Nessuna connessione SQL disponibile",
-    selectTables: "Seleziona le tabelle da trasferire",
+
     searchTables: "Cerca tabelle...",
     noTables: "Nessuna tabella",
     selectSourceFirst: "Seleziona prima la connessione e il database sorgente",
-    tableError: "Tabella {table} non riuscita: {error}",
+
     overallProgress: "Progresso complessivo",
     dataTransfer: "Trasferimento Dati",
   },
@@ -1666,12 +1607,11 @@ export default {
     previewLimitOption: "Anteprima {count}",
     compare: "Confronta Dati",
     summary: "Aggiunte {added}, rimosse {removed}, modificate {modified}",
-    batchSummary:
-      "Confrontate {tables} tabelle: {different} diverse, {same} identiche, {failed} non riuscite; aggiunte {added}, rimosse {removed}, modificate {modified}",
+
     comparingTable: "Confronto di {current}/{total}: {table}",
     keyColumnsInline: "Colonne chiave: {columns}",
     selectedInline: "Selezionate {selected}/{total}",
-    selectedSummary: "Selezionate: aggiunte {added}, rimosse {removed}, modificate {modified}",
+
     selectAllKind: "Seleziona tutti i {kind}",
     clearKind: "Cancella {kind}",
     clearSelection: "Cancella tutte le selezioni",
@@ -1835,14 +1775,14 @@ export default {
     snippetsBodyPlaceholder: "SELECT *\nFROM {table}\nLIMIT 100;",
     snippetsBodyHint:
       "Racchiudi una parola tra parentesi graffe per renderla un segnaposto, es. {table}. Quando lo snippet viene inserito, il cursore seleziona il primo segnaposto.",
-    snippetsRestoreDefaults: "Ripristina Predefiniti",
+
     snippetsAddTitle: "Aggiungi Snippet",
     snippetsEditTitle: "Modifica Snippet",
     snippetsDeleteTitle: "Elimina Snippet",
     snippetsSearchPlaceholder: "Cerca snippet...",
     snippetsCount: "{count} in totale",
     snippetsNoResults: "Nessuno snippet trovato",
-    syncWebDavTitle: "Sincronizzazione WebDAV",
+
     syncWebDavDescription:
       "Carica o ripristina uno snapshot di DBX da un servizio di archiviazione compatibile con WebDAV.",
     syncEndpoint: "URL WebDAV",
@@ -1891,8 +1831,7 @@ export default {
     wordWrapDescription:
       "Manda a capo le righe SQL lunghe entro la larghezza dell'editor invece di scorrere orizzontalmente.",
     confirmDangerousSqlExecution: "Conferma prima di SQL pericoloso",
-    confirmDangerousSqlExecutionDescription:
-      "Se disattivato, ALTER, DROP, DELETE, TRUNCATE e altri SQL pericolosi verranno eseguiti senza la finestra di avviso.",
+
     confirmDangerousSqlLead: "Se disattivato,",
     confirmDangerousSqlTrail: "e altre istruzioni distruttive vengono eseguite senza finestra di conferma.",
     redisScanPageSize: "Conteggio scansione Redis",
@@ -2021,6 +1960,12 @@ export default {
     officialDocs: "Documenti ufficiali",
   },
   driverStore: {
+    offlineDownloadHint:
+      "Per ambienti senza rete, scarica i pacchetti driver offline su una macchina connessa a internet, poi importali qui.",
+    offlineDownloadLink: "Download driver offline",
+    searchDrivers: "Cerca driver per nome, tipo, versione...",
+    searchJdbcDrivers: "Cerca driver JDBC per nome o percorso...",
+    noMatchingDrivers: "Nessun driver corrispondente.",
     progressJreExtract: "Estrazione JRE...",
     progressDownloadJre: "Download JRE in corso",
     progressDownloadDriver: "Download driver in corso",
@@ -2085,7 +2030,7 @@ export default {
     localInstall: "Installazione locale",
     runtimeDrivers: "Runtime",
     runtimeTitle: "Runtime del driver",
-    runtimeHint: "Le metriche di runtime vengono raccolte solo mentre questo pannello è aperto.",
+
     runtimeRunning: "In esecuzione",
     runtimeMemory: "Memoria",
     runtimeHealth: "Stato",
@@ -2128,11 +2073,89 @@ export default {
     tableLoadError: "Caricamento tabelle non riuscito: {error}",
     noTables: "Nessuna tabella trovata",
     export: "Esporta",
-    exporting: "Esportazione in corso...",
+
     currentTable: "Corrente: {table} ({current}/{total})",
     rowsExported: "{count} righe esportate",
     exportSuccess: "Database esportato con successo",
     exportError: "Esportazione non riuscita: {error}",
     exportCancelled: "Esportazione annullata",
+  },
+  executionSummary: {
+    empty: "Nessun riepilogo di esecuzione",
+    executing: "Esecuzione in corso...",
+    statement: "Istruzione",
+    type: "Tipo",
+    rows: "Righe",
+    affected: "Interessate",
+    time: "Tempo",
+    success: "Successo",
+    error: "Errore",
+    returnedTable: "Restituita una tabella di risultati con {count} colonne",
+    noTable: "Nessuna tabella di risultati restituita",
+  },
+  userAdmin: {
+    title: "Utenti e Privilegi",
+    unsupported:
+      "Sono supportate le connessioni compatibili con MySQL e PostgreSQL. SQL Server, Oracle e altri modelli di permessi potranno essere aggiunti in seguito.",
+    newUser: "Nuovo Utente",
+    anonymous: "Anonimo",
+    roleName: "Nome del ruolo",
+    allowLogin: "Consenti accesso",
+    searchUser: "Cerca utente o host",
+    loadingUsers: "Caricamento utenti...",
+    loadingGrants: "Caricamento concessioni...",
+    emptyUsers: "Nessun utente trovato, oppure l'account corrente non può leggere l'elenco degli utenti.",
+    grants: "Concessioni",
+    noGrants: "Nessuna concessione trovata",
+    privilegeEditor: "Editor dei privilegi",
+    privilegeHint:
+      "Scegli privilegi, database e tabella, quindi visualizza l'anteprima SQL prima di applicare. * indica globale o tutte le tabelle.",
+    database: "Database",
+    schema: "Schema",
+    table: "Tabella",
+    scope: "Ambito della concessione",
+    scopeDatabase: "Database",
+    scopeSchema: "Schema",
+    scopeTable: "Tabella",
+    scopeRole: "Appartenenza al ruolo",
+    memberRole: "Ruolo del membro",
+    privileges: "Privilegi",
+    grantOption: "Consenti ulteriori concessioni (WITH GRANT OPTION)",
+    adminOption: "Consenti la gestione dei membri (WITH ADMIN OPTION)",
+    grant: "Concedi",
+    revoke: "Revoca",
+    username: "Nome utente",
+    host: "Host",
+    changePassword: "Cambia password",
+    newPassword: "Nuova password",
+    lock: "Blocca",
+    unlock: "Sblocca",
+    disableLogin: "Disabilita accesso",
+    enableLogin: "Abilita accesso",
+    dropUser: "Elimina utente",
+    previewSql: "Anteprima SQL",
+    sqlPreview: "Anteprima SQL",
+    applySql: "Applica SQL",
+    applySuccess: "Privilegi utente aggiornati",
+    applyFailed: "Esecuzione non riuscita: {message}",
+  },
+  etcd: {
+    prefixPlaceholder: "Prefisso, es. /app/",
+    newKey: "Nuova chiave",
+    loadingKeys: "Caricamento chiavi...",
+    empty: "Nessuna chiave trovata",
+    loadMore: "Carica altre",
+    selectKey: "Seleziona una chiave per vedere il valore",
+    loadingValue: "Caricamento valore...",
+    notFound: "Chiave non trovata",
+    edit: "Modifica",
+    editKey: "Modifica chiave",
+    delete: "Elimina",
+    deleteTitle: "Elimina chiave etcd",
+    keyPlaceholder: "/path/to/key",
+    keyRequired: "La chiave è obbligatoria",
+    saved: "Chiave salvata",
+    deleted: "Chiave eliminata",
+    base64Readonly: "I valori Base64 sono di sola lettura in questa versione.",
   },
 };

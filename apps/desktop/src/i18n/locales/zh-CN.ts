@@ -1,7 +1,5 @@
 export default {
-  app: {
-    name: "DBX",
-  },
+  app: {},
   toolbar: {
     cancelExecution: "取消执行",
     newConnection: "新建连接",
@@ -19,9 +17,9 @@ export default {
     themeLight: "亮色",
     themeDark: "暗色",
     themeSystem: "跟随系统",
-    sqlSaved: "SQL 已保存",
+
     sqlOpenFailed: "打开文件失败：{message}",
-    sqlSaveFailed: "保存文件失败：{message}",
+
     driverManager: "驱动管理",
     updatableDriverCount: "可更新驱动数量",
   },
@@ -41,10 +39,8 @@ export default {
     downloadFailed: "更新下载失败：{error}",
     restart: "退出并重启",
     restartFailed: "重启应用失败：{error}",
-    exitAndUpdate: "退出并更新",
+
     reopenHint: "应用将自动重启以完成更新",
-    dockerUsersRun: "Docker 用户请运行",
-    toUpdate: "更新",
   },
   sidebar: {
     connections: "连接",
@@ -57,7 +53,7 @@ export default {
     export: "导出连接",
     collapse: "收起侧边栏",
     expand: "展开侧边栏",
-    showMore: "加载更多 ({count})...",
+
     filterByType: "按类型筛选",
     searchScopeConnection: "连接",
     searchScopeDatabase: "数据库",
@@ -162,7 +158,6 @@ export default {
     postgresClientCertBrowse: "选择客户端证书",
     postgresClientKeyBrowse: "选择客户端私钥",
     connectionUrlOptional: "URL（可选）",
-    connectionUrlPlaceholder: "postgresql://user:pass{'@'}host:5432/db?sslmode=require",
     parseConnectionUrl: "解析连接 URL",
     parseConnectionUrlApplied: "已应用连接 URL",
     parseConnectionUrlFailed: "解析连接 URL 失败：{message}",
@@ -230,7 +225,7 @@ export default {
     loadFailed: "加载已保存连接失败：{message}",
     sshTunnel: "SSH 隧道/代理",
     advancedTab: "高级",
-    sshEnable: "使用 SSH 隧道/代理连接",
+
     sshHost: "SSH 主机",
     sshUser: "SSH 用户",
     sshPassword: "SSH 密码",
@@ -261,7 +256,7 @@ export default {
     idleTimeout: "空闲超时",
     unitSeconds: "秒",
     proxy: "代理",
-    proxyEnable: "通过代理连接数据库",
+
     proxyType: "代理类型",
     proxyHost: "代理主机",
     proxyUsername: "代理用户",
@@ -278,12 +273,10 @@ export default {
     jdbcDriverBrowse: "选择 JDBC 驱动 JAR",
     jdbcDocs: "查看 JDBC 文档",
     jdbcPluginHint: "先安装 DBX JDBC 插件，再导入数据库厂商提供的 JDBC 驱动 JAR。",
-    dmCompatHint: "需要在系统上安装达梦 DM8 ODBC 驱动程序。",
-    dmDownload: "前往达梦官网下载",
+
     mongoLegacyHint:
       "MongoDB 4.2 以下版本需安装 MongoDB (Legacy) 驱动。若账号创建在 admin 且认证失败，请将认证库设为 admin。",
-    compatible: "兼容",
-    mainstream: "主流",
+
     color: "颜色",
     colorNone: "无颜色",
     colorGreen: "绿色",
@@ -396,7 +389,6 @@ export default {
     scrollLeft: "向左滚动标签页",
     scrollRight: "向右滚动标签页",
     openTabs: "已打开的标签页",
-    openDataTabs: "已打开的数据表",
   },
   executionSummary: {
     empty: "暂无执行摘要",
@@ -432,14 +424,13 @@ export default {
     noRows: "暂无数据",
     noRowsDescription: "当前结果集没有任何记录。",
     noSearchResults: "没有匹配结果",
-    noSearchResultsDescription: "换个关键词试试。",
     noFilteredRows: "没有符合条件的行",
     noFilteredRowsDescription: "调整搜索词或状态筛选试试。",
     copy: "复制",
     copyDdl: "复制 DDL",
     copyCell: "复制单元格",
     copyRow: "复制行 (JSON)",
-    copyColumnJson: "复制列 (JSON)",
+
     copyRowInsert: "复制为 INSERT 语句",
     copyRowInsertWithoutPrimaryKeys: "复制为 INSERT 语句（不含主键）",
     copyRowUpdate: "复制为 UPDATE 语句",
@@ -472,9 +463,7 @@ export default {
     renderModeHint: "在 Canvas 渲染和 DOM 兜底表格之间切换。",
     filter: "筛选",
     filterBuilder: "筛选器",
-    filterBuilderTitle: "筛选器",
-    filterBuilderHint: "点选筛选条件，并与手写 WHERE 一起生效。",
-    filterBuilderSummary: "{count} 条规则",
+
     filterBuilderAddRule: "新增条件",
     filterBuilderColumn: "字段",
     filterBuilderValue: "值",
@@ -532,7 +521,7 @@ export default {
     showAllColumns: "显示全部",
     viewOptions: "视图选项",
     hideNullColumns: "隐藏 NULL 列",
-    hideNullColumnsHint: "切换隐藏当前结果中整列均为 NULL 的字段。",
+
     moreValues: "还有 {count} 个值，输入关键词继续缩小范围",
     filterByValue: "筛选此值",
     filterExcludeValue: "排除此值",
@@ -549,12 +538,11 @@ export default {
     clearSort: "清除排序",
     pasted: "已粘贴!",
     search: "搜索...",
-    searchOrWhere: "搜索，或输入 WHERE 条件...",
-    applyWhere: "应用 WHERE",
+
     filterRows: "筛选行",
     filterAllRows: "全部行",
     filterChangedRows: "变更项",
-    page: "第 {page} 页",
+
     rowsPerPage: "每页行数",
     customRowsPerPage: "自定义行数",
     applyPageSize: "应用",
@@ -568,13 +556,13 @@ export default {
     cloneRows: "克隆 {count} 行为新行",
     restoreRows: "恢复 {count} 行",
     copyRows: "复制 {count} 行 (JSON)",
-    copyColumnsJson: "复制 {count} 列 (JSON)",
+
     copyRowsInsert: "复制 {count} 行为 INSERT",
     copyRowsInsertWithoutPrimaryKeys: "复制 {count} 行为 INSERT（不含主键）",
     copyRowsUpdate: "复制 {count} 行为 UPDATE",
     selectedRows: "已选 {count} 行",
     restoreRow: "恢复行",
-    statusClean: "未改",
+
     statusNew: "新增项",
     statusEdited: "更新项",
     statusDeleted: "删除项",
@@ -596,7 +584,7 @@ export default {
     columnDetailsFor: "“{column}”列详情",
     columnsCount: "{count} 列",
     rowCount: "行数",
-    rowsCount: "{count} 行",
+
     fieldIndex: "序号",
     cellValue: "值",
     valueEditor: "值编辑器",
@@ -616,10 +604,10 @@ export default {
     nullValue: "NULL",
     noComment: "暂无注释",
     formattedJson: "格式化 JSON",
-    formattedValue: "格式化值",
+
     detailSearchPlaceholder: "搜索字段名或值…",
     detailSearchNoMatch: "无匹配项",
-    rawValue: "原始值",
+
     largeValuePreviewHint: "仅预览前 {count} 个字符，复制仍会使用完整值。",
     copyValue: "复制值",
     downloadBinaryValue: "下载值",
@@ -669,26 +657,10 @@ export default {
     rollback: "回滚",
     transactionSaveHint: "在事务中提交 {count} 项待保存更改。",
     nonTransactionalSaveHint: "逐条保存 {count} 项更改；如果中途失败，前面已成功的更改不会回滚。",
-    keylessEditWarning: "无主键定位",
-    keylessEditWarningHint:
-      "这张表没有主键。保存更新或删除时会使用整行原始值作为 WHERE 条件；如果存在完全重复的行，可能会影响多行。",
+
     queryEditReady: "可编辑",
     queryEditReadyHint: "这是来自“{table}”的单表结果，可直接修改、删除或新增行，最后点击待保存按钮保存。",
-    queryEditReadOnly: "只读结果",
-    queryEditUnsupported: {
-      "not-select": "只有 SELECT 查询结果可以直接编辑。",
-      cte: "包含 WITH/CTE 的查询暂不支持直接回写。请改为简单单表 SELECT。",
-      "set-operation": "包含 UNION、INTERSECT 或 EXCEPT 的结果无法安全定位原表行。",
-      aggregation: "包含 DISTINCT、GROUP BY、HAVING 或聚合结果，无法直接编辑原始数据。",
-      "external-source": "外部文件或表函数查询结果无法直接回写，请先导入到数据库表后再编辑。",
-      "complex-source": "包含 JOIN、多个表或子查询的结果无法安全定位单个原表行。",
-      "computed-columns": "结果列包含表达式或函数，无法安全回写。请查询原始列名。",
-      "no-table": "未识别到可编辑的数据表。",
-      "no-primary-key": "目标表没有主键，无法安全定位要更新或删除的行。",
-      "primary-key-not-returned": "结果中缺少原始主键列。请把主键列按原列名一起查询出来。",
-      "aliased-columns": "结果列使用了别名或表达式。请使用原始列名查询需要编辑的列。",
-      "metadata-unavailable": "无法读取目标表元数据，暂不能启用结果编辑。",
-    },
+
     sortUnsupported: "当前 SQL 不支持全量排序，请改为单条 SELECT 查询后再尝试。",
     truncatedHint: "结果已截断，仅显示前 {count} 行。可通过底部分页继续加载，或调整每页行数。",
   },
@@ -706,7 +678,7 @@ export default {
     close: "关闭",
     tooltip: "导出进度",
     popoverTitle: "导出任务",
-    noTasks: "暂无导出任务",
+
     clearFinished: "清除已完成",
     showMore: "展开其余 {count} 个",
     showLess: "收起",
@@ -722,7 +694,7 @@ export default {
     quickConnections: "快速开始",
     quickConnectionsHint: "点击连接即可新建查询标签页。",
     shortcuts: "常用操作",
-    shortcutsHint: "从这里开始你的下一步。",
+
     tip: "也可以在左侧展开连接，右键数据库或表查看更多操作。",
     fileOpened: "已打开 {name}",
     mcpTitle: "AI 编程助手集成",
@@ -760,9 +732,9 @@ export default {
     title: "执行计划",
     tree: "树",
     summary: "摘要",
-    running: "正在读取执行计划...",
+
     empty: "暂无执行计划",
-    nodeCount: "{count} 个节点",
+
     node: "节点",
     relation: "表",
     index: "索引",
@@ -878,7 +850,7 @@ export default {
   },
   ai: {
     placeholder: "描述你想查什么...",
-    settings: "AI 设置",
+
     noConfig: "AI 尚未配置。请在 设置 > AI 中配置你的 AI 服务。",
     provider: "提供商",
     model: "模型",
@@ -891,18 +863,13 @@ export default {
     modelListUnsupported: "当前提供商不支持自动获取模型列表。",
     modelListEndpointRequired: "填写 Endpoint 后再获取模型列表。",
     modelListApiKeyRequired: "填写 API Key 后再获取模型列表。",
-    run: "执行",
-    readingSchema: "读取结构",
-    noConnection: "当前标签页没有可用连接",
-    noSql: "当前没有 SQL 可处理",
-    sqlPreview: "SQL 预览",
+
     copySql: "复制 SQL",
     copyCode: "复制代码",
     executeSql: "立即执行",
-    copyAll: "复制全部",
+
     copied: "已复制",
-    replace: "替换编辑器",
-    append: "追加到编辑器",
+
     apply: "应用到编辑器",
     clear: "清空对话",
     welcome: "聊聊你想查什么，我来写 SQL",
@@ -928,19 +895,8 @@ export default {
       agent: "可自动执行安全查询",
     },
     fixWithAi: "用 AI 修复",
-    truncated: "上下文已截断",
-    contextSummary: "{database} · {tables} 张表",
-    autoSqlBlocked: "AI 生成的 SQL 风险较高，已阻止自动执行，请手动检查后再运行。",
-    agentSteps: {
-      generated: "已生成 SQL",
-      noSql: "未找到 SQL",
-      safe: "安全检查通过",
-      needsConfirm: "需要确认",
-      blocked: "已阻止",
-      autoExecute: "准备执行",
-      notRequested: "未请求执行",
-      skipped: "未执行",
-    },
+
+    agentSteps: {},
     toolConfirm: {
       title: "执行这条语句？",
       run: "执行",
@@ -959,22 +915,8 @@ export default {
         empty_sql: "空语句",
       },
     },
-    agentOutcome: {
-      executed: "已执行",
-      failed: "执行失败",
-      retrying: "修复中 ({attempt}/{max})",
-      exhausted: "无法自动修复",
-    },
-    agentStepTitles: {
-      riskCheck: "风险检查：{action} · {category} · {environment} · {reasons}",
-      blocked: "风险策略阻止执行，请手动检查 SQL。",
-      requiresConfirmation: "此 SQL 需要确认后执行。",
-      askMode: "Ask 模式不会自动执行 SQL。",
-      unsupportedAction: "当前 AI 动作不会自动执行 SQL。",
-      noSql: "回复中没有可执行的 SQL 代码块。",
-      notRequested: "用户没有表达执行意图。",
-      skipped: "此步骤未执行。",
-    },
+    agentOutcome: {},
+    agentStepTitles: {},
     proxy: "代理",
     proxyEnable: "AI 请求通过代理发送",
     proxyDescription: "通过本地或企业代理转发助手流量。",
@@ -984,8 +926,7 @@ export default {
     enableThinkingDescription: "为支持的模型启用扩展推理。",
     proxyUrl: "代理地址",
     enableThinking: "Thinking",
-    enableThinkingOn: "已启用",
-    enableThinkingOff: "已禁用",
+
     enableThinkingHint:
       "此选项仅对 /chat/completions API 且部分支持的模型生效。设为禁用后可大幅节省 token，但生成结果质量可能会略微下降。",
     actions: {
@@ -1026,7 +967,7 @@ export default {
     refreshChildren: "刷新",
     pin: "置顶",
     unpin: "取消置顶",
-    refreshTab: "刷新数据",
+
     renameTab: "重命名标签页",
     compactTabTitle: "缩短标签标题",
     closeTab: "关闭标签页",
@@ -1038,8 +979,7 @@ export default {
     setDefaultDatabase: "设为默认数据库",
     clearDefaultDatabase: "取消默认数据库",
     exportDatabase: "导出数据库",
-    exportDatabaseSuccess: "已导出 {count} 张表，每表最多 {limit} 行",
-    exportDatabaseFailed: "导出数据库失败：{message}",
+
     importData: "导入数据",
     exportData: "导出数据",
     exportStructure: "导出表结构",
@@ -1187,7 +1127,6 @@ export default {
     sequences: "序列",
     packages: "包",
     partitions: "分区",
-    objectBrowser: "在对象浏览器中查看 ({count})",
   },
   userAdmin: {
     title: "用户与权限",
@@ -1200,7 +1139,7 @@ export default {
     loadingUsers: "正在加载用户...",
     loadingGrants: "正在加载授权...",
     emptyUsers: "暂无用户，或当前账号没有读取用户列表的权限。",
-    pluginUnknown: "认证插件未知",
+
     grants: "授权",
     noGrants: "暂无授权信息",
     privilegeEditor: "权限编辑",
@@ -1259,7 +1198,7 @@ export default {
     cancelEdit: "取消",
     sourceSaved: "源码已保存",
     sourceSaveFailed: "保存源码失败：{message}",
-    schemaColumn: "Schema",
+
     comment: "注释",
     loadingSchemas: "加载 Schema...",
     schema: "Schema",
@@ -1275,15 +1214,13 @@ export default {
     batchDropSuccess: "已删除 {count} 张表",
   },
   structureEditor: {
-    title: "编辑表结构",
     createTitle: "新建表",
     editTabTitle: "编辑: {tableName}",
     tableName: "表名",
     refresh: "刷新结构",
     density: "密度",
     densityCompact: "紧凑",
-    densityStandard: "标准",
-    densityComfortable: "宽松",
+
     densityCozy: "适中",
     densityComfy: "宽松",
     newTable: "新建表",
@@ -1294,7 +1231,7 @@ export default {
     indexes: "索引",
     foreignKeys: "外键",
     triggers: "触发器",
-    ddl: "DDL",
+
     addColumn: "新增字段",
     addIndex: "新增索引",
     columnName: "字段名",
@@ -1338,7 +1275,7 @@ export default {
     autoIncrement: "自增",
     onUpdateCurrentTimestamp: "自动更新时间",
     identity: "标识列",
-    identityGeneration: "生成方式",
+
     identitySeed: "起始值",
     identityIncrement: "增量",
   },
@@ -1416,10 +1353,8 @@ export default {
     entries: "{count} 条记录",
     noExpiry: "永不过期",
     columnType: "类型",
-    columnKey: "键",
     columnValue: "值",
     columnSize: "大小",
-    columnTTL: "TTL",
     binaryStringReadonlyHint: "二进制字符串按转义文本只读展示；当前不支持直接编辑原始字节值。",
     selectedKeys: "已选择的 key",
     deleteGroup: "删除分组",
@@ -1433,12 +1368,8 @@ export default {
     commandLine: "命令行",
     selectKeyForDetail: "选择一个 key 查看详情",
     commandWelcome: "欢迎使用 Redis 命令行控制台",
-    commandPlaceholder: "Redis 命令，如 GET user:1",
-    commandPrefix: "命令",
-    commandHint: "输入 Redis 命令，如 SMEMBERS feature:flags",
     executeCommand: "执行命令",
     commandEmpty: "请输入 Redis 命令",
-    commandEmptyResult: "执行 Redis 命令后会在这里显示结果",
     commandBlocked: "出于安全考虑，此 Redis 命令已被阻止",
     createKey: "新增 key",
     createKeyName: "Key",
@@ -1479,18 +1410,16 @@ export default {
     addField: "添加字段",
     deleteField: "删除字段",
     field: "字段",
-    value: "值",
+
     fieldPlaceholder: "字段名",
     emptyCollection: "空集合",
     selectDocument: "选择一个文档",
     readonlyId: "_id 只读",
-    invalidJsonValue: "当前单元格不是合法 JSON 值",
+
     duplicateField: "字段名重复：{field}",
     edit: "编辑",
     documentView: "文档视图",
     tableView: "表格视图",
-    filterPlaceholder: "过滤条件...",
-    sortPlaceholder: "排序条件...",
   },
   history: {
     title: "历史",
@@ -1591,20 +1520,16 @@ export default {
     batchSize: "每批行数",
     start: "开始传输",
     cancel: "取消",
-    progress: "传输中...",
-    transferring: "正在传输 {table}...",
+
     completed: "传输完成",
     completedWithErrors: "传输完成，{count} 个表失败",
     failed: "传输失败",
     cancelled: "传输已取消",
-    rowsTransferred: "已传输 {count} 行",
-    tableProgress: "{current} / {total} 张表",
-    noSqlConnections: "暂无可用的 SQL 连接",
-    selectTables: "选择要传输的表",
+
     searchTables: "搜索表名...",
     noTables: "暂无表",
     selectSourceFirst: "请先选择源连接和数据库",
-    tableError: "表 {table} 传输失败：{error}",
+
     overallProgress: "整体进度",
     dataTransfer: "数据传输",
   },
@@ -1711,12 +1636,11 @@ export default {
     previewLimitOption: "预览 {count}",
     compare: "开始比较数据",
     summary: "新增 {added} 行，删除 {removed} 行，修改 {modified} 行",
-    batchSummary:
-      "已比较 {tables} 张表：存在差异 {different} 张，一致 {same} 张，失败 {failed} 张；累计新增 {added} 行，删除 {removed} 行，修改 {modified} 行",
+
     comparingTable: "正在比较 {current}/{total}：{table}",
     keyColumnsInline: "匹配字段：{columns}",
     selectedInline: "已选择 {selected}/{total}",
-    selectedSummary: "当前选择：新增 {added} 行，删除 {removed} 行，修改 {modified} 行",
+
     selectAllKind: "全选{kind}",
     clearKind: "清空{kind}",
     clearSelection: "清空全部选择",
@@ -1862,14 +1786,14 @@ export default {
     snippetsPrefixPlaceholder: "如：sel",
     snippetsBodyPlaceholder: "SELECT *\nFROM {table}\nLIMIT 100;",
     snippetsBodyHint: "用花括号包裹单词即可设为占位符，例如 {table}。插入代码片段时，光标会自动选中第一个占位符。",
-    snippetsRestoreDefaults: "恢复默认",
+
     snippetsAddTitle: "添加片段",
     snippetsEditTitle: "编辑片段",
     snippetsDeleteTitle: "删除片段",
     snippetsSearchPlaceholder: "搜索片段…",
     snippetsCount: "共 {count} 个",
     snippetsNoResults: "未找到片段",
-    syncWebDavTitle: "WebDAV 同步",
+
     syncWebDavDescription: "将 DBX 快照上传到兼容 WebDAV 的存储服务，或从远端恢复。",
     syncEndpoint: "WebDAV 地址",
     syncUsername: "用户名",
@@ -1911,7 +1835,7 @@ export default {
     wordWrap: "自动换行",
     wordWrapDescription: "在编辑器宽度内自动折行显示长 SQL，而不是横向滚动。",
     confirmDangerousSqlExecution: "执行危险 SQL 前弹出确认",
-    confirmDangerousSqlExecutionDescription: "关闭后，ALTER、DROP、DELETE、TRUNCATE 等危险 SQL 将直接执行。",
+
     confirmDangerousSqlLead: "关闭后，",
     confirmDangerousSqlTrail: "等破坏性语句将直接执行，不再弹出确认对话框。",
     redisScanPageSize: "Redis 扫描数量",
@@ -2104,7 +2028,7 @@ export default {
     localInstall: "本地安装",
     runtimeDrivers: "运行时",
     runtimeTitle: "驱动运行时",
-    runtimeHint: "仅在打开此面板时采集运行时指标。",
+
     runtimeRunning: "运行中",
     runtimeMemory: "内存",
     runtimeHealth: "健康状态",
@@ -2147,7 +2071,7 @@ export default {
     tableLoadError: "加载表失败：{error}",
     noTables: "未找到表",
     export: "导出",
-    exporting: "正在导出...",
+
     currentTable: "当前: {table} ({current}/{total})",
     rowsExported: "已导出 {count} 行",
     exportSuccess: "数据库导出成功",
