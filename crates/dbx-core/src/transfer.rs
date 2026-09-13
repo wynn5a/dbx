@@ -1236,25 +1236,177 @@ struct TransferWriteTarget<'a> {
     pk_columns: &'a [String],
 }
 
-fn generate_transfer_write_sql(target: &TransferWriteTarget<'_>, rows: &[Vec<serde_json::Value>]) -> String {
-    match target.mode {
-        TransferMode::Upsert => generate_upsert_typed(
-            target.columns,
-            target.column_types,
-            rows,
-            target.table,
-            target.schema,
-            target.db_type,
-            target.pk_columns,
-        ),
-        _ => generate_insert_typed(
-            target.columns,
-            target.column_types,
-            rows,
-            target.table,
-            target.schema,
-            target.db_type,
-        ),
+/// The fixed skeleton and per-row fragments of a transfer write statement.
+/// Every statement shape is `prefix + fragments joined by separator + suffix`,
+/// which lets batch sizing pack pre-formatted fragments under the byte cap
+/// without re-formatting the whole statement for every candidate row.
+struct TransferWriteParts {
+    prefix: String,
+    separator: &'static str,
+    suffix: String,
+    fragments: Vec<String>,
+}
+
+fn insert_write_parts(
+    target: &TransferWriteTarget<'_>,
+    rows: &[Vec<serde_json::Value>],
+    full_table: &str,
+    col_list: &str,
+) -> TransferWriteParts {
+    TransferWriteParts {
+        prefix: format!("INSERT INTO {full_table} ({col_list}) VALUES\n"),
+        separator: ",\n",
+        suffix: String::new(),
+        fragments: value_rows_sql(rows, target.column_types, target.db_type),
+    }
+}
+
+fn transfer_write_parts(target: &TransferWriteTarget<'_>, rows: &[Vec<serde_json::Value>]) -> TransferWriteParts {
+    let full_table = qualified_table(target.table, target.schema, target.db_type);
+    let col_list = target.columns.iter().map(|c| quote_identifier(c, target.db_type)).collect::<Vec<_>>().join(", ");
+
+    if !matches!(target.mode, TransferMode::Upsert) || target.pk_columns.is_empty() {
+        return insert_write_parts(target, rows, &full_table, &col_list);
+    }
+
+    let non_pk_columns: Vec<&String> = target.columns.iter().filter(|c| !target.pk_columns.contains(c)).collect();
+    let update_set_for = |alias: &str| -> String {
+        non_pk_columns
+            .iter()
+            .map(|c| {
+                let qc = quote_identifier(c, target.db_type);
+                if alias == "src" {
+                    format!("target.{qc} = src.{qc}")
+                } else {
+                    format!("t.{qc} = s.{qc}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let when_clauses = |alias: &str| -> String {
+        let mut suffix = String::new();
+        if !non_pk_columns.is_empty() {
+            suffix.push_str(&format!("\nWHEN MATCHED THEN UPDATE SET {}", update_set_for(alias)));
+        }
+        let insert_cols =
+            target.columns.iter().map(|c| quote_identifier(c, target.db_type)).collect::<Vec<_>>().join(", ");
+        let insert_vals = target
+            .columns
+            .iter()
+            .map(|c| format!("{alias}.{}", quote_identifier(c, target.db_type)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        suffix.push_str(&format!("\nWHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals})"));
+        suffix
+    };
+
+    match target.db_type {
+        DatabaseType::Postgres | DatabaseType::Sqlite | DatabaseType::DuckDb => {
+            let pk_list =
+                target.pk_columns.iter().map(|c| quote_identifier(c, target.db_type)).collect::<Vec<_>>().join(", ");
+            let suffix = if non_pk_columns.is_empty() {
+                format!("\nON CONFLICT ({pk_list}) DO NOTHING")
+            } else {
+                let update_set = non_pk_columns
+                    .iter()
+                    .map(|c| {
+                        let qc = quote_identifier(c, target.db_type);
+                        format!("{qc} = EXCLUDED.{qc}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("\nON CONFLICT ({pk_list}) DO UPDATE SET {update_set}")
+            };
+            TransferWriteParts {
+                prefix: format!("INSERT INTO {full_table} ({col_list}) VALUES\n"),
+                separator: ",\n",
+                suffix,
+                fragments: value_rows_sql(rows, target.column_types, target.db_type),
+            }
+        }
+        DatabaseType::Mysql | DatabaseType::Doris | DatabaseType::StarRocks => {
+            let suffix = if non_pk_columns.is_empty() {
+                let first_pk = quote_identifier(&target.pk_columns[0], target.db_type);
+                format!("\nON DUPLICATE KEY UPDATE {first_pk} = {first_pk}")
+            } else {
+                let update_set = non_pk_columns
+                    .iter()
+                    .map(|c| {
+                        let qc = quote_identifier(c, target.db_type);
+                        format!("{qc} = VALUES({qc})")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("\nON DUPLICATE KEY UPDATE {update_set}")
+            };
+            TransferWriteParts {
+                prefix: format!("INSERT INTO {full_table} ({col_list}) VALUES\n"),
+                separator: ",\n",
+                suffix,
+                fragments: value_rows_sql(rows, target.column_types, target.db_type),
+            }
+        }
+        DatabaseType::SqlServer => {
+            let src_col_list =
+                target.columns.iter().map(|c| quote_identifier(c, target.db_type)).collect::<Vec<_>>().join(", ");
+            let on_clause = target
+                .pk_columns
+                .iter()
+                .map(|c| {
+                    let qc = quote_identifier(c, target.db_type);
+                    format!("target.{qc} = src.{qc}")
+                })
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            TransferWriteParts {
+                prefix: format!("MERGE INTO {full_table} AS target USING (VALUES\n"),
+                separator: ",\n",
+                suffix: format!("\n) AS src ({src_col_list}) ON {on_clause}{};", when_clauses("src")),
+                fragments: value_rows_sql(rows, target.column_types, target.db_type),
+            }
+        }
+        DatabaseType::Oracle => {
+            let fragments = rows
+                .iter()
+                .map(|row| {
+                    let vals = row
+                        .iter()
+                        .zip(target.columns.iter())
+                        .enumerate()
+                        .map(|(index, (v, c))| {
+                            format!(
+                                "{} AS {}",
+                                escape_value_typed(
+                                    v,
+                                    target.db_type,
+                                    target.column_types.get(index).and_then(|value| value.as_deref())
+                                ),
+                                quote_identifier(c, target.db_type)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("SELECT {vals} FROM dual")
+                })
+                .collect();
+            let on_clause = target
+                .pk_columns
+                .iter()
+                .map(|c| {
+                    let qc = quote_identifier(c, target.db_type);
+                    format!("t.{qc} = s.{qc}")
+                })
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            TransferWriteParts {
+                prefix: format!("MERGE INTO {full_table} t USING ("),
+                separator: " UNION ALL ",
+                suffix: format!(") s ON ({on_clause}){}", when_clauses("s")),
+                fragments,
+            }
+        }
+        _ => insert_write_parts(target, rows, &full_table, &col_list),
     }
 }
 
@@ -1262,30 +1414,43 @@ fn generate_transfer_write_sql_batches(
     target: &TransferWriteTarget<'_>,
     rows: &[Vec<serde_json::Value>],
 ) -> Vec<String> {
-    if rows.is_empty() {
+    let parts = transfer_write_parts(target, rows);
+    if parts.fragments.is_empty() {
         return Vec::new();
     }
 
+    // Pack pre-formatted row fragments into statements under the byte cap:
+    // statement bytes = prefix + fragment lengths + separators + suffix. The
+    // previous candidate loop re-formatted the entire statement per row, which
+    // was O(rows²) formatting work per batch.
     let max_rows = max_transfer_write_rows(target.db_type, target.mode);
+    let overhead = parts.prefix.len() + parts.suffix.len();
+    let sep_len = parts.separator.len();
+
     let mut statements = Vec::new();
     let mut start = 0;
-
-    while start < rows.len() {
+    while start < parts.fragments.len() {
+        let mut bytes = overhead + parts.fragments[start].len();
         let mut end = start + 1;
-        let mut accepted = generate_transfer_write_sql(target, &rows[start..end]);
-
-        while end < rows.len() && end - start < max_rows {
-            let candidate = generate_transfer_write_sql(target, &rows[start..=end]);
-            if candidate.len() > MAX_TRANSFER_WRITE_SQL_BYTES && !accepted.is_empty() {
+        while end < parts.fragments.len() && end - start < max_rows {
+            let candidate = bytes + sep_len + parts.fragments[end].len();
+            if candidate > MAX_TRANSFER_WRITE_SQL_BYTES {
                 break;
             }
-            accepted = candidate;
+            bytes = candidate;
             end += 1;
         }
 
-        if !accepted.is_empty() {
-            statements.push(accepted);
+        let mut sql = String::with_capacity(bytes);
+        sql.push_str(&parts.prefix);
+        sql.push_str(&parts.fragments[start]);
+        for fragment in &parts.fragments[start + 1..end] {
+            sql.push_str(&parts.separator);
+            sql.push_str(fragment);
         }
+        sql.push_str(&parts.suffix);
+        debug_assert_eq!(sql.len(), bytes);
+        statements.push(sql);
         start = end;
     }
 
@@ -3699,6 +3864,126 @@ mod tests {
 
         assert_eq!(statements.len(), 1);
         assert!(statements[0].contains("ON DUPLICATE KEY UPDATE"));
+    }
+
+    /// Reference implementation of the previous candidate-loop packing, kept to
+    /// prove the fragment-packing rewrite emits byte-identical statements.
+    fn reference_transfer_write_sql_batches(
+        target: &TransferWriteTarget<'_>,
+        rows: &[Vec<serde_json::Value>],
+    ) -> Vec<String> {
+        let gen = |r: &[Vec<serde_json::Value>]| -> String {
+            match target.mode {
+                TransferMode::Upsert => generate_upsert_typed(
+                    target.columns,
+                    target.column_types,
+                    r,
+                    target.table,
+                    target.schema,
+                    target.db_type,
+                    target.pk_columns,
+                ),
+                _ => generate_insert_typed(
+                    target.columns,
+                    target.column_types,
+                    r,
+                    target.table,
+                    target.schema,
+                    target.db_type,
+                ),
+            }
+        };
+        if rows.is_empty() {
+            return Vec::new();
+        }
+        let max_rows = max_transfer_write_rows(target.db_type, target.mode);
+        let mut statements = Vec::new();
+        let mut start = 0;
+        while start < rows.len() {
+            let mut end = start + 1;
+            let mut accepted = gen(&rows[start..end]);
+            while end < rows.len() && end - start < max_rows {
+                let candidate = gen(&rows[start..=end]);
+                if candidate.len() > MAX_TRANSFER_WRITE_SQL_BYTES && !accepted.is_empty() {
+                    break;
+                }
+                accepted = candidate;
+                end += 1;
+            }
+            if !accepted.is_empty() {
+                statements.push(accepted);
+            }
+            start = end;
+        }
+        statements
+    }
+
+    #[test]
+    fn transfer_write_sql_batches_match_reference_generator_across_shapes() {
+        let payload: Vec<Vec<serde_json::Value>> = (0..12).map(|i| vec![json!(i), json!("v-{i}")]).collect();
+        let big_rows: Vec<Vec<serde_json::Value>> =
+            (0..4).map(|i| vec![json!(i), json!("x".repeat(180 * 1024))]).collect();
+        let hive_rows: Vec<Vec<serde_json::Value>> = (0..1200).map(|i| vec![json!(i), json!("v")]).collect();
+        let columns = [String::from("id"), String::from("name")];
+        let column_types = [Some(String::from("int")), Some(String::from("varchar(64)"))];
+        let pks = [String::from("id")];
+
+        let cases: Vec<(TransferMode, DatabaseType, Vec<Vec<serde_json::Value>>, &[String])> = vec![
+            (TransferMode::Append, DatabaseType::Mysql, payload.clone(), &[]),
+            (TransferMode::Append, DatabaseType::Mysql, big_rows.clone(), &[]),
+            (TransferMode::Overwrite, DatabaseType::Postgres, payload.clone(), &[]),
+            (TransferMode::Overwrite, DatabaseType::SqlServer, payload.clone(), &[]),
+            (TransferMode::Upsert, DatabaseType::Mysql, payload.clone(), &pks),
+            (TransferMode::Upsert, DatabaseType::Postgres, payload.clone(), &pks),
+            (TransferMode::Upsert, DatabaseType::Sqlite, payload.clone(), &pks),
+            (TransferMode::Upsert, DatabaseType::SqlServer, payload.clone(), &pks),
+            (TransferMode::Upsert, DatabaseType::Oracle, payload.clone(), &pks),
+            (TransferMode::Upsert, DatabaseType::DuckDb, payload.clone(), &pks),
+            // Hive caps the statement row count, exercising max_rows packing.
+            (TransferMode::Append, DatabaseType::Hive, hive_rows, &[]),
+        ];
+
+        for (mode, db_type, rows, pk_columns) in cases {
+            let target = TransferWriteTarget {
+                mode: &mode,
+                columns: &columns,
+                column_types: &column_types,
+                table: "events",
+                schema: "",
+                db_type: &db_type,
+                pk_columns,
+            };
+            assert_eq!(
+                generate_transfer_write_sql_batches(&target, &rows),
+                reference_transfer_write_sql_batches(&target, &rows),
+                "statement mismatch for {mode:?} {db_type:?} with {} pk column(s)",
+                pk_columns.len()
+            );
+        }
+    }
+
+    #[test]
+    fn transfer_write_sql_batches_upsert_without_pk_inserts_instead_of_dropping_rows() {
+        // The reference (previous) generator returned empty statements for an
+        // upsert against a table without a primary key — silently skipping the
+        // whole batch. The fragment-packing generator falls back to a plain
+        // insert, so the transferred rows actually land.
+        let rows: Vec<Vec<serde_json::Value>> = (0..3).map(|i| vec![json!(i), json!("v-{i}")]).collect();
+        let target = TransferWriteTarget {
+            mode: &TransferMode::Upsert,
+            columns: &[String::from("id"), String::from("name")],
+            column_types: &[Some(String::from("int")), Some(String::from("varchar(64)"))],
+            table: "events",
+            schema: "",
+            db_type: &DatabaseType::Mysql,
+            pk_columns: &[],
+        };
+
+        assert!(reference_transfer_write_sql_batches(&target, &rows).is_empty());
+        let statements = generate_transfer_write_sql_batches(&target, &rows);
+        assert_eq!(statements.len(), 1);
+        assert!(statements[0].starts_with("INSERT INTO `events`"));
+        assert_eq!(statements[0].matches(",\n(").count() + 1, rows.len());
     }
 
     #[tokio::test]
