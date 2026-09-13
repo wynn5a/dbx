@@ -715,13 +715,29 @@ pub async fn do_execute(
                 },
                 None => client.lock().await,
             };
-            wait_for_query_opt(
-                cancel_token,
-                query_timeout,
-                db::sqlserver::execute_query_with_max_rows(&mut client, sql, max_rows),
-            )
-            .await
-            .map(|result| truncate_result_with_max_rows(result, max_rows))
+            let mut abandoned_wire = false;
+            let outcome = wait_for_query_opt(cancel_token, query_timeout, async {
+                let (result, abandoned) =
+                    db::sqlserver::execute_query_with_max_rows(&mut client, sql, max_rows).await?;
+                abandoned_wire = abandoned;
+                Ok(result)
+            })
+            .await;
+            match outcome {
+                Ok(result) => {
+                    if abandoned_wire {
+                        // The row limit made the driver drop the response stream:
+                        // unread TDS packets are left on this connection and the
+                        // next statement would stall draining them. Rebuild.
+                        log::warn!(
+                            "[query][do_execute] discarding protocol-stateful pool '{pool_key}' after row-limit stream break"
+                        );
+                        state.discard_pool(pool_key).await;
+                    }
+                    Ok(truncate_result_with_max_rows(result, max_rows))
+                }
+                Err(e) => Err(e),
+            }
         }
         PoolKind::Elasticsearch(client) => {
             let client = client.clone();
@@ -1154,6 +1170,7 @@ async fn execute_multi_sqlserver(
 ) -> Result<Vec<db::QueryResult>, String> {
     let batches = split_sql_batches(sql);
     let mut all_results = Vec::new();
+    let mut batches_abandoned_wire = false;
     let max_rows = options.max_rows;
 
     for batch in &batches {
@@ -1189,7 +1206,13 @@ async fn execute_multi_sqlserver(
         };
 
         match db::sqlserver::execute_batch_with_max_rows(&mut client, batch, max_rows).await {
-            Ok(results) => all_results.extend(results),
+            Ok((results, abandoned_wire)) => {
+                // Mid-loop the pool must stay usable for the remaining batches
+                // (they pay a one-time wire drain instead), so remember the
+                // break and discard the pool once the whole script is done.
+                batches_abandoned_wire |= abandoned_wire;
+                all_results.extend(results);
+            }
             Err(e) => {
                 all_results.push(db::QueryResult {
                     columns: vec!["Error".to_string()],
@@ -1203,6 +1226,16 @@ async fn execute_multi_sqlserver(
                 });
             }
         }
+    }
+
+    if batches_abandoned_wire {
+        // A batch hit the row limit and abandoned its response stream: unread
+        // TDS packets remain on this connection, so discard the pool and let
+        // the next command rebuild it.
+        log::warn!(
+            "[query][execute_multi_sqlserver] discarding protocol-stateful pool '{pool_key}' after row-limit stream break"
+        );
+        state.discard_pool(pool_key).await;
     }
 
     if all_results.is_empty() {

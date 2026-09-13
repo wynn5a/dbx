@@ -1648,7 +1648,10 @@ pub async fn execute_on_pool_with_max_rows(
             let client = client.clone();
             drop(connections);
             let mut client = client.lock().await;
-            db::sqlserver::execute_query_with_max_rows(&mut client, sql, max_rows).await
+            // Transfer batches read well under the row limit, so the abandoned-
+            // wire flag is not expected here; the pool stays in place (dropping
+            // it mid-transfer would break the caller's cached pool handle).
+            db::sqlserver::execute_query_with_max_rows(&mut client, sql, max_rows).await.map(|(result, _)| result)
         }
         PoolKind::Agent(client) => {
             let client = client.clone();

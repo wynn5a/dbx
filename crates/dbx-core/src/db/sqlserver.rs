@@ -157,7 +157,16 @@ async fn collect_first_result_limited(
                 if rows.len() < row_limit {
                     rows.push(row_to_json(&row));
                 } else {
+                    // The row limit is met and another row arrived: stop reading.
+                    // Dropping the stream mid-response leaves the remaining TDS
+                    // packets unconsumed; tiberius drains them (flush_stream)
+                    // before the next statement on this connection, so skipping
+                    // the overflow here saves parsing/allocating rows the user
+                    // will never see. Multi-result-set scripts keep draining
+                    // (collect_result_sets_limited) so every statement's result
+                    // stays visible.
                     truncated = true;
+                    break;
                 }
             }
             QueryItem::Row(_) => {}
@@ -959,14 +968,18 @@ pub async fn list_triggers(
 }
 
 pub async fn execute_query(client: &mut SqlServerClient, sql: &str) -> Result<QueryResult, String> {
-    execute_query_with_max_rows(client, sql, None).await
+    execute_query_with_max_rows(client, sql, None).await.map(|(result, _)| result)
 }
 
+/// Executes a query, returning the result plus a flag telling whether the row
+/// limit made us abandon the response stream mid-flight. An abandoned stream
+/// leaves unread TDS packets on the wire, so callers must discard the pooled
+/// connection (the next statement would otherwise block draining them).
 pub async fn execute_query_with_max_rows(
     client: &mut SqlServerClient,
     sql: &str,
     max_rows: Option<usize>,
-) -> Result<QueryResult, String> {
+) -> Result<(QueryResult, bool), String> {
     check_conn_health(client).await?;
     let start = Instant::now();
 
@@ -975,7 +988,7 @@ pub async fn execute_query_with_max_rows(
     // each be alone in their batch, so this runs them as three sequential
     // batches on the same connection (see execute_showplan_explain).
     if is_showplan_explain_batch(sql) {
-        return execute_showplan_explain(client, sql, max_rows, start).await;
+        return execute_showplan_explain(client, sql, max_rows, start).await.map(|result| (result, false));
     }
 
     if starts_with_executable_sql_keyword(sql, &["SELECT", "EXEC", "WITH", "TABLE"]) {
@@ -984,51 +997,64 @@ pub async fn execute_query_with_max_rows(
             Ok(None) | Err(_) => sql.to_string(),
         };
         let stream = sqlserver_driver_result(client.query(query_sql.as_str(), &[])).await?;
-        sqlserver_driver_result(collect_first_result_limited(stream, start, max_rows)).await
+        let result = sqlserver_driver_result(collect_first_result_limited(stream, start, max_rows)).await?;
+        // truncated is only set when collect_first_result_limited hit the row
+        // limit and dropped the stream — exactly the "wire has leftovers" case.
+        let abandoned_wire = result.truncated;
+        Ok((result, abandoned_wire))
     } else if requires_simple_query_batch(sql) || is_transaction_control(sql) {
         let stream = sqlserver_driver_result(client.simple_query(sql)).await?;
         let _ = sqlserver_driver_result(collect_result_sets_limited(stream, start, max_rows)).await?;
-        Ok(QueryResult {
-            columns: vec![],
-            column_types: Vec::new(),
-            rows: vec![],
-            affected_rows: 0,
-            execution_time_ms: start.elapsed().as_millis(),
-            truncated: false,
-            session_id: None,
-            has_more: false,
-        })
+        Ok((
+            QueryResult {
+                columns: vec![],
+                column_types: Vec::new(),
+                rows: vec![],
+                affected_rows: 0,
+                execution_time_ms: start.elapsed().as_millis(),
+                truncated: false,
+                session_id: None,
+                has_more: false,
+            },
+            false,
+        ))
     } else {
         let result = sqlserver_driver_result(client.execute(sql, &[])).await?;
-        Ok(QueryResult {
-            columns: vec![],
-            column_types: Vec::new(),
-            rows: vec![],
-            affected_rows: result.rows_affected().iter().sum::<u64>(),
-            execution_time_ms: start.elapsed().as_millis(),
-            truncated: false,
-            session_id: None,
-            has_more: false,
-        })
+        Ok((
+            QueryResult {
+                columns: vec![],
+                column_types: Vec::new(),
+                rows: vec![],
+                affected_rows: result.rows_affected().iter().sum::<u64>(),
+                execution_time_ms: start.elapsed().as_millis(),
+                truncated: false,
+                session_id: None,
+                has_more: false,
+            },
+            false,
+        ))
     }
 }
 
 pub async fn execute_batch(client: &mut SqlServerClient, sql: &str) -> Result<Vec<QueryResult>, String> {
-    execute_batch_with_max_rows(client, sql, None).await
+    execute_batch_with_max_rows(client, sql, None).await.map(|(results, _)| results)
 }
 
+/// Executes a batch, returning the results plus a flag telling whether a
+/// single-SELECT fast path abandoned the response stream mid-flight after the
+/// row limit. See [execute_query_with_max_rows] for the wire-leftover caveat.
 pub async fn execute_batch_with_max_rows(
     client: &mut SqlServerClient,
     sql: &str,
     max_rows: Option<usize>,
-) -> Result<Vec<QueryResult>, String> {
+) -> Result<(Vec<QueryResult>, bool), String> {
     let start = Instant::now();
     if is_single_sqlserver_select(sql) {
         if let Ok(Some(query_sql)) = spatial_safe_sqlserver_query(client, sql).await {
             let stream = sqlserver_driver_result(client.query(query_sql.as_str(), &[])).await?;
-            return sqlserver_driver_result(collect_first_result_limited(stream, start, max_rows))
-                .await
-                .map(|result| vec![result]);
+            let result = sqlserver_driver_result(collect_first_result_limited(stream, start, max_rows)).await?;
+            let abandoned_wire = result.truncated;
+            return Ok((vec![result], abandoned_wire));
         }
     }
     let stream = sqlserver_driver_result(client.simple_query(sql)).await?;
@@ -1047,7 +1073,7 @@ pub async fn execute_batch_with_max_rows(
         });
     }
 
-    Ok(results)
+    Ok((results, false))
 }
 
 /// True when `sql` is the `SET SHOWPLAN_ALL ON; ...` estimated-plan wrapper.
@@ -1293,6 +1319,24 @@ mod tests {
         let execute_batch = source.split("pub async fn execute_batch").nth(1).unwrap();
         let execute_batch = execute_batch.split("#[cfg(test)]").next().unwrap();
         assert!(!execute_batch.contains("into_results"));
+    }
+
+    #[test]
+    fn sqlserver_first_result_collector_abandons_stream_at_row_limit() {
+        let source = include_str!("sqlserver.rs");
+        let collector = source.split("async fn collect_first_result_limited").nth(1).unwrap();
+        let collector = collector.split("struct SqlServerResultSet").next().unwrap();
+        assert!(
+            collector.contains("break;"),
+            "collect_first_result_limited must stop reading once the row limit is met; \
+             otherwise huge results keep streaming over TDS and get parsed just to be dropped"
+        );
+        let execute_query = source.split("pub async fn execute_query_with_max_rows").nth(1).unwrap();
+        let execute_query = execute_query.split("pub async fn execute_batch").next().unwrap();
+        assert!(
+            execute_query.contains("abandoned_wire"),
+            "execute_query_with_max_rows must surface the abandoned-wire flag so pools get rebuilt"
+        );
     }
 
     #[test]
