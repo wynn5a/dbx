@@ -113,8 +113,8 @@
 ### 后端
 
 - **[高] PG 连接池 `max_size(1)`**（`db/postgres.rs:1004`）：单库所有查询与元数据共用一条物理连接互相排队；schema 查询路径每次执行 SET/`RESET` `search_path`（`postgres.rs:1715/1733`，+2 RTT），回收用 `RecyclingMethod::Verified`（`:991`）再付一次校验往返。建议：小池（2-4）+ 仅在 search_path 实际变化时设置（或改用全限定名，代码库他处已生成）。MySQL 侧查询路径每次 checkout 都 ping（`mysql.rs:1448-1470`，上限 3s；元数据路径约 15 处直取连接不 ping）。
-- **[高] `fetch_size` 未接入原生驱动**：`QueryExecutionOptions.fetch_size` 字段已存在（`query.rs:57`）但只转发给 agent/插件驱动。MySQL/PG 的行数限制目前是客户端截断，剩余行仍在网络传输；接上后可用服务端游标（PG portal / MySQL `set_fetch_size`）真正截断。只有 ClickHouse 已做服务端限制（`max_result_rows` + `result_overflow_mode=break`）。
-- **[中] 表导入整文件进内存**（`table_import.rs:435,307-316,472-492`）：CSV/JSON 先整读 `Vec<Vec<Value>>`，再为整个文件物化全部 INSERT 语句才执行——GB 级文件 OOM；无事务包裹，失败留半截数据。csv crate 支持流式读取，改为按块 流式构建-执行-提交。
+- **[高] `fetch_size` 未接入原生驱动**：`QueryExecutionOptions.fetch_size` 字段已存在（`query.rs:57`）但只转发给 agent/插件驱动。**部分完成**：MySQL 行数限制现在会在到达上限时放弃响应流并重建连接池（不再把剩余行传完再丢，`a7bc2c3f`）；PG 文本回退路径不再用 simple_query 全量缓冲，改为扩展协议按行拉取、到达上限即停（`a326a649`）。剩余：MySQL/PG 尚未接服务端游标（PG portal / MySQL `set_fetch_size`）做真正的服务端截断；ClickHouse 已做服务端限制（`max_result_rows` + `result_overflow_mode=break`）。
+- ~~**[中] 表导入整文件进内存**~~ → 已完成 `eff7d94f`：表头专用解析先行确定列映射，随后按 batch_size 块流式读取-生成-执行 INSERT（CSV/TSV 逐条记录读盘），内存从 O(文件) 降为 O(批次)。
 - **[中] XLSX 导出无内存上限**（`table_export.rs:330-403`）：xlsx 分支把所有分页批次累积进 `all_rows`，worksheet XML 整个构建为一个 String；csv/json/markdown/sql 分支已是逐批流式写出，xlsx 应对齐（或接流式 xlsx writer）。
 - **[中] 导出用 OFFSET 分页**（`database_export.rs:493-567`、`csv_export.rs:83-135`）：服务端每页重扫 offset 行；前者另有每表无条件 `SELECT COUNT(*)`（`database_export.rs:482-490`，csv_export 无 COUNT 但同样只有 OFFSET）。`table_export.rs` 已实现 keyset 分页（启用判定 `:195-208`，`keyset_pagination_sql` 定义于 `transfer.rs:1558`），复用即可。
 - **[中] Redis 每操作先 `SELECT db`**（`redis_ops.rs` 多处，实现 `redis_driver.rs:418-423`）：db 未变时重复 SELECT 白付一个 RTT；每条连接被一把 `Mutex` 串行化所有操作，而 `MultiplexedConnection` 可 clone + pipeline。集群路径逐 key 删除（`redis_ops.rs:523-531`）可改 UNLINK pipeline。

@@ -21,7 +21,7 @@ const SUPPORTS_OKLCH =
 // ==================== 自定义主题配置 ====================
 // 在这里修改你喜欢的颜色！
 
-// Data Buddy design-system defaults (docs/design-system). Fills in the chrome and
+// Data Buddy design-system defaults. Fills in the chrome and
 // any syntax token a user theme leaves unset; values are the canonical DS dark
 // palette so the custom theme matches the rest of the app out of the box.
 const customThemeColors = {

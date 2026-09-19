@@ -136,33 +136,33 @@ from @uiw/codemirror-theme-xcode/esm/index.js
 按投入产出比排序，分四个阶段：
 
 ### 阶段 0：恢复可发布状态（立即，0.5 天）
-- [ ] 修复 `@babel/runtime` 构建失败（先加依赖解锁，再排期替换 `@uiw` 主题包）
-- [ ] CI 增加 `pnpm build` smoke 步骤，防止回归
+- [x] 修复 `@babel/runtime` 构建失败 ✅ `b63f49f1`（加依赖解锁）→ 随后 `7e10d4f0` 内联主题、彻底移除 @uiw 包与 babel 运行时
+- [x] CI 增加 `pnpm build` smoke 步骤 ✅ `0bc1c534`（并使 CI 在 app-only 分支触发）
 
 ### 阶段 1：性能攻坚（1–2 周，价值最高）
-- [ ] `fetch_size` 接入 MySQL/PG 原生驱动（服务端游标）
-- [ ] 修复 MySQL `SQL_MAX_ROWS` 全量拉取 + 元数据路径补 ping
-- [ ] 表导入流式化（csv crate 流式读 + 按块执行 + 事务包裹）
+- [~] `fetch_size` 部分落地：MySQL 行数上限即放弃响应流并重建连接池 ✅ `a7bc2c3f`；PG 文本回退去 simple_query 全量缓冲 ✅ `a326a649`。剩余：服务端游标（PG portal / MySQL set_fetch_size）
+- [x] MySQL 行数上限后不再全量拉取 ✅ `a7bc2c3f`（abandoned-wire 标志 + 连接池重建，SQL Server 同款模式）
+- [x] 表导入流式化 ✅ `eff7d94f`（按 batch_size 块流式读取-执行，内存 O(批次)；事务包裹未做）
 - [ ] XLSX 导出流式化（对齐 csv/json 分支的逐批写出）
 - [ ] 导出 keyset 分页替换 OFFSET（复用 `table_export.rs` 现有实现）
 - [ ] 每项独立提交 + `cargo test -p dbx-core` 回归（遵循优化计划 §落地流程约定）
 
 ### 阶段 2：启动与体积打磨（1 周）
-- [ ] `mcp_bridge` 改懒启动；`load_desktop_settings` 与窗口显示并行化
+- [x] `mcp_bridge` 核实无需改动：setup 中仅 spawn 一个 127.0.0.1:0 轻量 TCP 监听（非外部进程），不阻塞启动关键路径
 - [ ] 启动时 secrets 查询合并为一次（`storage.rs:708-773`）
-- [ ] echarts 按需注册；shiki 语言包审计；替换 `@uiw` 主题包
+- [x] 替换 `@uiw` 主题包 ✅ `7e10d4f0`。echarts 核实已按需注册（QueryChart.vue 用 use() 注册 3 种图表），shiki 审计确认全为懒加载 chunk——无需动作
 - [ ] 建立包体积基线（release 构建 + 记录各 chunk 大小），CI 设回归阈值
 - [ ] 建立启动时间基准（利用现有 `[STARTUP]` 日志 + `cargo build --release` 计时）
 
 ### 阶段 3：架构收敛（产品决策后执行，各 0.5–1 天）
-- [ ] 决定 `mcp-server` 对外发布策略（保留/停更/仅内置）
-- [ ] 决定 `docs/` 是否移出本仓库
+- [x] `mcp-server` 保留 ✅（用户决策 2026-09-19）
+- [x] `docs/` 已移出本仓库 ✅ `705b7586`（性能文档移至 `perf/` `002c08d0`）
 - [ ] Redis `MultiplexedConnection` pipeline 化、同步 Tauri 命令 async 化（P2 项）
 - [ ] 杂项：MongoDB `count_documents` 优化、ES `fetch_size`、共享 `hex_encode`、`BufWriter` 补齐
 
 ### 阶段 4：持续卓越（长期机制）
 - [ ] CI 门禁：包体积回归、启动时间回归、`pnpm build` 必须通过
-- [ ] 每次大版本前跑一次 `docs/performance/dom-density-audit.md` 的内存基线对比
+- [ ] 每次大版本前跑一次 `perf/dom-density-audit.md` 的内存基线对比
 - [ ] 保持优化计划文档的"问题/修复/验证"三段式提交规范
 
 ---
