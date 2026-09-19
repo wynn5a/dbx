@@ -143,8 +143,8 @@ from @uiw/codemirror-theme-xcode/esm/index.js
 - [~] `fetch_size` 部分落地：MySQL 行数上限即放弃响应流并重建连接池 ✅ `a7bc2c3f`；PG 文本回退去 simple_query 全量缓冲 ✅ `a326a649`。剩余：服务端游标（PG portal / MySQL set_fetch_size）
 - [x] MySQL 行数上限后不再全量拉取 ✅ `a7bc2c3f`（abandoned-wire 标志 + 连接池重建，SQL Server 同款模式）
 - [x] 表导入流式化 ✅ `eff7d94f`（按 batch_size 块流式读取-执行，内存 O(批次)；事务包裹未做）
-- [ ] XLSX 导出流式化（对齐 csv/json 分支的逐批写出）
-- [ ] 导出 keyset 分页替换 OFFSET（复用 `table_export.rs` 现有实现）
+- [x] XLSX 导出流式化 ✅ `ebd18a70`（`XlsxSheetStreamWriter` 逐页写 sidecar scratch，内存 O(页)；finish 输出与旧路径逐字节一致，取消不留残文件）
+- [x] 导出 keyset 分页替换 OFFSET ✅ `ebd18a70`（`transfer::keyset_pagination_eligible` 统一判定；`table_export` xlsx / `database_export` / `csv_export` 均优先 keyset、无可用 PK 回退 OFFSET）
 - [ ] 每项独立提交 + `cargo test -p dbx-core` 回归（遵循优化计划 §落地流程约定）
 
 ### 阶段 2：启动与体积打磨（1 周）
