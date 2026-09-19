@@ -16,7 +16,7 @@
 
 ## 已完成 ✅
 
-以下 7 项已全部实施、测试、提交并推送（分支 `app-only`）。
+以下 13 项已全部实施、测试、提交并推送（分支 `app-only`）。
 
 ### 1. Agent 守护进程：全局互斥锁改为按 daemon 分片 `d64c3b4c`
 
@@ -68,6 +68,42 @@
 
 **修复** 全列可见（默认场景）时直接共享物化项；有隐藏列才走逐行投影。选择/导出等消费方均为只读，已核实无变异。
 
+### 8. 数据网格：单元格编辑只重建触碰的行 `0c04e91e`
+
+**问题** 每次单元格提交替换整个 `dirtyRows` Map → `displayRowRefs`/`displayItems` 全量失效重建；搜索激活时 `searchMatches` 随之 O(行×列) 重扫。10 万行页大小时每次击键在主线程为每行分配对象。
+
+**修复** 行引用与行项按行缓存，有效性完全自校验（字段相等、rows/newRows 修订计数、脏项快照、基行身份）——编辑只重建触碰的行，变异点无需手动失效；搜索匹配按查询+行身份逐行缓存，搜索中提交只重扫被编辑的行。缓存项冻结，消费方逐一核实只读；`result.rows` 替换时整体清空。新增 `dataGridRowItems.test.ts`（12 用例）。
+
+### 9. 重命名对话框：预览防抖 + 高亮缓存 `1c4ddf74`
+
+**问题** 两个重命名入口（侧栏 TreeItem、ObjectBrowser）每击键一次 IPC invoke 刷新预览 SQL，且对话框每次击键对未变化的 SQL 重跑 Shiki `codeToHtml`（Shiki 无输入级缓存）。
+
+**修复** 预览刷新防抖 150ms（与应用其他输入防抖一致，既有 request-id 守卫仍负责排序在途结果）；高亮 HTML 在 computed 中预计算，仅预览 SQL 实际变化时才重跑 Shiki。
+
+### 10. 列表虚拟化：Mongo 文档 / 库搜索 / 数据对比 `cb67f918`
+
+**问题** `MongoDocBrowser.vue` 文档列表平铺 v-for（页大小可达 10 万）且每次渲染对每个文档前 3 键跑 `JSON.stringify`；`DatabaseSearchDialog.vue` 结果可累计数千张卡片；`DataCompareDialog.vue` 四处列表（源表、批次任务预览、批次结果汇总表、差异明细行——"显示全部"下无上界）全部未虚拟化。
+
+**修复** Mongo 文档列表改定高 RecycleScroller，预览按文档身份 WeakMap 缓存（每页只算一次）；库搜索结果行走 DynamicScroller（匹配列 badge 可换行、行高可变）配收缩式限高容器；数据对比的源表与任务预览走定高 RecycleScroller，差异明细与批次结果汇总表（`<table>` 改网格头+虚拟行）走 DynamicScroller，汇总行增加 `uid` 作稳定 key。回收视图内 `:last-child` 选择器永不生效，行边框移到行自身。
+
+### 11. KeepAlive 上限 4→12 `f05d1a88`
+
+**问题** 缓存上限 4 个标签内容，5 个以上查询标签时每次切换销毁/重建最久未用标签的 CodeMirror 实例（扩展、主题、补全装配全重来）；补全元数据虽有进程级缓存，编辑器本体重建仍每次付费。
+
+**修复** 上限提到 12，覆盖现实并发标签数，超出部分行为不变（仍按 LRU 逐出）。
+
+### 12. 前端杂项：导出单次拼接 + 编辑器主题 watcher 精准化 `3acbc486`
+
+**问题** `copyAll`/`formatCsv` 先 join 出完整 body 再插值拼接，大结果全量导出/复制峰值内存翻倍；`sqlInsertExportData` 全列可见（常态）时仍逐行重建投影。`QueryEditor.vue` 深度 watcher 监听整个 `editorSettings`，任何嵌套变化（页大小、Mongo 视图模式等）都重建 CodeMirror 主题并重配 3 个 compartment。
+
+**修复** 拼接改为 header+行片段一次 join；恒等投影直接共享行数组（与任务 7 同型）。主题 watcher 改为只对真正喂给编辑器外观的字段（字号/字体/换行/主题 id/解析后的自定义主题色/暗色）以 JSON key 精确跟踪。
+
+### 13. connectionStore 侧栏树浅响应化 `0321966c`
+
+**问题** `treeNodes` 是深响应 ref，数千表的 schema 每个节点都是响应式代理，树遍历、扁平化与渲染读取全付代理开销。
+
+**修复** 树改为 `shallowRef` + 纯对象节点（完全去代理）；所有写点按 id 走 `commitTreeNode`，只克隆根到变更节点的路径并换根数组，未动子树保持引用身份（虚拟列表按路径精准重渲染）。这取代了旧的就地变异纪律——捕获的节点引用按设计即分离，加载器 finally 中按 id 提交清 `isLoading` 天然落在当前实例上，原 `rebuildTreeNodes` 注释防的"旋转图标永久卡住"由结构性方案消除。刷新链路（refreshTreeNode/refreshAllTree/refreshStaleTreeNode/restoreExpandedChildren）在恢复展开前按 id 重查节点；TreeItem/ConnectionTree 的写入改走新 store 动作。新增 `connectionStoreTreeCommits.test.ts`（4 用例：节点非代理、提交换根、经 stale 实例按 id 落点、合并保留展开与已加载 children）。
+
 ---
 
 ## 待办 📋
@@ -88,12 +124,14 @@
 
 ### 前端
 
-- **[高] DataGrid 编辑路径全量重建**（`DataGrid.vue:2455`、`useDataGridEditor.ts:515`、`DataGrid.vue:2496-2510`）：每次单元格提交替换整个 `dirtyRows` Map → `displayRowRefs`/`displayItems` 全量失效重建；搜索激活时 `searchMatches` 随之 O(行×列) 重扫。10 万行页大小时每次击键在主线程分配 10 万个对象。方向：行项按需构建（canvas 路径已有 `displayItemAt(rowIndex)`，DOM 路径与搜索改用它）、搜索基于原始行数组 + 修订计数器。（Task 7 已消除全列可见时的投影拷贝，此处是更深一层的惰性化。）
-- **[中] 重命名对话框每击键一次 IPC + 一次 Shiki 高亮**（`TreeItem.vue:1448-1460` watch → `buildRenameObjectSql` invoke，`v-html` 同步 `codeToHtml`；`ObjectBrowser.vue:524-526` watch → 同一 invoke，`:1651` `v-html`）：两个重命名入口都是未防抖的击键→IPC 路径，全库仅此两处。
-- **[中] Mongo 文档浏览器 / 数据库搜索 / 数据对比列表未虚拟化**（`MongoDocBrowser.vue:1211` 平铺 v-for + 每次渲染对每个文档前 3 键跑 `JSON.stringify`；`DatabaseSearchDialog.vue:363` 结果可累计数千；`DataCompareDialog.vue` 五处以上列表：源表/目标表/预览/结果/差异详情）。应用已有的 RecycleScroller 模式。
-- **[中] KeepAlive max=4 重建编辑器**（`App.vue:1070-1073`）：超过 4 个查询标签时每次切换销毁/重建 CodeMirror 实例并重装补全元数据（缓存未命中才重新走 IPC；进程级缓存 `connectionStore.completionObjectsCache` 上限 50 已存在，可共享）。
-- **[低] connectionStore 树全量深响应**（`stores/connectionStore.ts:125`）：数千表的 schema 每个节点都是响应式代理。改 `shallowRef` + 不可变节点替换可消除代理开销（树已虚拟化，影响有界）。
-- **[低] 杂项**：`useDataGridExport.ts:457,491,779` 全量导出同步拼接大字符串（用户触发，10 万行可感知；table-data 上下文的全表导出已走后端流式路径 `exportFullTableDataViaBackend`，热点是查询结果全量导出/部分行导出/复制）；`QueryEditor.vue:2193-2214` 深度 watcher 监听整个 editorSettings 对象、任何嵌套变化重建 CodeMirror 主题。
+以下条目已全部落地（任务 8–13），前端暂无待办：
+
+- ~~[高] DataGrid 编辑路径全量重建~~ → 任务 8 `0c04e91e`
+- ~~[中] 重命名对话框每击键一次 IPC + 一次 Shiki 高亮~~ → 任务 9 `1c4ddf74`
+- ~~[中] Mongo 文档浏览器 / 数据库搜索 / 数据对比列表未虚拟化~~ → 任务 10 `cb67f918`
+- ~~[中] KeepAlive max=4 重建编辑器~~ → 任务 11 `f05d1a88`
+- ~~[低] connectionStore 树全量深响应~~ → 任务 13 `0321966c`
+- ~~[低] 杂项（导出字符串拼接、QueryEditor 深度 watcher）~~ → 任务 12 `3acbc486`
 
 ---
 
