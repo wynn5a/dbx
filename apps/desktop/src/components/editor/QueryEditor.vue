@@ -2189,29 +2189,41 @@ function getCurrentCustomThemeColors() {
   return activeTheme?.colors ?? settings.customThemeColors;
 }
 
-// Reactively apply editor settings changes
-watch(
-  [() => settingsStore.editorSettings, () => isDark.value],
-  async ([ss]) => {
-    if (!view.value || !codeMirrorTheme || !fontThemeComp || !wordWrapComp || !runKeymapComp || !editorViewModule) {
-      return;
-    }
-    if (!isGestureZooming.value && !zoomCommitScheduler.hasPendingCommit() && liveFontSize.value !== ss.fontSize) {
-      liveFontSize.value = ss.fontSize;
-    }
-    syncEditorFontCssVars(liveFontSize.value, ss.fontFamily);
-    const themeColors = getCurrentCustomThemeColors();
-    const themeExt = await loadEditorTheme(ss.theme, editorThemeAppearance(), themeColors);
-    view.value.dispatch({
-      effects: [
-        codeMirrorTheme.reconfigure(themeExt),
-        wordWrapComp.reconfigure(props.forceWordWrap || ss.wordWrap ? editorViewModule.EditorView.lineWrapping : []),
-        runKeymapComp.reconfigure(runKeymapExtension(editorViewModule.keymap)),
-      ],
-    });
-  },
-  { deep: true },
-);
+// Reactively apply editor settings changes. Key on exactly the settings that
+// feed the editor chrome (plus their nested custom-theme colors): a plain deep
+// watcher on the whole editorSettings object would rebuild the CodeMirror
+// theme for unrelated edits like page size or Mongo view mode.
+const editorThemeSettingsKey = computed(() => {
+  const settings = settingsStore.editorSettings;
+  return JSON.stringify([
+    settings.fontSize,
+    settings.fontFamily,
+    settings.wordWrap,
+    settings.theme,
+    getCurrentCustomThemeColors(),
+    isDark.value,
+  ]);
+});
+
+watch(editorThemeSettingsKey, async () => {
+  const ss = settingsStore.editorSettings;
+  if (!view.value || !codeMirrorTheme || !fontThemeComp || !wordWrapComp || !runKeymapComp || !editorViewModule) {
+    return;
+  }
+  if (!isGestureZooming.value && !zoomCommitScheduler.hasPendingCommit() && liveFontSize.value !== ss.fontSize) {
+    liveFontSize.value = ss.fontSize;
+  }
+  syncEditorFontCssVars(liveFontSize.value, ss.fontFamily);
+  const themeColors = getCurrentCustomThemeColors();
+  const themeExt = await loadEditorTheme(ss.theme, editorThemeAppearance(), themeColors);
+  view.value.dispatch({
+    effects: [
+      codeMirrorTheme.reconfigure(themeExt),
+      wordWrapComp.reconfigure(props.forceWordWrap || ss.wordWrap ? editorViewModule.EditorView.lineWrapping : []),
+      runKeymapComp.reconfigure(runKeymapExtension(editorViewModule.keymap)),
+    ],
+  });
+});
 
 watch(
   () => settingsStore.editorSettings.snippets,

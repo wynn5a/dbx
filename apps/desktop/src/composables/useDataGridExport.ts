@@ -453,9 +453,13 @@ export function useDataGridExport(options: UseDataGridExportOptions) {
   });
 
   async function copyAll() {
-    const header = columns.value.join("\t");
-    const body = displayItems.value.map((item) => item.data.map((c) => displayCellValue(c)).join("\t")).join("\n");
-    await copyText(`${header}\n${body}`);
+    // Single join over header + row fragments: concatenating a pre-joined body
+    // into a template literal copies the full payload a second time.
+    const parts: string[] = [columns.value.join("\t")];
+    for (const item of displayItems.value) {
+      parts.push(item.data.map((c) => displayCellValue(c)).join("\t"));
+    }
+    await copyText(parts.join("\n"));
   }
 
   // --- Export functions ---
@@ -773,10 +777,16 @@ export function useDataGridExport(options: UseDataGridExportOptions) {
     const columnIndexes = exportColumns
       .map((column, index) => ({ column, index }))
       .filter((item): item is { column: string; index: number } => !!item.column);
+    // Every column visible in order is the common case; the rows then pass
+    // through unprojected instead of being rebuilt row by row.
+    const identityProjection =
+      columnIndexes.length === result.columns.length && columnIndexes.every((item, index) => item.index === index);
     return {
       columns: columnIndexes.map((item) => item.column),
       columnTypes: tableMeta.value ? columnIndexes.map((item) => columnTypes.value?.[item.index]) : undefined,
-      rows: result.rows.map((row) => columnIndexes.map((item) => row[item.index] ?? null)),
+      rows: identityProjection
+        ? result.rows
+        : result.rows.map((row) => columnIndexes.map((item) => row[item.index] ?? null)),
     };
   }
 

@@ -6,8 +6,11 @@ export type ExportCellValue = string | number | boolean | null;
 export function formatCsv(columns: string[], rows: ExportCellValue[][]): string {
   const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
   const header = columns.map(esc).join(",");
-  const body = rows.map((row) => row.map((c) => esc(c === null ? "" : String(c))).join(",")).join("\n");
-  return `${header}\n${body}`;
+  const parts = [header];
+  for (const row of rows) {
+    parts.push(row.map((c) => esc(c === null ? "" : String(c))).join(","));
+  }
+  return parts.join("\n");
 }
 
 export interface FormatSqlInsertOptions {
