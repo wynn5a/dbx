@@ -1068,6 +1068,11 @@ const showRenameObjectDialog = ref(false);
 const renameObjectName = ref("");
 const renameObjectError = ref("");
 const renameObjectPreviewSql = ref("");
+// Shiki has no input-level cache; precompute the HTML so the dialog's
+// per-keystroke re-renders don't re-highlight an unchanged preview.
+const renameObjectPreviewHtml = computed(() =>
+  renameObjectPreviewSql.value ? highlight(renameObjectPreviewSql.value) : "",
+);
 const dropTablePreviewSql = ref("");
 const emptyTablePreviewSql = ref("");
 const truncateTablePreviewSql = ref("");
@@ -1445,6 +1450,12 @@ async function refreshRenameObjectPreviewSql() {
   }
 }
 
+// The preview SQL is built by an IPC invoke; debounce it so typing a new name
+// doesn't fire one invoke per keystroke (the request-id guard still orders any
+// in-flight results).
+const RENAME_PREVIEW_DEBOUNCE_MS = 150;
+let renameObjectPreviewTimer: number | undefined;
+
 watch(
   [
     showRenameObjectDialog,
@@ -1455,7 +1466,15 @@ watch(
     () => currentDatabaseType(),
   ],
   () => {
-    void refreshRenameObjectPreviewSql();
+    if (typeof window === "undefined") {
+      void refreshRenameObjectPreviewSql();
+      return;
+    }
+    window.clearTimeout(renameObjectPreviewTimer);
+    renameObjectPreviewTimer = window.setTimeout(() => {
+      renameObjectPreviewTimer = undefined;
+      void refreshRenameObjectPreviewSql();
+    }, RENAME_PREVIEW_DEBOUNCE_MS);
   },
 );
 
@@ -3576,7 +3595,7 @@ function treeItemMenuItems(): ContextMenuItem[] {
       <pre
         v-if="renameObjectPreviewSql"
         class="max-h-32 overflow-auto rounded bg-[var(--ds-bg-canvas)] border border-[var(--ds-border-soft)] p-3 text-xs whitespace-pre-wrap"
-        v-html="highlight(renameObjectPreviewSql)"
+        v-html="renameObjectPreviewHtml"
       ></pre>
       <p v-if="renameObjectError" class="text-sm text-[var(--ds-red)]">{{ renameObjectError }}</p>
     </div>
