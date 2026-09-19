@@ -16,7 +16,7 @@
 
 ## 已完成 ✅
 
-以下 13 项已全部实施、测试、提交并推送（分支 `app-only`）。
+以下 18 项已全部实施、测试、提交并推送（分支 `app-only`）。
 
 ### 1. Agent 守护进程：全局互斥锁改为按 daemon 分片 `d64c3b4c`
 
@@ -104,34 +104,43 @@
 
 **修复** 树改为 `shallowRef` + 纯对象节点（完全去代理）；所有写点按 id 走 `commitTreeNode`，只克隆根到变更节点的路径并换根数组，未动子树保持引用身份（虚拟列表按路径精准重渲染）。这取代了旧的就地变异纪律——捕获的节点引用按设计即分离，加载器 finally 中按 id 提交清 `isLoading` 天然落在当前实例上，原 `rebuildTreeNodes` 注释防的"旋转图标永久卡住"由结构性方案消除。刷新链路（refreshTreeNode/refreshAllTree/refreshStaleTreeNode/restoreExpandedChildren）在恢复展开前按 id 重查节点；TreeItem/ConnectionTree 的写入改走新 store 动作。新增 `connectionStoreTreeCommits.test.ts`（4 用例：节点非代理、提交换根、经 stale 实例按 id 落点、合并保留展开与已加载 children）。
 
+### 14. PG 连接池扩容 + search_path 事务内作用域 + Fast 回收 `2279655a`
+
+**问题** 单库 PG 池 `max_size(1)`（`db/postgres.rs`）：所有查询、元数据与长事务在一条物理连接上排队；schema 查询每次 `SET`+`RESET` search_path（+2 RTT）；`RecyclingMethod::Verified` 每次 checkout 付一次校验往返。会话时区只在首条连接上 `SET` 一次。
+
+**修复** 池扩到 3（与 MySQL 查询池一致；交互式多语句事务本就经 `execute_statements_in_transaction` 钉住专用连接）。会话时区移入启动包 `options`（`-c timezone=...`），每条新建连接天然生效、零 RTT，值域收敛到 IANA 字符集防启动包被拆词。SELECT 路径 schema 作用域改为游标事务内 `SET LOCAL search_path`，与 `BEGIN`/`DECLARE` 合并为一次 batch（每查询净省 2 RTT，ROLLBACK 自动还原）；DML 保持会话级 SET/RESET 括号。`Verified` → `Fast`：空闲期被杀的连接改由查询路径透明重试一次吸收（SELECT 对任意非 DB 错误重试、DML 仅对语句未上线的 `is_closed` 重试），语义不劣于原预校验。
+
+### 15. Redis：跳过未变化的会话 db SELECT `b634a11c`
+
+**问题** 每个浏览操作先 `SELECT db`——固定浏览同一 db 时白付一个 RTT（`redis_ops.rs` 约 20 处调用点）。
+
+**修复** 直连/Sentinel 连接包装为 `RedisDirectConnection`（实现 `ConnectionLike` 委托全部命令，调用点零改动），跟踪当前会话 db：初始值取 URL `/db` 路径（Sentinel 恒 0），`select_db` 仅在变化时发送。控制台可执行用户输入的 SELECT，直连路径改用 `execute_command_tracked` 成功后回写跟踪值（参数不可解析则置未知强制重 SELECT）；断线重建时随新连接重新初始化。集群逐 key 删除保持不变——redis-rs 0.32 pipeline 强制单槽（跨槽报 `CrossSlot`），现状即正确写法。
+
+### 16. Tauri 同步导出构建器移出主线程 `afadbc0e`
+
+**问题** `build_export_insert_statements` / `build_export_sql_insert` / `build_database_sql_export` 是同步命令，主线程逐行生成 INSERT/整库 SQL，大表导出期间 UI 冻结。
+
+**修复** 三个命令改 async + `spawn_blocking`，命令名与契约不变、前端零改动。csv/xlsx 导出命令此前已是 async + spawn_blocking；其结果集 JSON 经 IPC 往返的成本属前端主导的导出架构（前端发起、前端写盘），保持现状。
+
+### 17. MongoDB：无过滤页计数走元数据 + 批次对齐 `243815c6`
+
+**问题** 文档浏览每页 `count_documents`——无过滤时全表扫描，大集合每次翻页全量计数；find/aggregate 未设 `batch_size`，首页默认小批次再多次 getMore。
+
+**修复** 无过滤改 `estimated_document_count`（元数据 O(1)，分页总数近似可接受）；带过滤仍精确计数。find 的 batch_size 对齐页大小、aggregate 对齐 fetch_limit。ES SQL 经核实无需处理：响应本就按 cursor 分页（默认 fetch_size=1000，解析层已处理 has_more），不存在全量缓冲。
+
+### 18. 杂项：线性 sqlite 规范化、共享 hex、缓冲导出、一次载入 secrets `ac716fec`
+
+sqlite SQL 规范化去掉每个标识符边界对剩余后缀的 collect+lowercase（O(n²)→线性，仅比较别名窗口）；DuckDB blob 十六进制改共享 `db::hex_encode`、Redis `\x` 转义改 `write!` 原地追加（消除逐字节堆分配）；整库 SQL 导出文件写入包 `BufWriter` + 显式 flush；`load_connections` 启动时一次查询载入全部 secrets（原为每连接每密钥一查）。`schema.rs` get_table_comment 通用回退维持现状：list_tables 已按表名过滤 + 256 上限兜底。
+
 ---
 
 ## 待办 📋
 
-按预期收益排序。前置事实：前端结果分页默认 100 行，但用户可调到 `MAX_RESULT_PAGE_SIZE = 100000`（`lib/paginationPageSize.ts`）——大部分前端热点在这个配置下才咬人；后端默认 `MAX_ROWS = 10000`（`query.rs:15`）。
+截至 2026-09-19，原待办条目已全部落地或经核实关闭（结论并入已完成条目 14–18）。经调查后**有意不做**的记录：
 
-### 后端
-
-- **[高] PG 连接池 `max_size(1)`**（`db/postgres.rs:1004`）：单库所有查询与元数据共用一条物理连接互相排队；schema 查询路径每次执行 SET/`RESET` `search_path`（`postgres.rs:1715/1733`，+2 RTT），回收用 `RecyclingMethod::Verified`（`:991`）再付一次校验往返。建议：小池（2-4）+ 仅在 search_path 实际变化时设置（或改用全限定名，代码库他处已生成）。MySQL 侧查询路径每次 checkout 都 ping（`mysql.rs:1448-1470`，上限 3s；元数据路径约 15 处直取连接不 ping）。
-- **[高] `fetch_size` 未接入原生驱动**：`QueryExecutionOptions.fetch_size` 字段已存在（`query.rs:57`）但只转发给 agent/插件驱动。**部分完成**：MySQL 行数限制现在会在到达上限时放弃响应流并重建连接池（不再把剩余行传完再丢，`a7bc2c3f`）；PG 两条查询路径（prepared 与文本回退）已改服务端游标：`BEGIN` + `DECLARE ... NO SCROLL CURSOR` + `FETCH row_limit`，后端产出行数即止，放弃的游标由 ROLLBACK 关闭、池化会话保持干净（`a326a649`、`8d3fc36d`）。剩余：MySQL 尚未接 `set_fetch_size` 做真正的服务端截断；ClickHouse 已做服务端限制（`max_result_rows` + `result_overflow_mode=break`）。
-- ~~**[中] 表导入整文件进内存**~~ → 已完成 `eff7d94f`：表头专用解析先行确定列映射，随后按 batch_size 块流式读取-生成-执行 INSERT（CSV/TSV 逐条记录读盘），内存从 O(文件) 降为 O(批次)。
-- **[中] XLSX 导出无内存上限**（`table_export.rs:330-403`）：~~xlsx 分支把所有分页批次累积进 `all_rows`~~ → 已完成 `ebd18a70`：xlsx 分支改为 `XlsxSheetStreamWriter` 逐页写 sidecar scratch、finish 时组装 workbook，内存从 O(全表) 降为 O(页)，输出与旧路径逐字节一致。
-- **[中] 导出用 OFFSET 分页**（`database_export.rs:493-567`、`csv_export.rs:83-135`）：~~服务端每页重扫 offset 行~~ → 已完成 `ebd18a70`：三处导出（`table_export` xlsx、`database_export` 整库、`csv_export`）统一经 `transfer::keyset_pagination_eligible` 判定，PK 可用时用 keyset 游标、无 PK 回退 OFFSET。`database_export` 每表无条件 `SELECT COUNT(*)` 保留（进度条需要 total_rows）。
-- **[中] Redis 每操作先 `SELECT db`**（`redis_ops.rs` 多处，实现 `redis_driver.rs:418-423`）：db 未变时重复 SELECT 白付一个 RTT；每条连接被一把 `Mutex` 串行化所有操作，而 `MultiplexedConnection` 可 clone + pipeline。集群路径逐 key 删除（`redis_ops.rs:523-531`）可改 UNLINK pipeline。
-- **[中] 同步 Tauri 命令在主线程拼接大字符串**（`src-tauri/src/commands/query.rs:483-502` 三个 INSERT/整库导出构建器是同步命令；`commands/csv_export.rs`/`xlsx_export.rs` 让整个结果集作为 JSON 跨 IPC 往返——编码本身已放 `spawn_blocking`，代价在 IPC 序列化与两侧内存拷贝）。重活应走 async + 事件进度（导出/导入/迁移的其余部分已正确这么做）。
-- **[低] MongoDB 每页 `count_documents`**（`db/mongo_driver.rs:125-145`，无索引时全扫描）且 find 未设 `batch_size`；ES SQL 无 `fetch_size` 全量缓冲响应（`elasticsearch_driver.rs:768-788`，DSL 路径已正确分页）。
-- **[低] 杂项**：`schema.rs:575` 通用 get_table_comment 兜底列出 256 张表找一个注释；`sqlite.rs:506-589` SQL 规范化在每个标识符边界对剩余整个后缀做 to_lowercase（最坏 O(n²)）；`query.rs:111,151` 与 `redis_driver.rs:1205` blob 十六进制编码逐字节 `format!`（应使用 `db/mod.rs:56-64` 的共享 `hex_encode`）；`database_export.rs:354` 文件写入未包 `BufWriter`（Windows/网络盘明显）；`storage.rs:708-773` 启动时逐 secret 逐条查询可合并为一次。
-
-### 前端
-
-以下条目已全部落地（任务 8–13），前端暂无待办：
-
-- ~~[高] DataGrid 编辑路径全量重建~~ → 任务 8 `0c04e91e`
-- ~~[中] 重命名对话框每击键一次 IPC + 一次 Shiki 高亮~~ → 任务 9 `1c4ddf74`
-- ~~[中] Mongo 文档浏览器 / 数据库搜索 / 数据对比列表未虚拟化~~ → 任务 10 `cb67f918`
-- ~~[中] KeepAlive max=4 重建编辑器~~ → 任务 11 `f05d1a88`
-- ~~[低] connectionStore 树全量深响应~~ → 任务 13 `0321966c`
-- ~~[低] 杂项（导出字符串拼接、QueryEditor 深度 watcher）~~ → 任务 12 `3acbc486`
+- **MySQL `set_fetch_size` 服务端截断**：不可行。项目所用 mysql_async fork（t8y2 rev 7b565fb，上游 0.37 同）无 `set_fetch_size`/COM_STMT_FETCH 服务端游标 API；且 MySQL 只读游标在服务端整体物化结果集，对大表是比"提前断流 + 重建池"（`a7bc2c3f` 已落地）更差的服务端副作用。行数限制维持现状。
+- **Redis 集群逐 key 删除改 pipeline**：redis-rs 0.32 的集群 pipeline 强制单槽（跨槽 `CrossSlot` 错误），逐 key 循环即正确写法（并入条目 15）。
+- **csv/xlsx 导出结果集 IPC 往返**：编码已在 spawn_blocking，序列化/拷贝成本根植于前端发起-前端写盘的导出架构；若要消除需后端托管导出全流程（连接、查询、写盘、进度），改动面大，暂不立项。
 
 ---
 
