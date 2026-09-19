@@ -76,24 +76,24 @@
 
 ### 后端
 
-- **[高] PG 连接池 `max_size(1)`**（`db/postgres.rs:1014-1020`）：单库所有查询与元数据共用一条物理连接互相排队；每次 checkout 还有 `SET search_path`/`RESET`（+2 RTT）与 `RecyclingMethod::Verified` 校验往返。建议：小池（2-4）+ 仅在 search_path 实际变化时设置（或改用全限定名，代码库他处已生成）。MySQL 侧每次 checkout 都 ping（`mysql.rs:1454-1470`，上限 3s）。
-- **[高] `fetch_size` 未接入原生驱动**：`QueryExecutionOptions.fetch_size` 字段已存在（`query.rs:56`）但只转发给 agent/插件驱动。MySQL/PG 的行数限制目前是客户端截断，剩余行仍在网络传输；接上后可用服务端游标（PG portal / MySQL `set_fetch_size`）真正截断。只有 ClickHouse 已做服务端限制（`max_result_rows` + `result_overflow_mode=break`）。
+- **[高] PG 连接池 `max_size(1)`**（`db/postgres.rs:1004`）：单库所有查询与元数据共用一条物理连接互相排队；schema 查询路径每次执行 SET/`RESET` `search_path`（`postgres.rs:1715/1733`，+2 RTT），回收用 `RecyclingMethod::Verified`（`:991`）再付一次校验往返。建议：小池（2-4）+ 仅在 search_path 实际变化时设置（或改用全限定名，代码库他处已生成）。MySQL 侧查询路径每次 checkout 都 ping（`mysql.rs:1448-1470`，上限 3s；元数据路径约 15 处直取连接不 ping）。
+- **[高] `fetch_size` 未接入原生驱动**：`QueryExecutionOptions.fetch_size` 字段已存在（`query.rs:57`）但只转发给 agent/插件驱动。MySQL/PG 的行数限制目前是客户端截断，剩余行仍在网络传输；接上后可用服务端游标（PG portal / MySQL `set_fetch_size`）真正截断。只有 ClickHouse 已做服务端限制（`max_result_rows` + `result_overflow_mode=break`）。
 - **[中] 表导入整文件进内存**（`table_import.rs:435,307-316,472-492`）：CSV/JSON 先整读 `Vec<Vec<Value>>`，再为整个文件物化全部 INSERT 语句才执行——GB 级文件 OOM；无事务包裹，失败留半截数据。csv crate 支持流式读取，改为按块 流式构建-执行-提交。
 - **[中] XLSX 导出无内存上限**（`table_export.rs:330-403`）：xlsx 分支把所有分页批次累积进 `all_rows`，worksheet XML 整个构建为一个 String；csv/json/markdown/sql 分支已是逐批流式写出，xlsx 应对齐（或接流式 xlsx writer）。
-- **[中] 导出用 OFFSET 分页**（`database_export.rs:493-567`、`csv_export.rs:83-135`）：服务端每页重扫 offset 行，另有每表无条件 `SELECT COUNT(*)`。`table_export.rs:195-208` 已实现 keyset 分页（`keyset_pagination_sql`），复用即可。
-- **[中] Redis 每操作先 `SELECT db`**（`redis_ops.rs` 多处，实现 `redis_driver.rs:419-424`）：db 未变时重复 SELECT 白付一个 RTT；单连接被全局 mutex 串行化，而 `MultiplexedConnection` 可 clone + pipeline。集群路径逐 key 删除（`redis_ops.rs:526-531`）可改 UNLINK pipeline。
-- **[中] 同步 Tauri 命令在主线程拼接大字符串**（`commands/query.rs:484-502` 的 INSERT 导出构建器是同步命令；`commands/csv_export.rs`/`xlsx_export.rs` 让整个结果集作为 JSON 跨 IPC 往返）。重活应走 async + 事件进度（导出/导入/迁移的其余部分已正确这么做）。
+- **[中] 导出用 OFFSET 分页**（`database_export.rs:493-567`、`csv_export.rs:83-135`）：服务端每页重扫 offset 行；前者另有每表无条件 `SELECT COUNT(*)`（`database_export.rs:482-490`，csv_export 无 COUNT 但同样只有 OFFSET）。`table_export.rs` 已实现 keyset 分页（启用判定 `:195-208`，`keyset_pagination_sql` 定义于 `transfer.rs:1558`），复用即可。
+- **[中] Redis 每操作先 `SELECT db`**（`redis_ops.rs` 多处，实现 `redis_driver.rs:418-423`）：db 未变时重复 SELECT 白付一个 RTT；每条连接被一把 `Mutex` 串行化所有操作，而 `MultiplexedConnection` 可 clone + pipeline。集群路径逐 key 删除（`redis_ops.rs:523-531`）可改 UNLINK pipeline。
+- **[中] 同步 Tauri 命令在主线程拼接大字符串**（`src-tauri/src/commands/query.rs:483-502` 三个 INSERT/整库导出构建器是同步命令；`commands/csv_export.rs`/`xlsx_export.rs` 让整个结果集作为 JSON 跨 IPC 往返——编码本身已放 `spawn_blocking`，代价在 IPC 序列化与两侧内存拷贝）。重活应走 async + 事件进度（导出/导入/迁移的其余部分已正确这么做）。
 - **[低] MongoDB 每页 `count_documents`**（`db/mongo_driver.rs:125-145`，无索引时全扫描）且 find 未设 `batch_size`；ES SQL 无 `fetch_size` 全量缓冲响应（`elasticsearch_driver.rs:768-788`，DSL 路径已正确分页）。
-- **[低] 杂项**：`schema.rs:575` 通用 get_table_comment 兜底列出 256 张表找一个注释；`sqlite.rs:506-589` SQL 规范化逐字符 + 每位置 to_lowercase；`query.rs:111,151` blob 十六进制编码逐字节 `format!`（应使用 `db/mod.rs:56-64` 的共享 `hex_encode`）；`database_export.rs:354` 文件写入未包 `BufWriter`（Windows/网络盘明显）；`storage.rs:708-773` 启动时逐 secret 逐条查询可合并为一次。
+- **[低] 杂项**：`schema.rs:575` 通用 get_table_comment 兜底列出 256 张表找一个注释；`sqlite.rs:506-589` SQL 规范化在每个标识符边界对剩余整个后缀做 to_lowercase（最坏 O(n²)）；`query.rs:111,151` 与 `redis_driver.rs:1205` blob 十六进制编码逐字节 `format!`（应使用 `db/mod.rs:56-64` 的共享 `hex_encode`）；`database_export.rs:354` 文件写入未包 `BufWriter`（Windows/网络盘明显）；`storage.rs:708-773` 启动时逐 secret 逐条查询可合并为一次。
 
 ### 前端
 
-- **[高] DataGrid 编辑路径全量重建**（`DataGrid.vue:2455`、`useDataGridEditor.ts:515`、`DataGrid.vue:2497-2509`）：每次单元格提交替换整个 `dirtyRows` Map → `displayRowRefs`/`displayItems` 全量失效重建；搜索激活时 `searchMatches` 随之 O(行×列) 重扫。10 万行页大小时每次击键在主线程分配 10 万个对象。方向：行项按需构建（canvas 路径已有 `displayItemAt(rowIndex)`，DOM 路径与搜索改用它）、搜索基于原始行数组 + 修订计数器。（Task 7 已消除全列可见时的投影拷贝，此处是更深一层的惰性化。）
-- **[中] 重命名对话框每击键一次 IPC + 一次 Shiki 高亮**（`TreeItem.vue:1448-1463` → `buildRenameObjectSql` invoke，`v-html` 同步 `codeToHtml`）：全库唯一未防抖的击键→IPC 路径。
-- **[中] Mongo 文档浏览器 / 数据库搜索 / 数据对比列表未虚拟化**（`MongoDocBrowser.vue:1211` 平铺 v-for + 每次渲染对每个文档前 3 键跑 `JSON.stringify`；`DatabaseSearchDialog.vue:363` 结果可累计数千；`DataCompareDialog.vue` 三处列表）。应用已有的 RecycleScroller 模式。
-- **[中] KeepAlive max=4 重建编辑器**（`App.vue:1070-1073`）：超过 4 个查询标签时每次切换销毁/重建 CodeMirror 实例并重新拉补全元数据，而进程级缓存 `connectionStore.completionObjectsCache`（上限 50）已存在，可共享。
+- **[高] DataGrid 编辑路径全量重建**（`DataGrid.vue:2455`、`useDataGridEditor.ts:515`、`DataGrid.vue:2496-2510`）：每次单元格提交替换整个 `dirtyRows` Map → `displayRowRefs`/`displayItems` 全量失效重建；搜索激活时 `searchMatches` 随之 O(行×列) 重扫。10 万行页大小时每次击键在主线程分配 10 万个对象。方向：行项按需构建（canvas 路径已有 `displayItemAt(rowIndex)`，DOM 路径与搜索改用它）、搜索基于原始行数组 + 修订计数器。（Task 7 已消除全列可见时的投影拷贝，此处是更深一层的惰性化。）
+- **[中] 重命名对话框每击键一次 IPC + 一次 Shiki 高亮**（`TreeItem.vue:1448-1460` watch → `buildRenameObjectSql` invoke，`v-html` 同步 `codeToHtml`；`ObjectBrowser.vue:524-526` watch → 同一 invoke，`:1651` `v-html`）：两个重命名入口都是未防抖的击键→IPC 路径，全库仅此两处。
+- **[中] Mongo 文档浏览器 / 数据库搜索 / 数据对比列表未虚拟化**（`MongoDocBrowser.vue:1211` 平铺 v-for + 每次渲染对每个文档前 3 键跑 `JSON.stringify`；`DatabaseSearchDialog.vue:363` 结果可累计数千；`DataCompareDialog.vue` 五处以上列表：源表/目标表/预览/结果/差异详情）。应用已有的 RecycleScroller 模式。
+- **[中] KeepAlive max=4 重建编辑器**（`App.vue:1070-1073`）：超过 4 个查询标签时每次切换销毁/重建 CodeMirror 实例并重装补全元数据（缓存未命中才重新走 IPC；进程级缓存 `connectionStore.completionObjectsCache` 上限 50 已存在，可共享）。
 - **[低] connectionStore 树全量深响应**（`stores/connectionStore.ts:125`）：数千表的 schema 每个节点都是响应式代理。改 `shallowRef` + 不可变节点替换可消除代理开销（树已虚拟化，影响有界）。
-- **[低] 杂项**：`useDataGridExport.ts:457,491,779` 全量导出同步拼接大字符串（用户触发，10 万行可感知）；`QueryEditor.vue:2226-2248` 深度 watcher 监听整个 editorSettings 对象、任何嵌套变化重建 CodeMirror 主题。
+- **[低] 杂项**：`useDataGridExport.ts:457,491,779` 全量导出同步拼接大字符串（用户触发，10 万行可感知；table-data 上下文的全表导出已走后端流式路径 `exportFullTableDataViaBackend`，热点是查询结果全量导出/部分行导出/复制）；`QueryEditor.vue:2193-2214` 深度 watcher 监听整个 editorSettings 对象、任何嵌套变化重建 CodeMirror 主题。
 
 ---
 
