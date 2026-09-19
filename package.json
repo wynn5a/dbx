@@ -23,6 +23,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@babel/runtime": "8.0.5",
     "@codemirror/autocomplete": "^6.20.2",
     "@codemirror/commands": "^6.10.3",
     "@codemirror/lang-json": "^6.0.2",
