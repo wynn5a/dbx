@@ -481,24 +481,31 @@ pub fn build_hive_table_properties_sql(
 }
 
 #[tauri::command]
-pub fn build_export_insert_statements(
+pub async fn build_export_insert_statements(
     options: dbx_core::database_export::BuildExportInsertStatementsOptions,
 ) -> Result<Vec<String>, String> {
-    dbx_core::database_export::build_export_insert_statements(options)
+    // Whole-table INSERT generation is O(rows); keep it off the main thread.
+    tauri::async_runtime::spawn_blocking(move || dbx_core::database_export::build_export_insert_statements(options))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn build_export_sql_insert(
+pub async fn build_export_sql_insert(
     options: dbx_core::database_export::BuildExportSqlInsertOptions,
 ) -> Result<String, String> {
-    dbx_core::database_export::build_export_sql_insert(options)
+    tauri::async_runtime::spawn_blocking(move || dbx_core::database_export::build_export_sql_insert(options))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn build_database_sql_export(
+pub async fn build_database_sql_export(
     options: dbx_core::database_export::BuildDatabaseSqlExportOptions,
 ) -> Result<String, String> {
-    dbx_core::database_export::build_database_sql_export(options)
+    tauri::async_runtime::spawn_blocking(move || dbx_core::database_export::build_database_sql_export(options))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
