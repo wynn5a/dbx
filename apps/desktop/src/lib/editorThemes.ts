@@ -280,26 +280,15 @@ export async function loadEditorTheme(
   switch (resolvedTheme) {
     case "one-dark":
       return (await import("@codemirror/theme-one-dark")).oneDark;
-    case "vscode-dark":
-      return (await import("@uiw/codemirror-theme-vscode")).vscodeDark;
-    case "vscode-light":
-      return (await import("@uiw/codemirror-theme-vscode")).vscodeLight;
-    case "nord":
-      return (await import("@uiw/codemirror-theme-nord")).nord;
-    case "okaidia":
-      return (await import("@uiw/codemirror-theme-okaidia")).okaidia;
-    case "material":
-      return (await import("@uiw/codemirror-theme-material")).materialDark;
-    case "duotone-light":
-      return (await import("@uiw/codemirror-theme-duotone")).duotoneLight;
-    case "duotone-dark":
-      return (await import("@uiw/codemirror-theme-duotone")).duotoneDark;
-    case "xcode":
-      return (await import("@uiw/codemirror-theme-xcode")).xcodeLight;
     case "custom":
       return createCustomTheme((await import("@codemirror/view")).EditorView, customColors, appAppearance === "dark");
-    default:
-      return (await import("@codemirror/theme-one-dark")).oneDark;
+    default: {
+      // Built-in themes inlined from @uiw/codemirror-theme-* (see
+      // builtinEditorThemes.ts). One dynamic import keeps them off the
+      // startup path; a missing key falls back to one-dark.
+      const builtin = (await import("./builtinEditorThemes")).builtinEditorThemes[resolvedTheme];
+      return builtin ? builtin() : (await import("@codemirror/theme-one-dark")).oneDark;
+    }
   }
 }
 
