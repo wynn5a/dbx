@@ -489,8 +489,20 @@ pub async fn export_database_sql_core(
                     Err(_) => None,
                 };
 
-                // Loop batches
+                // Loop batches. Keyset pagination avoids the per-page OFFSET
+                // rescan: with a PK-ordered cursor the server seeks straight to
+                // the next page instead of re-scanning `offset` rows per page.
+                // Tables without a usable PK keep the OFFSET fallback below.
+                let primary_keys: Vec<String> =
+                    columns.iter().filter(|c| c.is_primary_key).map(|c| c.name.clone()).collect();
+                let use_keyset = crate::transfer::keyset_pagination_eligible(&col_names, &primary_keys);
+                let pk_indices: Vec<usize> = if use_keyset {
+                    primary_keys.iter().map(|pk| col_names.iter().position(|c| c == pk).unwrap()).collect()
+                } else {
+                    Vec::new()
+                };
                 let mut offset: u64 = 0;
+                let mut last_pk_values: Vec<serde_json::Value> = Vec::new();
                 let mut rows_exported: u64 = 0;
 
                 loop {
@@ -509,16 +521,28 @@ pub async fn export_database_sql_core(
                         return Ok(());
                     }
 
-                    let sql = crate::transfer::pagination_sql(
-                        &crate::transfer::PageSource {
-                            columns: &col_names,
-                            table: table_name,
-                            schema: &request.schema,
-                            db_type: &db_type,
-                        },
-                        offset,
-                        batch_size,
-                    );
+                    let sql = if use_keyset {
+                        crate::transfer::keyset_pagination_sql(
+                            &col_names,
+                            table_name,
+                            &request.schema,
+                            &db_type,
+                            &primary_keys,
+                            &last_pk_values,
+                            batch_size,
+                        )
+                    } else {
+                        crate::transfer::pagination_sql(
+                            &crate::transfer::PageSource {
+                                columns: &col_names,
+                                table: table_name,
+                                schema: &request.schema,
+                                db_type: &db_type,
+                            },
+                            offset,
+                            batch_size,
+                        )
+                    };
 
                     let result = match crate::transfer::execute_on_pool(state, &pool_key, &sql).await {
                         Ok(r) => r,
@@ -548,7 +572,13 @@ pub async fn export_database_sql_core(
                     }
 
                     rows_exported += row_count as u64;
-                    offset += row_count as u64;
+                    if use_keyset {
+                        if let Some(last_row) = result.rows.last() {
+                            last_pk_values = pk_indices.iter().map(|&i| last_row[i].clone()).collect();
+                        }
+                    } else {
+                        offset += row_count as u64;
+                    }
 
                     on_progress(ExportProgress {
                         export_id: request.export_id.clone(),

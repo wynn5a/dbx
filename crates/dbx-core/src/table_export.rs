@@ -7,10 +7,10 @@ use crate::csv_export::{escape_csv, format_csv, value_to_csv_text};
 pub use crate::database_export::ExportStatus;
 use crate::database_export::{build_export_insert_statements, is_export_cancelled, BuildExportInsertStatementsOptions};
 use crate::transfer::{
-    count_sql_with_where, execute_on_pool, execute_on_pool_with_max_rows, keyset_pagination_sql,
-    pagination_sql_with_filter_order, PageSource,
+    count_sql_with_where, execute_on_pool, execute_on_pool_with_max_rows, keyset_pagination_eligible,
+    keyset_pagination_sql, pagination_sql_with_filter_order, PageSource,
 };
-use crate::xlsx_export::{build_xlsx_workbook, XlsxWorksheetData};
+use crate::xlsx_export::XlsxSheetStreamWriter;
 
 const DEFAULT_BATCH_SIZE: usize = 10_000;
 
@@ -197,8 +197,7 @@ pub async fn export_table_data_core(
     // When no PK is available, falls back to offset-based pagination.
     let has_custom_filter_or_order = request.where_input.as_ref().is_some_and(|value| !value.trim().is_empty())
         || request.order_by.as_ref().is_some_and(|value| !value.trim().is_empty());
-    let use_keyset =
-        !has_custom_filter_or_order && !primary_keys.is_empty() && primary_keys.iter().all(|pk| col_names.contains(pk));
+    let use_keyset = !has_custom_filter_or_order && keyset_pagination_eligible(&col_names, &primary_keys);
 
     // PK column indices within result rows (for extracting last-row values)
     let pk_indices: Vec<usize> = if use_keyset {
@@ -327,7 +326,11 @@ pub async fn export_table_data_core(
             }
         }
         "xlsx" => {
-            let mut all_rows: Vec<Vec<Value>> = Vec::new();
+            // Streamed: each page goes to the sidecar scratch file (O(page)
+            // memory) instead of accumulating every row in `all_rows`.
+            // The workbook is assembled at `finish()` — the target file only
+            // appears then, so a cancelled export leaves no corrupt output.
+            let mut sheet = XlsxSheetStreamWriter::create(&request.file_path, &col_names)?;
 
             loop {
                 // Check cancellation between batches
@@ -360,12 +363,12 @@ pub async fn export_table_data_core(
                     break;
                 }
 
-                all_rows.extend(result.rows);
+                sheet.write_rows(&result.rows)?;
                 rows_exported += row_count as u64;
 
                 if use_keyset {
                     // Keyset pagination: track last PK values for next batch
-                    if let Some(last_row) = all_rows.last() {
+                    if let Some(last_row) = result.rows.last() {
                         last_pk_values = pk_indices.iter().map(|&i| last_row[i].clone()).collect();
                     }
                 } else {
@@ -396,11 +399,9 @@ pub async fn export_table_data_core(
                 error_message: None,
             });
 
-            // Build XLSX workbook from accumulated rows
-            let workbook_data =
-                XlsxWorksheetData { sheet_name: Some(request.table_name.clone()), columns: col_names, rows: all_rows };
-            let xlsx_bytes = build_xlsx_workbook(&workbook_data)?;
-            file.write_all(&xlsx_bytes).map_err(|e| format!("Failed to write XLSX file: {e}"))?;
+            // Build XLSX workbook from the streamed sidecar rows
+            sheet.finish(&request.file_path, Some(&request.table_name))?;
+            file.flush().map_err(|e| format!("Failed to flush export file: {e}"))?;
         }
         "json" => {
             file.write_all(b"[\n").map_err(|e| format!("Failed to write JSON: {e}"))?;
@@ -638,6 +639,7 @@ pub async fn export_table_data_core(
 mod tests {
     use super::*;
     use crate::database_export::{clear_export_cancelled, set_export_cancelled};
+    use crate::xlsx_export::{build_xlsx_workbook, XlsxWorksheetData};
     use serde_json::json;
 
     // -----------------------------------------------------------------------

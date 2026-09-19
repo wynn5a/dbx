@@ -1466,6 +1466,15 @@ pub struct PageSource<'a> {
     pub db_type: &'a DatabaseType,
 }
 
+/// Keyset pagination requires a stable row order over the projected columns:
+/// every primary-key column must be present in the SELECT list so the next
+/// page's start position can be extracted from the last returned row.
+/// The projection is call-site owned (`col_names` may be an explicit column
+/// filter), so compare case-sensitively against the resolved PK names.
+pub fn keyset_pagination_eligible(columns: &[String], primary_keys: &[String]) -> bool {
+    !primary_keys.is_empty() && primary_keys.iter().all(|pk| columns.contains(pk))
+}
+
 impl PageSource<'_> {
     /// `(col_list, qualified_table)` for the shared `SELECT {col_list} FROM {table}` head.
     fn select_head(&self) -> (String, String) {
@@ -3631,6 +3640,16 @@ mod tests {
             sql,
             "SELECT [tenant_id], [id], [name] FROM [dbo].[users] WHERE ([tenant_id] > 10 OR ([tenant_id] = 10 AND [id] > 25)) ORDER BY [tenant_id] ASC, [id] ASC OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY"
         );
+    }
+
+    #[test]
+    fn keyset_pagination_eligible_requires_pks_in_projection() {
+        let columns = vec![String::from("id"), String::from("name")];
+        assert!(keyset_pagination_eligible(&columns, &[String::from("id")]));
+        // Empty PK set: no stable ordering key exists.
+        assert!(!keyset_pagination_eligible(&columns, &[]));
+        // PK excluded from the projection: the next-page cursor cannot be read back.
+        assert!(!keyset_pagination_eligible(&[String::from("name")], &[String::from("id")]));
     }
 
     #[test]

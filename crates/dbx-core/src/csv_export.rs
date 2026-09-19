@@ -7,6 +7,7 @@ use crate::connection::AppState;
 use crate::models::connection::DatabaseType;
 use crate::query::{execute_sql_statement_with_options, QueryExecutionOptions};
 use crate::sql_dialect::{build_table_data_select_sql, TableDataSelectSqlOptions};
+use crate::transfer::{keyset_pagination_eligible, keyset_pagination_sql};
 
 const TABLE_DATA_EXPORT_PAGE_SIZE: usize = 10_000;
 
@@ -76,28 +77,69 @@ async fn connection_database_type(state: &AppState, connection_id: &str) -> Resu
 pub async fn export_table_data_csv_core(state: &AppState, options: TableCsvExportOptions) -> Result<u64, String> {
     let database_type = connection_database_type(state, &options.connection_id).await?;
     let page_size = options.page_size.unwrap_or(TABLE_DATA_EXPORT_PAGE_SIZE).max(1);
+
+    // Keyset pagination avoids the per-page OFFSET rescan on large tables.
+    // PKs come from a single metadata lookup; when no PK is usable (or the
+    // export projection excludes the PK) the loop falls back to OFFSET below.
+    let schema = options.schema.as_deref().unwrap_or("");
+    let primary_keys = if options.columns.is_empty() {
+        Vec::new()
+    } else {
+        match crate::schema::get_columns_core(
+            state,
+            &options.connection_id,
+            &options.database,
+            schema,
+            &options.table_name,
+        )
+        .await
+        {
+            Ok(columns) => columns.into_iter().filter(|c| c.is_primary_key).map(|c| c.name).collect(),
+            Err(_) => Vec::new(),
+        }
+    };
+    let use_keyset = keyset_pagination_eligible(&options.columns, &primary_keys);
+    let pk_indices: Vec<usize> = if use_keyset {
+        primary_keys.iter().map(|pk| options.columns.iter().position(|c| c == pk).unwrap()).collect()
+    } else {
+        Vec::new()
+    };
+
     let mut writer =
         BufWriter::new(File::create(&options.file_path).map_err(|err| format!("Failed to write CSV file: {err}"))?);
     writer.write_all("\u{FEFF}".as_bytes()).map_err(|err| err.to_string())?;
 
     let mut offset = 0usize;
+    let mut last_pk_values: Vec<Value> = Vec::new();
     let mut rows_exported = 0u64;
     let mut wrote_header = false;
 
     loop {
-        let sql = build_table_data_select_sql(TableDataSelectSqlOptions {
-            database_type: Some(database_type),
-            schema: options.schema.clone(),
-            table_name: options.table_name.clone(),
-            primary_keys: Vec::new(),
-            columns: options.columns.clone(),
-            fallback_order_columns: Vec::new(),
-            order_by: None,
-            limit: Some(page_size),
-            offset: Some(offset),
-            where_input: None,
-            include_row_id: false,
-        });
+        let sql = if use_keyset {
+            keyset_pagination_sql(
+                &options.columns,
+                &options.table_name,
+                schema,
+                &database_type,
+                &primary_keys,
+                &last_pk_values,
+                page_size,
+            )
+        } else {
+            build_table_data_select_sql(TableDataSelectSqlOptions {
+                database_type: Some(database_type),
+                schema: options.schema.clone(),
+                table_name: options.table_name.clone(),
+                primary_keys: Vec::new(),
+                columns: options.columns.clone(),
+                fallback_order_columns: Vec::new(),
+                order_by: None,
+                limit: Some(page_size),
+                offset: Some(offset),
+                where_input: None,
+                include_row_id: false,
+            })
+        };
         let result = execute_sql_statement_with_options(
             state,
             &options.connection_id,
@@ -122,16 +164,22 @@ pub async fn export_table_data_csv_core(state: &AppState, options: TableCsvExpor
         if fetched == 0 {
             break;
         }
-        for row in result.rows {
+        for row in &result.rows {
             writer.write_all(b"\n").map_err(|err| err.to_string())?;
             write_csv_row(&mut writer, row.iter().map(value_to_csv_text))?;
         }
 
         rows_exported += fetched as u64;
+        if use_keyset {
+            if let Some(last_row) = result.rows.last() {
+                last_pk_values = pk_indices.iter().map(|&i| last_row[i].clone()).collect();
+            }
+        } else {
+            offset += fetched;
+        }
         if fetched < page_size {
             break;
         }
-        offset += fetched;
     }
 
     if rows_exported == 0 {

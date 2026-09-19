@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::io::{Cursor, Write};
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Cursor, Write};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,42 +140,45 @@ fn cell_xml(value: Option<&Value>, row_index: usize, col_index: usize, style: Op
     }
 }
 
-fn worksheet_xml(data: &XlsxWorksheetData) -> String {
-    let total_rows = data.rows.len() + 1;
-    let range = sheet_range(data.columns.len(), total_rows);
-    let widths = estimate_column_widths(&data.columns, &data.rows);
-
-    let cols_xml = widths
+fn cols_xml(widths: &[usize]) -> String {
+    widths
         .iter()
         .enumerate()
         .map(|(index, width)| {
             format!("<col min=\"{}\" max=\"{}\" width=\"{}\" customWidth=\"1\"/>", index + 1, index + 1, width)
         })
-        .collect::<String>();
+        .collect::<String>()
+}
 
-    let header_xml = format!(
+fn header_row_xml(columns: &[String]) -> String {
+    format!(
         "<row r=\"1\">{}</row>",
-        data.columns
+        columns
             .iter()
             .enumerate()
             .map(|(index, col)| cell_xml(Some(&Value::String(col.clone())), 0, index, Some(1)))
             .collect::<String>()
-    );
+    )
+}
 
-    // Reserve up front so the sheet body grows without repeated reallocation:
-    // each cell costs roughly the tag frame plus the value text.
-    let mut body_xml = String::with_capacity(data.rows.len() * (data.columns.len() * 32 + 32) + 64);
-    for (row_index, row) in data.rows.iter().enumerate() {
-        let excel_row = row_index + 2;
-        let cells = data
-            .columns
-            .iter()
-            .enumerate()
-            .map(|(col_index, _)| cell_xml(row.get(col_index), excel_row - 1, col_index, None))
-            .collect::<String>();
-        body_xml.push_str(&format!("<row r=\"{excel_row}\">{cells}</row>"));
-    }
+/// `<row>` XML for one zero-based data row (the header occupies Excel row 1,
+/// so the first data row is Excel row 2). `columns` only fixes the cell count —
+/// missing cells serialize as empty `<c/>`, exactly like the one-shot builder.
+fn data_row_xml(columns: &[String], row: &[Value], row_index: usize) -> String {
+    let excel_row = row_index + 2;
+    let cells = columns
+        .iter()
+        .enumerate()
+        .map(|(col_index, _)| cell_xml(row.get(col_index), excel_row - 1, col_index, None))
+        .collect::<String>();
+    format!("<row r=\"{excel_row}\">{cells}</row>")
+}
 
+/// Everything before `<sheetData>`: the XML declaration through `</cols>`.
+/// `dimension`/`cols` depend on the full row count and sampled widths, which
+/// are only known at finish time — the streaming writer emits this head last.
+fn worksheet_head_xml(columns: &[String], widths: &[usize], data_row_count: usize) -> String {
+    let range = sheet_range(columns.len(), data_row_count + 1);
     format!(
         concat!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>",
@@ -183,14 +187,35 @@ fn worksheet_xml(data: &XlsxWorksheetData) -> String {
             "<sheetViews><sheetView workbookViewId=\"0\"><pane ySplit=\"1\" topLeftCell=\"A2\" activePane=\"bottomLeft\" state=\"frozen\"/></sheetView></sheetViews>",
             "<sheetFormatPr defaultRowHeight=\"15\"/>",
             "<cols>{cols_xml}</cols>",
-            "<sheetData>{header_xml}{body_xml}</sheetData>",
-            "<autoFilter ref=\"{range}\"/>",
-            "</worksheet>"
         ),
         range = range,
-        cols_xml = cols_xml,
+        cols_xml = cols_xml(widths),
+    )
+}
+
+/// Everything after the last data row. The range matches the head's dimension.
+fn worksheet_tail_xml(columns: &[String], data_row_count: usize) -> String {
+    let range = sheet_range(columns.len(), data_row_count + 1);
+    format!("<autoFilter ref=\"{range}\"/></worksheet>")
+}
+
+fn worksheet_xml(data: &XlsxWorksheetData) -> String {
+    let widths = estimate_column_widths(&data.columns, &data.rows);
+    let header_xml = header_row_xml(&data.columns);
+
+    // Reserve up front so the sheet body grows without repeated reallocation:
+    // each cell costs roughly the tag frame plus the value text.
+    let mut body_xml = String::with_capacity(data.rows.len() * (data.columns.len() * 32 + 32) + header_xml.len() + 64);
+    for (row_index, row) in data.rows.iter().enumerate() {
+        body_xml.push_str(&data_row_xml(&data.columns, row, row_index));
+    }
+
+    format!(
+        concat!("{head}", "<sheetData>{header_xml}{body_xml}</sheetData>", "{tail}",),
+        head = worksheet_head_xml(&data.columns, &widths, data.rows.len()),
         header_xml = header_xml,
         body_xml = body_xml,
+        tail = worksheet_tail_xml(&data.columns, data.rows.len()),
     )
 }
 
@@ -260,7 +285,7 @@ pub fn build_xlsx_workbook(data: &XlsxWorksheetData) -> Result<Vec<u8>, String> 
         ("xl/workbook.xml", workbook_xml(&sheet_name)),
         ("xl/_rels/workbook.xml.rels", workbook_rels_xml().to_string()),
         ("xl/styles.xml", styles_xml().to_string()),
-        ("xl/worksheets/sheet1.xml", worksheet_xml(data)),
+        (SHEET_ENTRY_PATH, worksheet_xml(data)),
     ];
 
     let cursor = Cursor::new(Vec::<u8>::new());
@@ -276,10 +301,199 @@ pub fn build_xlsx_workbook(data: &XlsxWorksheetData) -> Result<Vec<u8>, String> 
     Ok(output.into_inner())
 }
 
+/// Sheet entry path inside the workbook zip. Shared by the one-shot builder
+/// and the streaming writer so both produce the same archive layout.
+const SHEET_ENTRY_PATH: &str = "xl/worksheets/sheet1.xml";
+
+/// Sidecar file holding one page's worth of `<row>` XML at a time while the
+/// rest of the workbook is being dimensioned. Same directory as the target
+/// (same filesystem, safe to clean up), removed on finish or on drop.
+fn sheet_sidecar_path(target_path: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("{target_path}.xlsx-rows.part"))
+}
+
+/// Streaming XLSX worksheet writer.
+///
+/// The one-shot `build_xlsx_workbook` accumulates every exported row in memory
+/// (`table_export` used to hold all pages in `all_rows`) and materializes the
+/// whole sheet XML as one `String`. This writer instead appends each page's
+/// rows to a sidecar file next to the target as they arrive, so peak memory
+/// stays O(page) no matter how large the export is:
+///
+/// ```text
+/// write_rows() ─▶ `<target>.xlsx-rows.part` (raw `<row>` XML, O(page) RAM)
+/// finish()     ─▶ head + `<sheetData>` + header + sidecar + tail, zipped
+/// ```
+///
+/// Dropping the writer without `finish()` (cancel / error) leaves the target
+/// untouched and removes the sidecar, so a cancelled export never produces a
+/// corrupt workbook. Column widths keep sampling the first 100 rows exactly
+/// like `estimate_column_widths`, and the finished archive is byte-identical
+/// to the one-shot builder for the same rows.
+pub struct XlsxSheetStreamWriter {
+    sidecar_path: std::path::PathBuf,
+    sidecar: Option<BufWriter<File>>,
+    columns: Vec<String>,
+    widths: Vec<usize>,
+    sampled_rows: usize,
+    data_rows: usize,
+    finished: bool,
+}
+
+/// Width sampling mirrors `estimate_column_widths` (first 100 rows).
+const WIDTH_SAMPLE_ROWS: usize = 100;
+
+impl XlsxSheetStreamWriter {
+    /// Creates the sidecar next to `target_path`. The target itself is not
+    /// touched until `finish()`, so constructing the writer is side-effect
+    /// free from the user's point of view.
+    pub fn create(target_path: &str, columns: &[String]) -> Result<Self, String> {
+        let sidecar_path = sheet_sidecar_path(target_path);
+        let file = File::create(&sidecar_path).map_err(|err| format!("Failed to create XLSX scratch file: {err}"))?;
+        Ok(Self {
+            sidecar_path,
+            sidecar: Some(BufWriter::new(file)),
+            widths: columns.iter().map(|column| column_width_for(column)).collect(),
+            columns: columns.to_vec(),
+            sampled_rows: 0,
+            data_rows: 0,
+            finished: false,
+        })
+    }
+
+    /// Appends one page of rows to the sidecar, one `<row>` per line.
+    pub fn write_rows(&mut self, rows: &[Vec<Value>]) -> Result<(), String> {
+        let writer = self.sidecar.as_mut().ok_or("XLSX sheet writer already finished")?;
+        // Scratch stays bounded (~1 MiB) even for pathological wide rows.
+        let mut scratch = String::with_capacity((rows.len() * (self.columns.len() * 32 + 32)).min(1 << 20) + 64);
+        for row in rows {
+            if self.sampled_rows < WIDTH_SAMPLE_ROWS {
+                for (col_index, width) in self.widths.iter_mut().enumerate() {
+                    *width = (*width).max(column_width_for(&value_text(row.get(col_index))));
+                }
+                self.sampled_rows += 1;
+            }
+            scratch.push_str(&data_row_xml(&self.columns, row, self.data_rows));
+            self.data_rows += 1;
+            if scratch.len() >= 1 << 20 {
+                writer
+                    .write_all(scratch.as_bytes())
+                    .map_err(|err| format!("Failed to write XLSX scratch file: {err}"))?;
+                scratch.clear();
+            }
+        }
+        if !scratch.is_empty() {
+            writer.write_all(scratch.as_bytes()).map_err(|err| format!("Failed to write XLSX scratch file: {err}"))?;
+        }
+        Ok(())
+    }
+
+    /// Assembles the workbook at `target_path` and removes the sidecar.
+    /// A failed assembly also removes a partially written target, so callers
+    /// never leave a corrupt `.xlsx` behind.
+    pub fn finish(mut self, target_path: &str, sheet_name: Option<&str>) -> Result<(), String> {
+        // Flush + close the sidecar before reading it back (Windows locks).
+        if let Some(mut sidecar) = self.sidecar.take() {
+            sidecar.flush().map_err(|err| format!("Failed to write XLSX scratch file: {err}"))?;
+        }
+        drop(self.sidecar.take());
+        let result = assemble_streamed_workbook(
+            target_path,
+            sheet_name,
+            &self.columns,
+            &self.widths,
+            self.data_rows,
+            &self.sidecar_path,
+        );
+        // The sidecar is scratch state: always clean it up, success or not.
+        let _ = std::fs::remove_file(&self.sidecar_path);
+        self.finished = true;
+        if result.is_err() {
+            let _ = std::fs::remove_file(target_path);
+        }
+        result
+    }
+}
+
+impl Drop for XlsxSheetStreamWriter {
+    fn drop(&mut self) {
+        if !self.finished {
+            drop(self.sidecar.take());
+            let _ = std::fs::remove_file(&self.sidecar_path);
+        }
+    }
+}
+
+/// Single sampled width, mirroring one step of `estimate_column_widths`'s
+/// `(chars capped at 60, floor 8, +2 padding, clamp 10..=60)` rule.
+fn column_width_for(text: &str) -> usize {
+    (text.chars().count().clamp(8, 60) + 2).clamp(10, 60)
+}
+
+fn assemble_streamed_workbook(
+    target_path: &str,
+    sheet_name: Option<&str>,
+    columns: &[String],
+    widths: &[usize],
+    data_row_count: usize,
+    sidecar_path: &std::path::Path,
+) -> Result<(), String> {
+    let sheet_name = normalize_sheet_name(sheet_name);
+    let target = File::create(target_path).map_err(|err| format!("Failed to create XLSX file: {err}"))?;
+    let mut zip = zip::ZipWriter::new(BufWriter::new(target));
+    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+    for (path, content) in [
+        ("[Content_Types].xml", content_types_xml().to_string()),
+        ("_rels/.rels", root_rels_xml().to_string()),
+        ("xl/workbook.xml", workbook_xml(&sheet_name)),
+        ("xl/_rels/workbook.xml.rels", workbook_rels_xml().to_string()),
+        ("xl/styles.xml", styles_xml().to_string()),
+    ] {
+        zip.start_file(path, options).map_err(|err| err.to_string())?;
+        zip.write_all(content.as_bytes()).map_err(|err| err.to_string())?;
+    }
+
+    zip.start_file(SHEET_ENTRY_PATH, options).map_err(|err| err.to_string())?;
+    zip.write_all(worksheet_head_xml(columns, widths, data_row_count).as_bytes()).map_err(|err| err.to_string())?;
+    zip.write_all(b"<sheetData>").map_err(|err| err.to_string())?;
+    zip.write_all(header_row_xml(columns).as_bytes()).map_err(|err| err.to_string())?;
+    let mut sidecar =
+        BufReader::new(File::open(sidecar_path).map_err(|err| format!("Failed to read XLSX scratch file: {err}"))?);
+    std::io::copy(&mut sidecar, &mut zip).map_err(|err| err.to_string())?;
+    zip.write_all(b"</sheetData>").map_err(|err| err.to_string())?;
+    zip.write_all(worksheet_tail_xml(columns, data_row_count).as_bytes()).map_err(|err| err.to_string())?;
+
+    let mut buffered = zip.finish().map_err(|err| err.to_string())?;
+    buffered.flush().map_err(|err| err.to_string())?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{build_xlsx_workbook, escape_xml, XlsxWorksheetData};
+    use super::{build_xlsx_workbook, escape_xml, XlsxSheetStreamWriter, XlsxWorksheetData};
     use serde_json::json;
+
+    /// Writes `rows` in `page_size` chunks through the streaming writer and
+    /// returns the finished workbook bytes. Fails the test on any error.
+    fn streamed_workbook(columns: &[String], rows: &[Vec<serde_json::Value>], page_size: usize) -> Vec<u8> {
+        let dir = std::env::temp_dir().join(format!("dbx-xlsx-stream-test-{}-{page_size}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        let target = dir.join(format!("out-{page_size}.xlsx"));
+        let target_str = target.to_str().expect("scratch path is UTF-8").to_string();
+
+        let mut writer = XlsxSheetStreamWriter::create(&target_str, columns).expect("create stream writer");
+        for chunk in rows.chunks(page_size.max(1)) {
+            writer.write_rows(chunk).expect("write rows");
+        }
+        writer.finish(&target_str, Some("streamed")).expect("finish workbook");
+
+        // Scratch is cleaned up; the target is a valid zip.
+        assert!(!std::path::Path::new(&format!("{target_str}.xlsx-rows.part")).exists());
+        let bytes = std::fs::read(&target).expect("read finished workbook");
+        std::fs::remove_dir_all(&dir).ok();
+        bytes
+    }
 
     #[test]
     fn escapes_and_strips_like_the_reference_implementation() {
@@ -325,5 +539,76 @@ mod tests {
         .expect("build workbook");
         let text = String::from_utf8_lossy(&workbook);
         assert!(text.contains("name=\"bad name with chars and-a-very-\""));
+    }
+
+    fn sample_columns() -> Vec<String> {
+        vec!["id".to_string(), "name".to_string(), "active".to_string(), "note".to_string()]
+    }
+
+    fn sample_rows(count: usize) -> Vec<Vec<serde_json::Value>> {
+        (0..count)
+            .map(|i| {
+                vec![
+                    json!(i),
+                    json!(format!("user-{i} <&> \"quoted\"")),
+                    json!(i % 2 == 0),
+                    if i % 7 == 0 { serde_json::Value::Null } else { json!(format!("note {i}")) },
+                ]
+            })
+            .collect()
+    }
+
+    fn one_shot_workbook(rows: &[Vec<serde_json::Value>]) -> Vec<u8> {
+        build_xlsx_workbook(&XlsxWorksheetData {
+            sheet_name: Some("streamed".to_string()),
+            columns: sample_columns(),
+            rows: rows.to_vec(),
+        })
+        .expect("build workbook")
+    }
+
+    #[test]
+    fn streamed_workbook_matches_one_shot_bytes() {
+        // >100 rows so column widths must sample the first 100 (not just the
+        // header), mixed types, escaping, and NULLs included.
+        let rows = sample_rows(250);
+        let expected = one_shot_workbook(&rows);
+        for page_size in [1, 7, 1000] {
+            assert_eq!(
+                streamed_workbook(&sample_columns(), &rows, page_size),
+                expected,
+                "page_size={page_size} must produce identical bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn streamed_empty_table_matches_one_shot() {
+        let expected = one_shot_workbook(&[]);
+        assert_eq!(streamed_workbook(&sample_columns(), &[], 10), expected);
+        let text = String::from_utf8_lossy(&expected);
+        assert!(text.contains("<dimension ref=\"A1:D1\"/>"));
+    }
+
+    #[test]
+    fn dropped_writer_leaves_no_target_and_cleans_sidecar() {
+        let dir = std::env::temp_dir().join(format!("dbx-xlsx-drop-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        let target = dir.join("cancelled.xlsx");
+        let target_str = target.to_str().expect("scratch path is UTF-8").to_string();
+
+        {
+            let mut writer =
+                XlsxSheetStreamWriter::create(&target_str, &sample_columns()).expect("create stream writer");
+            writer.write_rows(&sample_rows(50)).expect("write rows");
+            // Drop without finish(): simulates export cancellation.
+        }
+
+        assert!(!target.exists(), "cancelled export must not create the target");
+        assert!(
+            !std::path::Path::new(&format!("{target_str}.xlsx-rows.part")).exists(),
+            "cancelled export must clean the sidecar"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
