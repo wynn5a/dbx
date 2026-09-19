@@ -325,7 +325,7 @@ pub async fn parse_import_file(path: &str, preview_limit: usize) -> Result<Parse
 }
 
 pub fn mapping_indexes(
-    data: &ParsedImportFile,
+    columns: &[String],
     mappings: &[TableImportColumnMapping],
 ) -> Result<Vec<(usize, String)>, String> {
     if mappings.is_empty() {
@@ -334,8 +334,7 @@ pub fn mapping_indexes(
     let mut mapped = Vec::new();
     let mut target_seen = HashSet::new();
     for mapping in mappings {
-        let source_index = data
-            .columns
+        let source_index = columns
             .iter()
             .position(|column| column == &mapping.source_column)
             .ok_or_else(|| format!("Source column not found: {}", mapping.source_column))?;
@@ -359,7 +358,7 @@ pub fn build_import_insert_batches(
     db_type: &DatabaseType,
     batch_size: usize,
 ) -> Result<Vec<ImportSqlBatch>, String> {
-    let mapped = mapping_indexes(data, mappings)?;
+    let mapped = mapping_indexes(&data.columns, mappings)?;
     let columns = mapped.iter().map(|(_, target)| target.clone()).collect::<Vec<_>>();
     let column_types = columns
         .iter()
@@ -400,6 +399,232 @@ pub fn truncate_sql(table: &str, schema: &str, db_type: &DatabaseType) -> String
     }
 }
 
+/// Header for a file, read without materializing data rows beyond the
+/// format's needs. Used to resolve column mappings before the streaming
+/// import loop starts.
+struct ImportFileHeader {
+    columns: Vec<String>,
+}
+
+/// Read only the header/columns of an import file. For JSON this still parses
+/// the full document (object keys define the column union), but data rows are
+/// dropped immediately; CSV/TSV/XLSX stop after the header row.
+async fn import_file_header(path: &str) -> Result<ImportFileHeader, String> {
+    match import_file_kind(path)? {
+        ImportFileKind::Csv => delimited_header(path, b',').await,
+        ImportFileKind::Tsv => delimited_header(path, b'\t').await,
+        ImportFileKind::Json => {
+            let bytes = tokio::fs::read(path).await.map_err(|e| e.to_string())?;
+            json_header(&bytes)
+        }
+        ImportFileKind::Xlsx => {
+            let path = path.to_string();
+            tokio::task::spawn_blocking(move || xlsx_header(&path)).await.map_err(|e| e.to_string())?
+        }
+    }
+}
+
+async fn delimited_header(path: &str, delimiter: u8) -> Result<ImportFileHeader, String> {
+    let path = path.to_string();
+    tokio::task::spawn_blocking(move || {
+        let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+        let mut reader = csv::ReaderBuilder::new().delimiter(delimiter).flexible(true).from_reader(file);
+        let columns = reader
+            .headers()
+            .map_err(|e| e.to_string())?
+            .iter()
+            .enumerate()
+            .map(|(index, header)| normalize_header(header, index))
+            .collect::<Vec<_>>();
+        if columns.is_empty() {
+            return Err("Import file has no columns".to_string());
+        }
+        Ok(ImportFileHeader { columns })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn json_header(bytes: &[u8]) -> Result<ImportFileHeader, String> {
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    let items = match value {
+        serde_json::Value::Array(items) => items,
+        serde_json::Value::Object(_) => vec![value],
+        _ => return Err("JSON import must be an object or an array".to_string()),
+    };
+    if items.is_empty() {
+        return Err("Import file has no rows".to_string());
+    }
+    if items.iter().all(|item| item.is_object()) {
+        let mut columns = Vec::new();
+        for item in &items {
+            if let Some(obj) = item.as_object() {
+                for key in obj.keys() {
+                    if !columns.contains(key) {
+                        columns.push(key.clone());
+                    }
+                }
+            }
+        }
+        if columns.is_empty() {
+            return Err("Import file has no columns".to_string());
+        }
+        return Ok(ImportFileHeader { columns });
+    }
+    if items.iter().all(|item| item.is_array()) {
+        let max_cols = items.iter().filter_map(|item| item.as_array().map(|row| row.len())).max().unwrap_or(0);
+        if max_cols == 0 {
+            return Err("Import file has no columns".to_string());
+        }
+        let columns = (0..max_cols).map(|index| format!("column_{}", index + 1)).collect::<Vec<_>>();
+        return Ok(ImportFileHeader { columns });
+    }
+    Err("JSON import rows must all be objects or all be arrays".to_string())
+}
+
+fn xlsx_header(path: &str) -> Result<ImportFileHeader, String> {
+    let mut workbook = open_workbook_auto(path).map_err(|e| e.to_string())?;
+    let sheet_name = workbook.sheet_names().first().cloned().ok_or_else(|| "Workbook has no sheets".to_string())?;
+    let range = workbook.worksheet_range(&sheet_name).map_err(|e| e.to_string())?;
+    let mut rows_iter = range.rows();
+    let header = rows_iter.next().ok_or_else(|| "Import file has no rows".to_string())?;
+    let columns = header
+        .iter()
+        .enumerate()
+        .map(|(index, cell)| normalize_header(&xlsx_cell_label(cell), index))
+        .collect::<Vec<_>>();
+    if columns.is_empty() {
+        return Err("Import file has no columns".to_string());
+    }
+    Ok(ImportFileHeader { columns })
+}
+
+/// Streaming row source for the import loop. Implementations skip the header
+/// row at construction; `read_chunk` appends up to `limit` mapped rows
+/// (projected to `source_indexes`) into `out` and returns with `out` empty at
+/// EOF.
+enum ImportRowReader {
+    Delimited(csv::Reader<std::fs::File>),
+    Json(std::vec::IntoIter<Vec<serde_json::Value>>),
+    Xlsx(std::vec::IntoIter<Vec<serde_json::Value>>),
+}
+
+impl ImportRowReader {
+    fn read_chunk(
+        &mut self,
+        source_indexes: &[usize],
+        limit: usize,
+        out: &mut Vec<Vec<serde_json::Value>>,
+    ) -> Result<(), String> {
+        match self {
+            ImportRowReader::Delimited(reader) => {
+                let mut record = csv::StringRecord::new();
+                while out.len() < limit {
+                    match reader.read_record(&mut record) {
+                        Ok(true) => {
+                            let mut row = Vec::with_capacity(source_indexes.len());
+                            for &index in source_indexes {
+                                row.push(record.get(index).map(csv_value).unwrap_or(serde_json::Value::Null));
+                            }
+                            out.push(row);
+                        }
+                        Ok(false) => break,
+                        Err(e) => return Err(e.to_string()),
+                    }
+                }
+                Ok(())
+            }
+            ImportRowReader::Json(iter) | ImportRowReader::Xlsx(iter) => {
+                while out.len() < limit {
+                    let Some(row) = iter.next() else { break };
+                    let mut projected = Vec::with_capacity(source_indexes.len());
+                    for &index in source_indexes {
+                        projected.push(row.get(index).cloned().unwrap_or(serde_json::Value::Null));
+                    }
+                    out.push(projected);
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// Build a streaming reader positioned after the header row.
+async fn import_row_reader(path: &str) -> Result<ImportRowReader, String> {
+    match import_file_kind(path)? {
+        ImportFileKind::Csv => delimited_row_reader(path, b',').await,
+        ImportFileKind::Tsv => delimited_row_reader(path, b'\t').await,
+        ImportFileKind::Json => {
+            let bytes = tokio::fs::read(path).await.map_err(|e| e.to_string())?;
+            json_row_reader(&bytes)
+        }
+        ImportFileKind::Xlsx => {
+            let path = path.to_string();
+            tokio::task::spawn_blocking(move || xlsx_row_reader(&path)).await.map_err(|e| e.to_string())?
+        }
+    }
+}
+
+async fn delimited_row_reader(path: &str, delimiter: u8) -> Result<ImportRowReader, String> {
+    let path = path.to_string();
+    tokio::task::spawn_blocking(move || {
+        let file = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+        let mut reader = csv::ReaderBuilder::new().delimiter(delimiter).flexible(true).from_reader(file);
+        // Consume the header row so the first read_chunk returns data rows.
+        reader.headers().map_err(|e| e.to_string())?;
+        Ok(ImportRowReader::Delimited(reader))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn json_row_reader(bytes: &[u8]) -> Result<ImportRowReader, String> {
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    let items = match value {
+        serde_json::Value::Array(items) => items,
+        serde_json::Value::Object(_) => vec![value],
+        _ => return Err("JSON import must be an object or an array".to_string()),
+    };
+    if items.is_empty() {
+        return Err("Import file has no rows".to_string());
+    }
+    let header = json_header(bytes)?;
+    let rows = items
+        .into_iter()
+        .map(|item| match &item {
+            serde_json::Value::Object(obj) => header
+                .columns
+                .iter()
+                .map(|column| obj.get(column).cloned().unwrap_or(serde_json::Value::Null))
+                .collect::<Vec<_>>(),
+            serde_json::Value::Array(arr) => (0..header.columns.len())
+                .map(|index| arr.get(index).cloned().unwrap_or(serde_json::Value::Null))
+                .collect::<Vec<_>>(),
+            _ => vec![serde_json::Value::Null; header.columns.len()],
+        })
+        .collect::<Vec<_>>();
+    Ok(ImportRowReader::Json(rows.into_iter()))
+}
+
+fn xlsx_row_reader(path: &str) -> Result<ImportRowReader, String> {
+    let mut workbook = open_workbook_auto(path).map_err(|e| e.to_string())?;
+    let sheet_name = workbook.sheet_names().first().cloned().ok_or_else(|| "Workbook has no sheets".to_string())?;
+    let range = workbook.worksheet_range(&sheet_name).map_err(|e| e.to_string())?;
+    let mut rows_iter = range.rows();
+    let header = rows_iter.next().ok_or_else(|| "Import file has no rows".to_string())?;
+    let column_count = header.len();
+    let rows = rows_iter
+        .map(|source_row| {
+            (0..column_count)
+                .map(|index| source_row.get(index).map(xlsx_cell_value).unwrap_or(serde_json::Value::Null))
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    Ok(ImportRowReader::Xlsx(rows.into_iter()))
+}
+
 pub async fn preview_table_import_file_core(file_path: &str) -> Result<TableImportPreview, String> {
     let kind = import_file_kind(file_path)?;
     let parsed = parse_import_file(file_path, DEFAULT_PREVIEW_LIMIT).await?;
@@ -419,6 +644,10 @@ pub async fn preview_table_import_file_core(file_path: &str) -> Result<TableImpo
 
 /// Core import logic. Returns (rows_imported, total_rows).
 /// `progress_callback` is invoked for progress updates.
+///
+/// The file is never fully materialized: rows are read in `batch_size` chunks
+/// and each chunk is INSERTed before the next is read, so multi-GB files
+/// import with O(batch_size) memory instead of O(file size).
 pub async fn import_table_file_core<F>(
     state: &AppState,
     request: &TableImportRequest,
@@ -432,29 +661,33 @@ where
 {
     let batch_size = if request.batch_size == 0 { DEFAULT_BATCH_SIZE } else { request.batch_size };
 
-    let parsed = match parse_import_file(&request.file_path, usize::MAX).await {
-        Ok(parsed) => parsed,
-        Err(error) => {
+    let emit_error =
+        |progress_callback: &mut F, import_id: &str, rows_imported: usize, total_rows: usize, error: &str| {
             progress_callback(TableImportProgress {
-                import_id: request.import_id.clone(),
+                import_id: import_id.to_string(),
                 status: TableImportStatus::Error,
-                rows_imported: 0,
-                total_rows: 0,
-                error: Some(error.clone()),
+                rows_imported,
+                total_rows,
+                error: Some(error.to_string()),
             });
+        };
+
+    // Resolve header + column mapping from a lightweight header-only pass.
+    let header = match import_file_header(&request.file_path).await {
+        Ok(header) => header,
+        Err(error) => {
+            emit_error(&mut progress_callback, &request.import_id, 0, 0, &error);
             return Err(error);
         }
     };
-
-    let total_rows = parsed.total_rows;
-    progress_callback(TableImportProgress {
-        import_id: request.import_id.clone(),
-        status: TableImportStatus::Running,
-        rows_imported: 0,
-        total_rows,
-        error: None,
-    });
-
+    let mapped = match mapping_indexes(&header.columns, &request.mappings) {
+        Ok(mapped) => mapped,
+        Err(error) => {
+            emit_error(&mut progress_callback, &request.import_id, 0, 0, &error);
+            return Err(error);
+        }
+    };
+    let target_columns = mapped.iter().map(|(_, target)| target.clone()).collect::<Vec<_>>();
     let target_column_types = get_columns_for_transfer(
         state,
         pool_key,
@@ -468,72 +701,81 @@ where
     .into_iter()
     .map(|column| (column.name, column.data_type))
     .collect::<Vec<_>>();
+    let column_types = target_columns
+        .iter()
+        .map(|column| {
+            target_column_types
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(column))
+                .map(|(_, data_type)| data_type.clone())
+        })
+        .collect::<Vec<_>>();
 
-    let batches = match build_import_insert_batches(
-        &parsed,
-        &request.mappings,
-        &target_column_types,
-        &request.table,
-        &request.schema,
-        db_type,
-        batch_size,
-    ) {
-        Ok(batches) => batches,
-        Err(error) => {
-            progress_callback(TableImportProgress {
-                import_id: request.import_id.clone(),
-                status: TableImportStatus::Error,
-                rows_imported: 0,
-                total_rows,
-                error: Some(error.clone()),
-            });
-            return Err(error);
-        }
-    };
+    progress_callback(TableImportProgress {
+        import_id: request.import_id.clone(),
+        status: TableImportStatus::Running,
+        rows_imported: 0,
+        total_rows: 0,
+        error: None,
+    });
 
     if matches!(request.mode, TableImportMode::Truncate) {
         let sql = truncate_sql(&request.table, &request.schema, db_type);
         if let Err(error) = execute_on_pool(state, pool_key, &sql).await {
-            progress_callback(TableImportProgress {
-                import_id: request.import_id.clone(),
-                status: TableImportStatus::Error,
-                rows_imported: 0,
-                total_rows,
-                error: Some(error.clone()),
-            });
+            emit_error(&mut progress_callback, &request.import_id, 0, 0, &error);
             return Err(error);
         }
     }
 
-    let mut rows_imported = 0;
-    for batch in batches {
+    let mut rows_imported = 0usize;
+    let mut chunk: Vec<Vec<serde_json::Value>> = Vec::with_capacity(batch_size);
+    let mut reader = match import_row_reader(&request.file_path).await {
+        Ok(reader) => reader,
+        Err(error) => {
+            emit_error(&mut progress_callback, &request.import_id, 0, 0, &error);
+            return Err(error);
+        }
+    };
+    let source_indexes = mapped.iter().map(|(source_index, _)| *source_index).collect::<Vec<_>>();
+
+    loop {
         if is_cancelled(&request.import_id).await {
             progress_callback(TableImportProgress {
                 import_id: request.import_id.clone(),
                 status: TableImportStatus::Cancelled,
                 rows_imported,
-                total_rows,
+                total_rows: rows_imported,
                 error: None,
             });
             return Err("Import cancelled".to_string());
         }
 
-        if let Err(error) = execute_on_pool(state, pool_key, &batch.sql).await {
-            progress_callback(TableImportProgress {
-                import_id: request.import_id.clone(),
-                status: TableImportStatus::Error,
-                rows_imported,
-                total_rows,
-                error: Some(error.clone()),
-            });
-            return Err(error);
+        chunk.clear();
+        match reader.read_chunk(&source_indexes, batch_size, &mut chunk) {
+            Ok(()) => {}
+            Err(error) => {
+                emit_error(&mut progress_callback, &request.import_id, rows_imported, rows_imported, &error);
+                return Err(error);
+            }
         }
-        rows_imported = (rows_imported + batch.row_count).min(total_rows);
+        if chunk.is_empty() {
+            break;
+        }
+
+        let sql =
+            generate_insert_typed(&target_columns, &column_types, &chunk, &request.table, &request.schema, db_type);
+        if !sql.trim().is_empty() {
+            if let Err(error) = execute_on_pool(state, pool_key, &sql).await {
+                emit_error(&mut progress_callback, &request.import_id, rows_imported, rows_imported, &error);
+                return Err(error);
+            }
+        }
+        rows_imported += chunk.len();
         progress_callback(TableImportProgress {
             import_id: request.import_id.clone(),
             status: TableImportStatus::Running,
             rows_imported,
-            total_rows,
+            total_rows: rows_imported,
             error: None,
         });
     }
@@ -542,11 +784,11 @@ where
         import_id: request.import_id.clone(),
         status: TableImportStatus::Done,
         rows_imported,
-        total_rows,
+        total_rows: rows_imported,
         error: None,
     });
 
-    Ok(TableImportSummary { import_id: request.import_id.clone(), rows_imported, total_rows })
+    Ok(TableImportSummary { import_id: request.import_id.clone(), rows_imported, total_rows: rows_imported })
 }
 
 #[cfg(test)]
@@ -676,5 +918,65 @@ mod tests {
             sql: "INSERT INTO `policies` (`insurance_start_time`, `raw_text`) VALUES\n('2026-05-12 00:00:00', '2026-05-12T00:00:00+00:00')".to_string(),
             row_count: 1,
         }]);
+    }
+
+    #[tokio::test]
+    async fn streaming_csv_reader_skips_header_and_reads_chunks_in_order() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("dbx-import-test-{}.csv", std::process::id()));
+        std::fs::write(&path, "id,name\n1,Ada\n2,Bob\n3,Cid\n4,Dan\n5,Eve\n").unwrap();
+        let path_str = path.to_string_lossy().to_string();
+
+        let header = import_file_header(&path_str).await.unwrap();
+        assert_eq!(header.columns, vec!["id".to_string(), "name".to_string()]);
+
+        let mut reader = import_row_reader(&path_str).await.unwrap();
+        // Map only the "name" column (index 1).
+        let source_indexes = vec![1usize];
+        let mut chunk = Vec::new();
+
+        reader.read_chunk(&source_indexes, 2, &mut chunk).unwrap();
+        assert_eq!(chunk, vec![vec![serde_json::json!("Ada")], vec![serde_json::json!("Bob")]]);
+        chunk.clear();
+
+        reader.read_chunk(&source_indexes, 2, &mut chunk).unwrap();
+        assert_eq!(chunk, vec![vec![serde_json::json!("Cid")], vec![serde_json::json!("Dan")]]);
+        chunk.clear();
+
+        reader.read_chunk(&source_indexes, 2, &mut chunk).unwrap();
+        assert_eq!(chunk, vec![vec![serde_json::json!("Eve")]]);
+        chunk.clear();
+
+        // EOF: empty chunk, no error.
+        reader.read_chunk(&source_indexes, 2, &mut chunk).unwrap();
+        assert!(chunk.is_empty());
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[tokio::test]
+    async fn streaming_json_reader_projects_rows_in_header_order() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("dbx-import-test-{}.json", std::process::id()));
+        std::fs::write(&path, r#"[{"id":1,"name":"Ada"},{"name":"Bob","id":2}]"#).unwrap();
+        let path_str = path.to_string_lossy().to_string();
+
+        let header = import_file_header(&path_str).await.unwrap();
+        assert_eq!(header.columns, vec!["id".to_string(), "name".to_string()]);
+
+        let mut reader = import_row_reader(&path_str).await.unwrap();
+        let source_indexes = vec![0usize, 1usize];
+        let mut chunk = Vec::new();
+        reader.read_chunk(&source_indexes, 10, &mut chunk).unwrap();
+        // Key order differs between the two objects; rows must follow the header.
+        assert_eq!(
+            chunk,
+            vec![
+                vec![serde_json::json!(1), serde_json::json!("Ada")],
+                vec![serde_json::json!(2), serde_json::json!("Bob")],
+            ]
+        );
+
+        std::fs::remove_file(&path).ok();
     }
 }
