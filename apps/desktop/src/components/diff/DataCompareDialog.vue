@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useToast } from "@/composables/useToast";
 import { useSqlHighlighter } from "@/composables/useSqlHighlighter";
+import { DynamicScroller, RecycleScroller } from "vue-virtual-scroller";
 import { isSchemaAware } from "@/lib/databaseCapabilities";
 import { copyToClipboard } from "@/lib/clipboard";
 import type {
@@ -60,6 +61,7 @@ interface SelectableDataCompareResult {
 }
 
 interface DataCompareTableResult {
+  uid: string;
   sourceTable: string;
   targetTable: string;
   keyColumns: string[];
@@ -82,6 +84,19 @@ interface DataCompareTableResult {
 }
 
 const PREVIEW_LIMIT_OPTIONS = [50, 100, 200, 500];
+
+// Fixed-height virtualized rows: px-2.5 py-1.5 text-xs source table rows, and
+// px-2 py-1 border-b task preview rows.
+const SOURCE_TABLE_ROW_HEIGHT = 28;
+const SOURCE_TABLES_MAX_HEIGHT = 160;
+const TASK_PREVIEW_ROW_HEIGHT = 25;
+const TASK_PREVIEW_MAX_HEIGHT = 144;
+// Variable-height rows estimated from their common 4-line / 2-line layouts;
+// the scroller re-measures on render.
+const RESULT_ROW_MIN_HEIGHT = 81;
+const RESULT_ROWS_MAX_HEIGHT = 256;
+const DIFF_ROW_MIN_HEIGHT = 53;
+const DIFF_ROWS_MAX_HEIGHT = 288;
 
 const { t } = useI18n();
 const { toast } = useToast();
@@ -151,6 +166,16 @@ const filteredSourceTables = computed(() => {
   if (!query) return sourceTables.value;
   return sourceTables.value.filter((table) => table.toLowerCase().includes(query));
 });
+const filteredSourceTableItems = computed(() => filteredSourceTables.value.map((name) => ({ name })));
+const sourceTablesScrollerStyle = computed(() => ({
+  height: `${Math.min(filteredSourceTables.value.length * SOURCE_TABLE_ROW_HEIGHT, SOURCE_TABLES_MAX_HEIGHT)}px`,
+}));
+const taskPreviewScrollerStyle = computed(() => ({
+  height: `${Math.min(compareTasksPreview.value.length * TASK_PREVIEW_ROW_HEIGHT, TASK_PREVIEW_MAX_HEIGHT)}px`,
+}));
+const resultRowsScrollerStyle = computed(() => ({
+  height: `${Math.min(batchResults.value.length * RESULT_ROW_MIN_HEIGHT, RESULT_ROWS_MAX_HEIGHT)}px`,
+}));
 const allFilteredTablesSelected = computed(
   () =>
     filteredSourceTables.value.length > 0 &&
@@ -513,6 +538,12 @@ function rowsForDisplay(table: DataCompareTableResult, kind: DiffKind) {
   return table.showAll[kind] ? rows : rows.slice(0, detailPreviewLimitNumber.value);
 }
 
+function diffRowsScrollerStyle(table: DataCompareTableResult, kind: DiffKind) {
+  return {
+    height: `${Math.min(rowsForDisplay(table, kind).length * DIFF_ROW_MIN_HEIGHT, DIFF_ROWS_MAX_HEIGHT)}px`,
+  };
+}
+
 function remainingRows(table: DataCompareTableResult, kind: DiffKind) {
   return Math.max(0, table.diff[kind].length - rowsForDisplay(table, kind).length);
 }
@@ -650,6 +681,7 @@ async function startCompare() {
             keyColumns: resolvedKeys,
           });
           results.push({
+            uid: `${task.sourceTable}:${task.targetTable}`,
             sourceTable: task.sourceTable,
             targetTable: task.targetTable,
             keyColumns: resolvedKeys,
@@ -731,6 +763,7 @@ async function startCompare() {
         const status: DataCompareTableStatus = added || removed || modified ? "different" : "same";
 
         results.push({
+          uid: `${task.sourceTable}:${task.targetTable}`,
           sourceTable: task.sourceTable,
           targetTable: task.targetTable,
           keyColumns: resolvedKeys,
@@ -755,6 +788,7 @@ async function startCompare() {
         });
       } catch (e: any) {
         results.push({
+          uid: `${task.sourceTable}:${task.targetTable}`,
           sourceTable: task.sourceTable,
           targetTable: task.targetTable,
           keyColumns: keyColumns.value,
@@ -1078,22 +1112,31 @@ watch(
               </div>
               <div
                 v-else
-                class="max-h-40 overflow-auto rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)]"
+                class="rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)]"
               >
-                <button
-                  v-for="table in filteredSourceTables"
-                  :key="table"
-                  type="button"
-                  class="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-[var(--ds-text-2)] transition-colors hover:bg-[var(--ds-bg-hover)]"
-                  @click="toggleSourceTable(table)"
+                <RecycleScroller
+                  v-if="filteredSourceTableItems.length"
+                  :items="filteredSourceTableItems"
+                  :item-size="SOURCE_TABLE_ROW_HEIGHT"
+                  :style="sourceTablesScrollerStyle"
+                  :skip-hover="true"
+                  key-field="name"
                 >
-                  <CheckSquare
-                    v-if="selectedSourceTables.has(table)"
-                    class="w-3.5 h-3.5 text-[var(--ds-accent)] shrink-0"
-                  />
-                  <Square v-else class="w-3.5 h-3.5 text-[var(--ds-text-4)] shrink-0" />
-                  <span class="truncate font-mono">{{ table }}</span>
-                </button>
+                  <template #default="{ item }">
+                    <button
+                      type="button"
+                      class="flex h-[28px] w-full items-center gap-2 px-2.5 text-left text-xs text-[var(--ds-text-2)] transition-colors hover:bg-[var(--ds-bg-hover)]"
+                      @click="toggleSourceTable(item.name)"
+                    >
+                      <CheckSquare
+                        v-if="selectedSourceTables.has(item.name)"
+                        class="w-3.5 h-3.5 text-[var(--ds-accent)] shrink-0"
+                      />
+                      <Square v-else class="w-3.5 h-3.5 text-[var(--ds-text-4)] shrink-0" />
+                      <span class="truncate font-mono">{{ item.name }}</span>
+                    </button>
+                  </template>
+                </RecycleScroller>
               </div>
             </div>
           </div>
@@ -1168,22 +1211,30 @@ watch(
               </div>
               <div
                 v-if="compareTasksPreview.length"
-                class="max-h-36 overflow-auto rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)]"
+                class="rounded-[var(--ds-radius-sm)] border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)]"
               >
-                <div
-                  v-for="task in compareTasksPreview"
-                  :key="`${task.sourceTable}:${task.targetTable}`"
-                  class="flex items-center justify-between gap-2 border-b border-[var(--ds-border-soft)] px-2 py-1 last:border-b-0"
+                <RecycleScroller
+                  :items="compareTasksPreview"
+                  :item-size="TASK_PREVIEW_ROW_HEIGHT"
+                  :style="taskPreviewScrollerStyle"
+                  :skip-hover="true"
+                  key-field="sourceTable"
                 >
-                  <span class="truncate font-mono text-[var(--ds-text-2)]">{{ task.sourceTable }}</span>
-                  <span class="text-[var(--ds-text-4)]">→</span>
-                  <span
-                    class="truncate font-mono"
-                    :class="task.matched ? 'text-[var(--ds-text-2)]' : 'text-[var(--ds-red)]'"
-                  >
-                    {{ task.targetTable || t("dataCompare.targetTableMissing", { table: task.sourceTable }) }}
-                  </span>
-                </div>
+                  <template #default="{ item }">
+                    <div
+                      class="flex h-[25px] items-center justify-between gap-2 border-b border-[var(--ds-border-soft)] px-2"
+                    >
+                      <span class="truncate font-mono text-[var(--ds-text-2)]">{{ item.sourceTable }}</span>
+                      <span class="text-[var(--ds-text-4)]">→</span>
+                      <span
+                        class="truncate font-mono"
+                        :class="item.matched ? 'text-[var(--ds-text-2)]' : 'text-[var(--ds-red)]'"
+                      >
+                        {{ item.targetTable || t("dataCompare.targetTableMissing", { table: item.sourceTable }) }}
+                      </span>
+                    </div>
+                  </template>
+                </RecycleScroller>
               </div>
             </div>
           </div>
@@ -1255,25 +1306,34 @@ watch(
           </div>
 
           <div class="rounded-[var(--ds-radius)] border border-[var(--ds-border)] overflow-hidden">
-            <div class="max-h-64 overflow-auto">
-              <table class="w-full text-xs">
-                <thead class="bg-[var(--ds-bg-canvas)] sticky top-0 z-10">
-                  <tr class="text-[var(--ds-text-3)]">
-                    <th class="px-3 py-2 text-left font-medium">{{ t("diff.table") }}</th>
-                    <th class="px-3 py-2 text-left font-medium">{{ t("dataCompare.targetTable") }}</th>
-                    <th class="px-3 py-2 text-left font-medium">{{ t("diff.status") }}</th>
-                    <th class="px-3 py-2 text-left font-medium">{{ t("diff.details") }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="item in batchResults"
-                    :key="`${item.sourceTable}:${item.targetTable}`"
-                    class="border-t border-[var(--ds-border-soft)]"
+            <div
+              class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,2fr)] gap-x-3 bg-[var(--ds-bg-canvas)] px-3 py-2 text-xs text-[var(--ds-text-3)]"
+            >
+              <span class="text-left font-medium">{{ t("diff.table") }}</span>
+              <span class="text-left font-medium">{{ t("dataCompare.targetTable") }}</span>
+              <span class="text-left font-medium">{{ t("diff.status") }}</span>
+              <span class="text-left font-medium">{{ t("diff.details") }}</span>
+            </div>
+            <DynamicScroller
+              v-if="batchResults.length"
+              :items="batchResults"
+              :min-item-size="RESULT_ROW_MIN_HEIGHT"
+              :style="resultRowsScrollerStyle"
+              key-field="uid"
+            >
+              <template #default="{ item, active, index }">
+                <DynamicScrollerItem
+                  :item="item"
+                  :active="active"
+                  :data-index="index"
+                  :size-dependencies="[item.status, item.error]"
+                >
+                  <div
+                    class="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto_minmax(0,2fr)] items-start gap-x-3 border-t border-[var(--ds-border-soft)] px-3 py-2 text-xs"
                   >
-                    <td class="px-3 py-2 align-top font-mono text-[var(--ds-text-1)]">{{ item.sourceTable }}</td>
-                    <td class="px-3 py-2 align-top font-mono text-[var(--ds-text-3)]">{{ item.targetTable }}</td>
-                    <td class="px-3 py-2 align-top">
+                    <div class="min-w-0 break-words font-mono text-[var(--ds-text-1)]">{{ item.sourceTable }}</div>
+                    <div class="min-w-0 break-words font-mono text-[var(--ds-text-3)]">{{ item.targetTable }}</div>
+                    <div>
                       <span
                         class="inline-flex items-center gap-1.5 rounded-[var(--ds-radius-pill)] px-2 py-0.5 text-[11px] font-medium"
                         :style="resultStatusStyle(item.status)"
@@ -1281,8 +1341,8 @@ watch(
                         <span class="size-1.5 rounded-full" :style="{ background: resultStatusColor(item.status) }" />
                         {{ resultStatusLabel(item.status) }}
                       </span>
-                    </td>
-                    <td class="px-3 py-2 align-top text-[var(--ds-text-3)]">
+                    </div>
+                    <div class="min-w-0 text-[var(--ds-text-3)]">
                       <div v-if="item.status === 'error'" class="text-[var(--ds-red)]">{{ item.error }}</div>
                       <template v-else>
                         <div>
@@ -1317,11 +1377,11 @@ watch(
                           }}
                         </div>
                       </template>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+                    </div>
+                  </div>
+                </DynamicScrollerItem>
+              </template>
+            </DynamicScroller>
           </div>
 
           <div class="space-y-3">
@@ -1391,28 +1451,38 @@ watch(
                     </Button>
                   </div>
 
-                  <div class="max-h-72 overflow-auto divide-y divide-[var(--ds-border-soft)]">
-                    <button
-                      v-for="row in rowsForDisplay(item, kind)"
-                      :key="`${item.sourceTable}:${kind}:${row.key}`"
-                      type="button"
-                      class="flex w-full items-start gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-[var(--ds-bg-hover)]"
-                      @click="toggleRowSelection(row)"
-                    >
-                      <CheckSquare v-if="row.selected" class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--ds-accent)]" />
-                      <Square v-else class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--ds-text-4)]" />
-                      <div class="min-w-0 flex-1">
-                        <div class="font-mono text-[var(--ds-text-2)]">{{ formatKeyValues(row.keyValues) }}</div>
-                        <div class="mt-1 text-[var(--ds-text-3)] break-words">
-                          {{
-                            kind === "modified"
-                              ? formatModifiedSummary(row as SelectableDataCompareModifiedRow)
-                              : formatRowValues((row as SelectableDataCompareRow).values)
-                          }}
-                        </div>
-                      </div>
-                    </button>
-                  </div>
+                  <DynamicScroller
+                    :items="rowsForDisplay(item, kind)"
+                    :min-item-size="DIFF_ROW_MIN_HEIGHT"
+                    :style="diffRowsScrollerStyle(item, kind)"
+                    key-field="key"
+                  >
+                    <template #default="{ item: row, active, index }">
+                      <DynamicScrollerItem :item="row" :active="active" :data-index="index">
+                        <button
+                          type="button"
+                          class="flex w-full items-start gap-3 border-b border-[var(--ds-border-soft)] px-3 py-2 text-left text-xs transition-colors hover:bg-[var(--ds-bg-hover)]"
+                          @click="toggleRowSelection(row)"
+                        >
+                          <CheckSquare
+                            v-if="row.selected"
+                            class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--ds-accent)]"
+                          />
+                          <Square v-else class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--ds-text-4)]" />
+                          <div class="min-w-0 flex-1">
+                            <div class="font-mono text-[var(--ds-text-2)]">{{ formatKeyValues(row.keyValues) }}</div>
+                            <div class="mt-1 text-[var(--ds-text-3)] break-words">
+                              {{
+                                kind === "modified"
+                                  ? formatModifiedSummary(row as SelectableDataCompareModifiedRow)
+                                  : formatRowValues((row as SelectableDataCompareRow).values)
+                              }}
+                            </div>
+                          </div>
+                        </button>
+                      </DynamicScrollerItem>
+                    </template>
+                  </DynamicScroller>
 
                   <div
                     v-if="remainingRows(item, kind) > 0 && !item.showAll[kind]"

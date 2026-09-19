@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { uuid } from "@/lib/utils";
 import { useI18n } from "vue-i18n";
 import { AlertCircle, Loader2, Search, Square, Table2 } from "@lucide/vue";
+import { DynamicScroller, DynamicScrollerItem } from "vue-virtual-scroller";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogFooter, DialogHeader, DialogScrollContent, DialogTitle } from "@/components/ui/dialog";
@@ -81,6 +82,15 @@ const generalError = ref("");
 const limitedTables = ref(false);
 const currentExecutionId = ref("");
 let runId = 0;
+
+// Result cards stack a name row and a preview row (53px) plus an 8px gap.
+// Matched-column badges can wrap and grow the card, hence the variable-size
+// scroller with 61px as the initial estimate.
+const SEARCH_RESULT_ROW_PITCH = 61;
+const SEARCH_RESULT_MAX_HEIGHT = 360;
+const resultScrollerStyle = computed(() => ({
+  height: `${Math.min(results.value.length * SEARCH_RESULT_ROW_PITCH, SEARCH_RESULT_MAX_HEIGHT)}px`,
+}));
 
 const connection = computed(() =>
   props.prefillConnectionId ? connectionStore.getConfig(props.prefillConnectionId) : undefined,
@@ -358,26 +368,44 @@ function openResult(item: SearchResultItem) {
             <div class="text-sm font-medium">{{ t("databaseSearch.results") }}</div>
             <Badge variant="outline">{{ results.length }}</Badge>
           </div>
-          <div v-if="results.length" class="max-h-[360px] space-y-2 overflow-auto pr-1">
-            <button
-              v-for="item in results"
-              :key="item.id"
-              class="flex w-full items-start gap-3 rounded-md border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/40"
-              @click="openResult(item)"
-            >
-              <Table2 class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-              <div class="min-w-0 flex-1">
-                <div class="flex min-w-0 flex-wrap items-center gap-2">
-                  <span class="truncate font-medium">{{
-                    item.schema ? `${item.schema}.${item.tableName}` : item.tableName
-                  }}</span>
-                  <Badge v-for="column in item.matchedColumns" :key="column" variant="secondary">{{ column }}</Badge>
+          <DynamicScroller
+            v-if="results.length"
+            class="pr-1"
+            :items="results"
+            :min-item-size="SEARCH_RESULT_ROW_PITCH"
+            key-field="id"
+            :style="resultScrollerStyle"
+          >
+            <template #default="{ item, active, index }">
+              <DynamicScrollerItem
+                :item="item"
+                :active="active"
+                :data-index="index"
+                :size-dependencies="[item.matchedColumns.length, item.preview.length]"
+              >
+                <div class="pb-2">
+                  <button
+                    class="flex w-full items-start gap-3 rounded-md border bg-background px-3 py-2 text-left transition-colors hover:bg-muted/40"
+                    @click="openResult(item)"
+                  >
+                    <Table2 class="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div class="min-w-0 flex-1">
+                      <div class="flex min-w-0 flex-wrap items-center gap-2">
+                        <span class="truncate font-medium">{{
+                          item.schema ? `${item.schema}.${item.tableName}` : item.tableName
+                        }}</span>
+                        <Badge v-for="column in item.matchedColumns" :key="column" variant="secondary">{{
+                          column
+                        }}</Badge>
+                      </div>
+                      <div class="mt-1 truncate text-xs text-muted-foreground">{{ item.preview }}</div>
+                    </div>
+                    <span class="shrink-0 text-xs text-primary">{{ t("databaseSearch.openResult") }}</span>
+                  </button>
                 </div>
-                <div class="mt-1 truncate text-xs text-muted-foreground">{{ item.preview }}</div>
-              </div>
-              <span class="shrink-0 text-xs text-primary">{{ t("databaseSearch.openResult") }}</span>
-            </button>
-          </div>
+              </DynamicScrollerItem>
+            </template>
+          </DynamicScroller>
           <div v-else class="rounded-md border border-dashed py-10 text-center text-sm text-muted-foreground">
             {{ running ? t("databaseSearch.waiting") : t("databaseSearch.noResults") }}
           </div>

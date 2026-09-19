@@ -36,6 +36,7 @@ import JsonEditNode from "./JsonEditNode.vue";
 import type { EditNode } from "@/types/editor";
 import type { QueryResult } from "@/types/database";
 import { Splitpanes, Pane } from "splitpanes";
+import { RecycleScroller } from "vue-virtual-scroller";
 import "splitpanes/dist/splitpanes.css";
 
 const { t } = useI18n();
@@ -49,6 +50,11 @@ const props = defineProps<{
 
 type JsonRecord = Record<string, unknown>;
 type ViewMode = "document" | "table";
+
+// px-3 py-1.5 border-b text-xs row hosting a 20px (size-5) action button.
+const MONGO_DOC_ROW_HEIGHT = 33;
+const MONGO_DOC_SCROLL_BUFFER = 600;
+type PagedDocItem = { idx: number; doc: JsonRecord };
 
 const documents = ref<JsonRecord[]>([]);
 const lastGridColumns = ref<string[]>([]);
@@ -664,6 +670,21 @@ function docPreview(doc: JsonRecord): string {
   return `${id} - ${preview}`;
 }
 
+// Rows recycle while scrolling, so previews must not re-run JSON.stringify per
+// render. Documents are replaced wholesale on every load, so a WeakMap keyed by
+// document identity is both hit-stable and self-evicting.
+const docPreviewCache = new WeakMap<JsonRecord, string>();
+
+function docPreviewCached(doc: JsonRecord): string {
+  const hit = docPreviewCache.get(doc);
+  if (hit !== undefined) return hit;
+  const preview = docPreview(doc);
+  docPreviewCache.set(doc, preview);
+  return preview;
+}
+
+const pagedDocs = computed<PagedDocItem[]>(() => documents.value.map((doc, idx) => ({ idx, doc })));
+
 function highlightedJson(json: string): string {
   const escaped = json.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -1206,24 +1227,34 @@ function resetTableSearchSplitWidth() {
       <!-- Document list (left) -->
       <Pane :size="30" :min-size="15" :max-size="50">
         <div class="h-full flex flex-col overflow-hidden">
-          <div class="flex-1 overflow-y-auto">
-            <div
-              v-for="(doc, idx) in documents"
-              :key="idx"
-              class="px-3 py-1.5 border-b text-xs font-mono cursor-pointer hover:bg-accent/50 flex items-center gap-2 group"
-              :class="{ 'bg-accent': selectedIdx === idx }"
-              @click="selectDoc(idx)"
+          <div class="min-h-0 flex-1">
+            <RecycleScroller
+              v-if="pagedDocs.length"
+              class="h-full"
+              :items="pagedDocs"
+              :item-size="MONGO_DOC_ROW_HEIGHT"
+              :buffer="MONGO_DOC_SCROLL_BUFFER"
+              :skip-hover="true"
+              key-field="idx"
             >
-              <span class="truncate flex-1">{{ docPreview(doc) }}</span>
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                class="opacity-0 group-hover:opacity-100 text-destructive shrink-0"
-                @click.stop="requestDeleteDoc(idx)"
-              >
-                <Trash2 class="w-3 h-3" />
-              </Button>
-            </div>
+              <template #default="{ item }">
+                <div
+                  class="h-[33px] px-3 py-1.5 border-b text-xs font-mono cursor-pointer hover:bg-accent/50 flex items-center gap-2 group"
+                  :class="{ 'bg-accent': selectedIdx === item.idx }"
+                  @click="selectDoc(item.idx)"
+                >
+                  <span class="truncate flex-1">{{ docPreviewCached(item.doc) }}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    class="opacity-0 group-hover:opacity-100 text-destructive shrink-0"
+                    @click.stop="requestDeleteDoc(item.idx)"
+                  >
+                    <Trash2 class="w-3 h-3" />
+                  </Button>
+                </div>
+              </template>
+            </RecycleScroller>
             <div v-if="documents.length === 0 && !loading" class="px-3 py-8 text-center text-muted-foreground text-xs">
               {{ t("mongo.emptyCollection") }}
             </div>
