@@ -339,20 +339,20 @@ async function toggle() {
   const wasExpanded = !!node.isExpanded;
 
   if (node.type === "connection-group") {
-    node.isExpanded = !node.isExpanded;
+    connectionStore.setTreeNodeExpanded(node, !node.isExpanded);
     connectionStore.toggleConnectionGroupCollapsed(node.id);
     emit("node-toggled", node, wasExpanded);
     return;
   }
 
   if (node.type === "saved-sql-root" || node.type === "saved-sql-folder") {
-    node.isExpanded = !node.isExpanded;
+    connectionStore.setTreeNodeExpanded(node, !node.isExpanded);
     emit("node-toggled", node, wasExpanded);
     return;
   }
 
   if (node.type === "group-partitions") {
-    node.isExpanded = !node.isExpanded;
+    connectionStore.setTreeNodeExpanded(node, !node.isExpanded);
     emit("node-toggled", node, wasExpanded);
     return;
   }
@@ -365,13 +365,13 @@ async function toggle() {
     node.type === "group-sequences" ||
     node.type === "group-packages";
   if (databaseObjectGroup && connectionStore.isTreeNodeChildrenLoaded(node.id)) {
-    node.isExpanded = !node.isExpanded;
+    connectionStore.setTreeNodeExpanded(node, !node.isExpanded);
     emit("node-toggled", node, wasExpanded);
     return;
   }
 
   if (node.isExpanded) {
-    node.isExpanded = false;
+    connectionStore.setTreeNodeExpanded(node, false);
     emit("node-toggled", node, wasExpanded);
     return;
   }
@@ -447,7 +447,7 @@ async function toggle() {
     }
     emit("node-toggled", node, wasExpanded);
   } catch (e: any) {
-    if (!wasExpanded) node.isExpanded = false;
+    if (!wasExpanded) connectionStore.setTreeNodeExpanded(node, false);
     const errMsg = e?.message || String(e);
     toast(t("connection.connectFailed", { message: translateBackendError(t, errMsg) }), 5000);
     if (errMsg.includes("driver is not installed") || errMsg.includes("is not installed")) {
@@ -2368,8 +2368,7 @@ async function disconnectConnection() {
   if (props.node.connectionId) {
     try {
       await connectionStore.disconnect(props.node.connectionId);
-      props.node.isExpanded = false;
-      props.node.children = [];
+      connectionStore.resetTreeNodeChildren(props.node);
       toast(t("connection.disconnected"), 2000);
     } catch (e: any) {
       toast(t("connection.saveFailed", { message: e?.message || String(e) }), 5000);

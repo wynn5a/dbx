@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { uuid } from "@/lib/utils";
-import { ref, computed, watch } from "vue";
+import { ref, shallowRef, computed, watch } from "vue";
 import type { ColumnInfo, ConnectionConfig, ObjectInfo, SidebarLayout, TreeNode } from "@/types/database";
 import { applyPinnedTreeNodeState, orderPinnedFirst } from "@/lib/pinnedItems";
 import {
@@ -122,7 +122,49 @@ export const useConnectionStore = defineStore("connection", () => {
     if (id) localStorage.setItem(ACTIVE_CONNECTION_STORAGE_KEY, id);
     else localStorage.removeItem(ACTIVE_CONNECTION_STORAGE_KEY);
   });
-  const treeNodes = ref<TreeNode[]>([]);
+  // The tree is shallow-reactive: nodes are plain (non-proxied) objects, so
+  // reads during tree walks and rendering pay no proxy overhead. Every write
+  // MUST go through commitTreeNode / commitTreeNodes, which re-commit the
+  // root array by cloning only the path down to the changed node — mutating a
+  // captured node instance in place would edit a detached clone and never
+  // reach the UI.
+  const treeNodes = shallowRef<TreeNode[]>([]);
+
+  function commitTreeNodes(transform: (nodes: TreeNode[]) => TreeNode[]) {
+    treeNodes.value = transform(treeNodes.value);
+  }
+
+  function commitTreeNode(instanceOrId: TreeNode | string, update: (draft: TreeNode) => void): boolean {
+    const id = typeof instanceOrId === "string" ? instanceOrId : instanceOrId.id;
+    let touched = false;
+    commitTreeNodes((nodes) => {
+      const walk = (current: TreeNode[]): TreeNode[] => {
+        let next: TreeNode[] | null = null;
+        for (let i = 0; i < current.length; i++) {
+          const node = current[i];
+          if (node.id === id) {
+            const draft = { ...node };
+            update(draft);
+            touched = true;
+            if (!next) next = current.slice();
+            next[i] = draft;
+            continue;
+          }
+          if (node.children?.length) {
+            const children = walk(node.children);
+            if (children !== node.children) {
+              if (!next) next = current.slice();
+              next[i] = { ...node, children };
+            }
+          }
+        }
+        return next ?? current;
+      };
+      return walk(nodes);
+    });
+    return touched;
+  }
+
   const pinnedTreeNodeIds = ref<Set<string>>(new Set());
   const connectedIds = ref<Set<string>>(new Set());
   // Per-connection "last used" timestamps (epoch ms), kept frontend-only in
@@ -462,25 +504,30 @@ export const useConnectionStore = defineStore("connection", () => {
   }
 
   function setChildren(parent: TreeNode, children: TreeNode[]) {
-    if (parent.children && parent.children.length > 0) {
-      const oldMap = new Map(parent.children.map((c) => [c.id, c] as const));
-      children = children.map((child) => {
-        const old = oldMap.get(child.id);
-        if (old && old.isExpanded && old.children && old.children.length > 0) {
-          return { ...child, isExpanded: true, children: old.children };
-        }
-        return child;
-      });
-    }
-    parent.children = applyPinnedTreeNodeState(children, pinnedTreeNodeIds.value);
-    loadedTreeNodeChildrenIds.value.add(parent.id);
+    commitTreeNode(parent, (draft) => {
+      if (draft.children && draft.children.length > 0) {
+        const oldMap = new Map(draft.children.map((c) => [c.id, c] as const));
+        children = children.map((child) => {
+          const old = oldMap.get(child.id);
+          if (old && old.isExpanded && old.children && old.children.length > 0) {
+            return { ...child, isExpanded: true, children: old.children };
+          }
+          return child;
+        });
+      }
+      draft.children = applyPinnedTreeNodeState(children, pinnedTreeNodeIds.value);
+      loadedTreeNodeChildrenIds.value.add(draft.id);
+    });
   }
 
   function removeTreeNode(nodeId: string) {
-    const parent = findParentNode(treeNodes.value, nodeId);
-    if (parent?.children) {
-      parent.children = parent.children.filter((c) => c.id !== nodeId);
-    }
+    commitTreeNodes((nodes) => {
+      const strip = (current: TreeNode[]): TreeNode[] =>
+        current
+          .filter((node) => node.id !== nodeId)
+          .map((node) => (node.children?.length ? { ...node, children: strip(node.children) } : node));
+      return strip(nodes);
+    });
     if (selectedTreeNodeId.value === nodeId) selectedTreeNodeId.value = null;
     selectedTreeNodeIds.value = selectedTreeNodeIds.value.filter((id) => id !== nodeId);
     if (treeSelectionAnchorId.value === nodeId) treeSelectionAnchorId.value = null;
@@ -569,19 +616,25 @@ export const useConnectionStore = defineStore("connection", () => {
   }
 
   function refreshSavedSqlTree(connectionId?: string) {
-    const refresh = (nodes: TreeNode[]) => {
-      for (const node of nodes) {
+    const refresh = (nodes: TreeNode[]): TreeNode[] =>
+      nodes.map((node) => {
+        let next = node;
         if (node.type === "connection" && node.connectionId && (!connectionId || node.connectionId === connectionId)) {
-          node.children = withSavedSqlRoot(
-            node.connectionId,
-            (node.children || []).filter((child) => child.type !== "saved-sql-root" && child.type !== "user-admin"),
-            node,
-          );
+          next = {
+            ...node,
+            children: withSavedSqlRoot(
+              node.connectionId,
+              (node.children || []).filter((child) => child.type !== "saved-sql-root" && child.type !== "user-admin"),
+              node,
+            ),
+          };
         }
-        if (node.children) refresh(node.children);
-      }
-    };
-    refresh(treeNodes.value);
+        if (next.children) {
+          return { ...next, children: refresh(next.children) };
+        }
+        return next;
+      });
+    commitTreeNodes(refresh);
   }
 
   function schemaCacheKey(...parts: string[]): string {
@@ -599,7 +652,12 @@ export const useConnectionStore = defineStore("connection", () => {
     const expandedIds = collectExpandedNodeIds([node]);
     clearLoadedChildrenCache(node.id);
     void loadTreeNodeChildren(node, { force: true })
-      .then(() => restoreExpandedChildren(node, expandedIds, { force: true }))
+      .then(() => {
+        // Loading replaced the node instance in the committed tree; restore
+        // expansion from the fresh one, not the captured reference.
+        const fresh = findNode(treeNodes.value, node.id) ?? node;
+        return restoreExpandedChildren(fresh, expandedIds, { force: true });
+      })
       .finally(() => staleTreeRefreshIds.delete(node.id));
   }
 
@@ -618,7 +676,9 @@ export const useConnectionStore = defineStore("connection", () => {
         ? withSavedSqlRoot(node.connectionId, normalizedChildren, node)
         : normalizedChildren,
     );
-    node.isExpanded = true;
+    commitTreeNode(node, (draft) => {
+      draft.isExpanded = true;
+    });
     return { hit: true, isStale: decoded.isStale };
   }
 
@@ -636,7 +696,9 @@ export const useConnectionStore = defineStore("connection", () => {
       );
       setChildren(node, normalizedChildren);
     }
-    node.isExpanded = true;
+    commitTreeNode(node, (draft) => {
+      draft.isExpanded = true;
+    });
     return true;
   }
 
@@ -689,8 +751,9 @@ export const useConnectionStore = defineStore("connection", () => {
     pinnedTreeNodeIds.value = next;
     persistPinnedTreeNodeIds();
 
-    const node = findNode(treeNodes.value, id);
-    if (node) node.pinned = next.has(id);
+    commitTreeNode(id, (draft) => {
+      draft.pinned = next.has(id);
+    });
 
     const isConnectionOrGroup =
       treeNodes.value.some((n) => n.id === id) ||
@@ -700,11 +763,15 @@ export const useConnectionStore = defineStore("connection", () => {
     } else {
       const parent = findParentNode(treeNodes.value, id);
       if (parent?.children) {
-        parent.children = orderPinnedFirst(parent.children, (child) => !!child.pinned);
-        const sqlRootIdx = parent.children.findIndex((c) => c.type === "saved-sql-root");
-        if (sqlRootIdx > 0) {
-          parent.children.unshift(...parent.children.splice(sqlRootIdx, 1));
-        }
+        commitTreeNode(parent, (draft) => {
+          let children = orderPinnedFirst(draft.children || [], (child) => !!child.pinned);
+          const sqlRootIdx = children.findIndex((c) => c.type === "saved-sql-root");
+          if (sqlRootIdx > 0) {
+            children = [...children];
+            children.unshift(...children.splice(sqlRootIdx, 1));
+          }
+          draft.children = children;
+        });
       }
     }
   }
@@ -883,8 +950,9 @@ export const useConnectionStore = defineStore("connection", () => {
 
   async function connect(config: ConnectionConfig) {
     config = normalizeConnection(config);
-    const pendingNode = findNode(treeNodes.value, config.id);
-    if (pendingNode) pendingNode.isLoading = true;
+    commitTreeNode(config.id, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       const id = await withConnectionAttemptTimeout(api.connectDb(config), config);
       activeConnectionId.value = id;
@@ -895,27 +963,33 @@ export const useConnectionStore = defineStore("connection", () => {
 
       const existing = findNode(treeNodes.value, id);
       if (existing) {
-        existing.label = config.name;
-        existing.type = "connection";
-        existing.connectionId = id;
-        existing.children = existing.children || [];
-      } else {
-        treeNodes.value.push({
-          id,
-          label: config.name,
-          type: "connection",
-          connectionId: id,
-          isExpanded: false,
-          children: [],
+        commitTreeNode(id, (draft) => {
+          draft.label = config.name;
+          draft.type = "connection";
+          draft.connectionId = id;
+          draft.children = draft.children || [];
         });
+      } else {
+        commitTreeNodes((nodes) => [
+          ...nodes,
+          {
+            id,
+            label: config.name,
+            type: "connection" as const,
+            connectionId: id,
+            isExpanded: false,
+            children: [],
+          },
+        ]);
       }
       return id;
     } catch (e) {
       recordConnectionError(config.id, e);
       throw e;
     } finally {
-      const node = findNode(treeNodes.value, config.id);
-      if (node) node.isLoading = false;
+      commitTreeNode(config.id, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -936,11 +1010,10 @@ export const useConnectionStore = defineStore("connection", () => {
         break;
     }
     connectedIds.value.delete(connectionId);
-    const node = findNode(treeNodes.value, connectionId);
-    if (node) {
-      node.isExpanded = false;
-      node.children = [];
-    }
+    commitTreeNode(connectionId, (draft) => {
+      draft.isExpanded = false;
+      draft.children = [];
+    });
     clearLoadedChildrenCache(connectionId);
     if (activeConnectionId.value === connectionId) {
       activeConnectionId.value = null;
@@ -967,9 +1040,12 @@ export const useConnectionStore = defineStore("connection", () => {
     }
     const node = findDatabaseTreeNode(treeNodes.value, connectionId, database);
     if (node) {
-      node.isExpanded = false;
-      node.children = [];
-      clearLoadedChildrenCache(node.id);
+      const nodeId = node.id;
+      commitTreeNode(nodeId, (draft) => {
+        draft.isExpanded = false;
+        draft.children = [];
+      });
+      clearLoadedChildrenCache(nodeId);
     }
     invalidateCompletionCache(connectionId, database);
   }
@@ -1001,7 +1077,9 @@ export const useConnectionStore = defineStore("connection", () => {
   async function loadDatabases(connectionId: string, options?: LoadTreeOptions) {
     const node = findNode(treeNodes.value, connectionId);
     if (!node) return;
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       await ensureConnected(connectionId);
       if (useCachedChildren(node, options)) return;
@@ -1077,12 +1155,16 @@ export const useConnectionStore = defineStore("connection", () => {
         setChildren(node, children);
         await savePersistedTreeChildren(cacheKey, children);
       }
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -1090,7 +1172,9 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, connectionId);
     if (!node) return;
 
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       await ensureConnected(connectionId);
       const dbs = await withMetadataLoadTimeout(connectionId, () => api.redisListDatabases(connectionId));
@@ -1120,12 +1204,16 @@ export const useConnectionStore = defineStore("connection", () => {
           node,
         ),
       );
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -1133,7 +1221,9 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, connectionId);
     if (!node) return;
 
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       await ensureConnected(connectionId);
       setChildren(
@@ -1154,12 +1244,16 @@ export const useConnectionStore = defineStore("connection", () => {
           node,
         ),
       );
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -1170,19 +1264,23 @@ export const useConnectionStore = defineStore("connection", () => {
   ) {
     const node = findNode(treeNodes.value, `${connectionId}:db${db}`);
     if (!node || node.type !== "redis-db") return;
-    if (stats.loaded != null) node.loadedKeyCount = stats.loaded;
-    if (stats.total != null) node.totalKeyCount = stats.total;
-    if (stats.totalDelta != null && node.totalKeyCount != null) {
-      node.totalKeyCount = Math.max(0, node.totalKeyCount + stats.totalDelta);
-    }
-    node.label = redisDbLabel(db, node.loadedKeyCount, node.totalKeyCount);
+    commitTreeNode(node, (draft) => {
+      if (stats.loaded != null) draft.loadedKeyCount = stats.loaded;
+      if (stats.total != null) draft.totalKeyCount = stats.total;
+      if (stats.totalDelta != null && draft.totalKeyCount != null) {
+        draft.totalKeyCount = Math.max(0, draft.totalKeyCount + stats.totalDelta);
+      }
+      draft.label = redisDbLabel(db, draft.loadedKeyCount, draft.totalKeyCount);
+    });
   }
 
   async function loadMongoDatabases(connectionId: string) {
     const node = findNode(treeNodes.value, connectionId);
     if (!node) return;
 
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       await ensureConnected(connectionId);
       const dbs = await withMetadataLoadTimeout(connectionId, () => api.mongoListDatabases(connectionId));
@@ -1204,12 +1302,16 @@ export const useConnectionStore = defineStore("connection", () => {
           node,
         ),
       );
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -1218,7 +1320,9 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, nodeId);
     if (!node) return;
 
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       const collections = await withMetadataLoadTimeout(connectionId, () =>
         api.mongoListCollections(connectionId, database),
@@ -1234,12 +1338,16 @@ export const useConnectionStore = defineStore("connection", () => {
           isExpanded: false,
         })),
       );
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -1247,7 +1355,9 @@ export const useConnectionStore = defineStore("connection", () => {
     const nodeId = `${connectionId}:${database}`;
     const node = findNode(treeNodes.value, nodeId);
     if (!node) return;
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       await ensureConnected(connectionId);
       if (useCachedChildren(node, options)) return;
@@ -1275,12 +1385,16 @@ export const useConnectionStore = defineStore("connection", () => {
       }));
       setChildren(node, children);
       await savePersistedTreeChildren(cacheKey, children);
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -1288,7 +1402,9 @@ export const useConnectionStore = defineStore("connection", () => {
     const nodeId = `${connectionId}:${database}`;
     const node = findNode(treeNodes.value, nodeId);
     if (!node) return;
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       await ensureConnected(connectionId);
       if (useCachedChildren(node, options)) return;
@@ -1319,12 +1435,16 @@ export const useConnectionStore = defineStore("connection", () => {
       });
       setChildren(node, children);
       await savePersistedTreeChildren(cacheKey, children);
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -1332,7 +1452,9 @@ export const useConnectionStore = defineStore("connection", () => {
     const nodeId = schema ? `${connectionId}:${database}:${schema}` : `${connectionId}:${database}`;
     const node = findNode(treeNodes.value, nodeId);
     if (!node) return;
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       await ensureConnected(connectionId);
       if (useCachedChildren(node, options)) return;
@@ -1387,18 +1509,24 @@ export const useConnectionStore = defineStore("connection", () => {
       }
       setChildren(node, children);
       await savePersistedTreeChildren(cacheKey, children);
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
   async function loadObjectGroupChildren(node: TreeNode, options?: LoadTreeOptions) {
     if (!node.connectionId || !hasTreeNodeDatabaseContext(node)) return;
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       await ensureConnected(node.connectionId);
       if (useCachedChildren(node, options)) return;
@@ -1444,15 +1572,21 @@ export const useConnectionStore = defineStore("connection", () => {
       });
       const refreshedGroup = grouped.find((group) => group.type === node.type);
       const children = refreshedGroup?.children ?? [];
-      node.objectCount = refreshedGroup?.objectCount ?? children.length;
+      commitTreeNode(node, (draft) => {
+        draft.objectCount = refreshedGroup?.objectCount ?? children.length;
+      });
       setChildren(node, children);
       await savePersistedTreeChildren(cacheKey, children);
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(node.connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -1526,7 +1660,9 @@ export const useConnectionStore = defineStore("connection", () => {
     }
 
     setChildren(node, children);
-    node.isExpanded = true;
+    commitTreeNode(node, (draft) => {
+      draft.isExpanded = true;
+    });
   }
 
   async function loadColumns(connectionId: string, database: string, table: string, schema?: string, nodeId?: string) {
@@ -1538,7 +1674,9 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, parentId);
     if (!node) return;
 
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       const querySchema = metadataQuerySchema(connectionId, database, schema);
       const columns = await withMetadataLoadTimeout(connectionId, () =>
@@ -1557,12 +1695,16 @@ export const useConnectionStore = defineStore("connection", () => {
           meta: col,
         })),
       );
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -1575,7 +1717,9 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, parentId);
     if (!node) return;
 
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       const querySchema = metadataQuerySchema(connectionId, database, schema);
       const indexes = await withMetadataLoadTimeout(connectionId, () =>
@@ -1594,12 +1738,16 @@ export const useConnectionStore = defineStore("connection", () => {
           meta: idx,
         })),
       );
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -1618,7 +1766,9 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, parentId);
     if (!node) return;
 
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       const querySchema = metadataQuerySchema(connectionId, database, schema);
       const fkeys = await withMetadataLoadTimeout(connectionId, () =>
@@ -1637,12 +1787,16 @@ export const useConnectionStore = defineStore("connection", () => {
           meta: fk,
         })),
       );
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -1655,7 +1809,9 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, parentId);
     if (!node) return;
 
-    node.isLoading = true;
+    commitTreeNode(node, (draft) => {
+      draft.isLoading = true;
+    });
     try {
       const querySchema = metadataQuerySchema(connectionId, database, schema);
       const triggers = await withMetadataLoadTimeout(connectionId, () =>
@@ -1674,12 +1830,16 @@ export const useConnectionStore = defineStore("connection", () => {
           meta: tr,
         })),
       );
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     } catch (e) {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      node.isLoading = false;
+      commitTreeNode(node, (draft) => {
+        draft.isLoading = false;
+      });
     }
   }
 
@@ -1755,7 +1915,9 @@ export const useConnectionStore = defineStore("connection", () => {
     ) {
       await loadObjectGroupChildren(node, options);
     } else if (node.type === "group-partitions") {
-      node.isExpanded = true;
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = true;
+      });
     }
   }
 
@@ -1764,7 +1926,10 @@ export const useConnectionStore = defineStore("connection", () => {
     for (const child of node.children) {
       if (!expandedIds.has(child.id)) continue;
       await loadTreeNodeChildren(child, options);
-      await restoreExpandedChildren(child, expandedIds, options);
+      // Loading replaced the child instance in the committed tree; recurse from
+      // the fresh one so its new children are visible to the next level.
+      const fresh = findNode(treeNodes.value, child.id) ?? child;
+      await restoreExpandedChildren(fresh, expandedIds, options);
     }
   }
 
@@ -1788,10 +1953,13 @@ export const useConnectionStore = defineStore("connection", () => {
     await clearPersistedTreeCacheForNode(node);
     clearLoadedChildrenCache(node.id);
     if (node.type !== "connection-group") {
-      node.children = [];
+      commitTreeNode(node, (draft) => {
+        draft.children = [];
+      });
     }
     await loadTreeNodeChildren(node, { force: true });
-    await restoreExpandedChildren(node, expandedIds, { force: true });
+    const fresh = findNode(treeNodes.value, node.id) ?? node;
+    await restoreExpandedChildren(fresh, expandedIds, { force: true });
   }
 
   async function refreshDatabaseTreeNode(connectionId: string, database: string) {
@@ -2439,16 +2607,16 @@ export const useConnectionStore = defineStore("connection", () => {
           return { ...node, children: mergeState(node.children || []) };
         }
         if (existing && node.type === "connection") {
-          // Mutate the existing node in place rather than spreading into a new
-          // object. In-flight loaders (loadDatabases, etc.) capture this node
-          // reference once and clear `node.isLoading` in a `finally`; if a
-          // rebuild replaced it with a fresh object that copied `isLoading: true`,
-          // the loader would clear the now-detached original and the rendered
-          // node would spin forever, making every subsequent click a no-op.
-          existing.label = node.label;
-          existing.pinned = node.pinned;
-          existing.children = withSavedSqlRoot(node.connectionId!, existing.children || [], existing);
-          return existing;
+          // Rebuilds produce a fresh instance carrying over the previous state.
+          // That is safe here because loader mutations are committed by id —
+          // a finalizer clearing `isLoading` applies to whichever instance is
+          // currently in the tree, not to a captured reference.
+          return {
+            ...existing,
+            label: node.label,
+            pinned: node.pinned,
+            children: withSavedSqlRoot(node.connectionId!, existing.children || [], existing),
+          };
         }
         if (node.type === "connection" && node.connectionId) {
           return { ...node, children: withSavedSqlRoot(node.connectionId, node.children || []) };
@@ -2475,9 +2643,12 @@ export const useConnectionStore = defineStore("connection", () => {
         if (!expandedIds.has(node.id)) continue;
         if (node.connectionId && !connectedIds.value.has(node.connectionId)) continue;
         clearLoadedChildrenCache(node.id);
-        node.children = [];
+        commitTreeNode(node, (draft) => {
+          draft.children = [];
+        });
         await loadTreeNodeChildren(node, { force: true });
-        await restoreExpandedChildren(node, expandedIds, { force: true });
+        const fresh = findNode(treeNodes.value, node.id);
+        if (fresh) await restoreExpandedChildren(fresh, expandedIds, { force: true });
       }
     };
     await refreshExpandedNodes(treeNodes.value);
@@ -2734,6 +2905,26 @@ export const useConnectionStore = defineStore("connection", () => {
     treeSelectionAnchorId,
     treeClipboard,
     treeNodes,
+    setTreeNodeExpanded(node: TreeNode, expanded: boolean) {
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = expanded;
+      });
+    },
+    resetTreeNodeChildren(node: TreeNode) {
+      commitTreeNode(node, (draft) => {
+        draft.isExpanded = false;
+        draft.children = [];
+      });
+    },
+    expandTreeNodes(nodes: TreeNode[]) {
+      for (const node of nodes) {
+        if (!node.isExpanded) {
+          commitTreeNode(node, (draft) => {
+            draft.isExpanded = true;
+          });
+        }
+      }
+    },
     removeTreeNode,
     refreshAllTree,
     refreshSavedSqlTree,

@@ -250,11 +250,7 @@ async function locateActiveTabInSidebar() {
   }
   if (!nodePath) return;
 
-  for (const ancestor of nodePath) {
-    if (!ancestor.isExpanded) {
-      ancestor.isExpanded = true;
-    }
-  }
+  store.expandTreeNodes(nodePath);
 
   await nextTick();
 
