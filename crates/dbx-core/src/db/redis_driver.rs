@@ -85,8 +85,42 @@ pub struct RedisCommandResult {
 }
 
 pub enum RedisConnection {
-    Direct(Mutex<redis::aio::MultiplexedConnection>),
+    Direct(Mutex<RedisDirectConnection>),
     Cluster(RedisClusterPool),
+}
+
+/// A direct (standalone or Sentinel) Redis connection plus the session db it
+/// is currently SELECTed to. Tracking the db lets per-operation SELECT round
+/// trips be skipped; the surrounding mutex serializes every user, which is
+/// what makes the tracked state reliable.
+pub struct RedisDirectConnection {
+    con: redis::aio::MultiplexedConnection,
+    selected_db: Option<u32>,
+}
+
+impl RedisDirectConnection {
+    fn new(con: redis::aio::MultiplexedConnection, selected_db: u32) -> Self {
+        Self { con, selected_db: Some(selected_db) }
+    }
+}
+
+impl ConnectionLike for RedisDirectConnection {
+    fn req_packed_command<'a>(&'a mut self, cmd: &'a redis::Cmd) -> redis::RedisFuture<'a, redis::Value> {
+        self.con.req_packed_command(cmd)
+    }
+
+    fn req_packed_commands<'a>(
+        &'a mut self,
+        cmd: &'a redis::Pipeline,
+        offset: usize,
+        count: usize,
+    ) -> redis::RedisFuture<'a, Vec<redis::Value>> {
+        self.con.req_packed_commands(cmd, offset, count)
+    }
+
+    fn get_db(&self) -> i64 {
+        self.selected_db.map_or_else(|| self.con.get_db(), |db| db as i64)
+    }
 }
 
 pub struct RedisClusterPool {
@@ -104,8 +138,10 @@ pub struct RedisNodeEndpoint {
     pub port: u16,
 }
 
-pub async fn connect(url: &str, timeout: std::time::Duration) -> Result<redis::aio::MultiplexedConnection, String> {
+pub async fn connect(url: &str, timeout: std::time::Duration) -> Result<RedisDirectConnection, String> {
     let client = redis::Client::open(url).map_err(|e| format!("Redis connection failed: {e}"))?;
+    // The URL's /db path component decides the session db the server starts in.
+    let initial_db = u32::try_from(client.get_connection_info().redis.db).unwrap_or(0);
     let mut con = tokio::time::timeout(timeout, client.get_multiplexed_async_connection())
         .await
         .map_err(|_| format!("Redis connection timed out ({}s)", timeout.as_secs()))?
@@ -116,10 +152,10 @@ pub async fn connect(url: &str, timeout: std::time::Duration) -> Result<redis::a
         .map_err(|_| format!("Redis ping timed out ({}s)", timeout.as_secs()))?
         .map_err(|e| format!("Redis authentication failed or command rejected: {e}"))?;
 
-    Ok(con)
+    Ok(RedisDirectConnection::new(con, initial_db))
 }
 
-pub async fn connect_sentinel(config: &ConnectionConfig) -> Result<redis::aio::MultiplexedConnection, String> {
+pub async fn connect_sentinel(config: &ConnectionConfig) -> Result<RedisDirectConnection, String> {
     let service_name = config.redis_sentinel_master.trim();
     if service_name.is_empty() {
         return Err("Redis Sentinel master name is required".to_string());
@@ -139,7 +175,8 @@ pub async fn connect_sentinel(config: &ConnectionConfig) -> Result<redis::aio::M
     .map_err(|_| format!("Redis Sentinel lookup timed out ({}s)", super::CONNECTION_TIMEOUT_SECS))?
     .map_err(|e| format!("Redis Sentinel master lookup failed: {e}"))?;
 
-    connect_client(client).await
+    // Sentinel masters are always reached with db 0 (see node_connection_info).
+    Ok(RedisDirectConnection::new(connect_client(client).await?, 0))
 }
 
 pub async fn connect_cluster(config: &ConnectionConfig) -> Result<RedisClusterPool, String> {
@@ -415,11 +452,16 @@ where
     Ok(dbs)
 }
 
-pub async fn select_db<C>(con: &mut C, db: u32) -> Result<(), String>
-where
-    C: ConnectionLike + Send + Sync + Unpin,
-{
-    redis::cmd("SELECT").arg(db).query_async(con).await.map_err(|e| e.to_string())
+/// SELECTs the session db, skipping the round trip when the connection is
+/// already on the requested db (browsing a single db used to pay one SELECT
+/// per operation).
+pub async fn select_db(con: &mut RedisDirectConnection, db: u32) -> Result<(), String> {
+    if con.selected_db == Some(db) {
+        return Ok(());
+    }
+    redis::cmd("SELECT").arg(db).query_async::<()>(&mut con.con).await.map_err(|e| e.to_string())?;
+    con.selected_db = Some(db);
+    Ok(())
 }
 
 pub fn ensure_cluster_db(db: u32) -> Result<(), String> {
@@ -832,6 +874,24 @@ where
     let raw: RedisRawValue = cmd.query_async(con).await.map_err(|e| e.to_string())?;
 
     Ok(RedisCommandResult { command, safety, value: redis_command_raw_to_json(raw) })
+}
+
+/// Console execution for direct connections. A user-issued SELECT changes the
+/// session db behind select_db's tracking, so the tracked db is re-derived
+/// after a successful SELECT (an unparseable argument marks it unknown,
+/// forcing the next browse operation to re-SELECT).
+pub async fn execute_command_tracked(
+    con: &mut RedisDirectConnection,
+    command_text: &str,
+) -> Result<RedisCommandResult, String> {
+    let argv = parse_command_argv(command_text);
+    let is_select =
+        argv.as_ref().is_ok_and(|argv| argv.first().is_some_and(|name| name.eq_ignore_ascii_case("SELECT")));
+    let result = execute_command(con, command_text).await;
+    if is_select && result.is_ok() {
+        con.selected_db = argv.ok().and_then(|argv| argv.get(1).and_then(|arg| arg.trim().parse::<u32>().ok()));
+    }
+    result
 }
 
 pub async fn scan_keys_page<C>(
@@ -1788,5 +1848,35 @@ mod tests {
     fn uses_lightweight_redis_json_placeholder_for_key_scan_preview() {
         assert_eq!(redis_key_value_preview("ReJSON-RL"), "{...}");
         assert_eq!(redis_key_value_preview("string"), "");
+    }
+
+    // --- tracked session db (skip redundant SELECT) ---
+
+    #[test]
+    fn select_db_skips_select_when_db_already_selected() {
+        let source = include_str!("redis_driver.rs");
+        let body = source.split("pub async fn select_db").nth(1).unwrap();
+        let body = body.split("\npub async fn ").next().unwrap();
+        assert!(
+            body.contains("selected_db == Some(db)"),
+            "select_db must skip the SELECT round trip when the tracked session db already matches"
+        );
+    }
+
+    #[test]
+    fn console_select_updates_tracked_session_db() {
+        let source = include_str!("redis_driver.rs");
+        let body = source.split("pub async fn execute_command_tracked").nth(1).unwrap();
+        let body = body.split("\npub async fn ").next().unwrap();
+        assert!(
+            body.contains("selected_db"),
+            "console-issued SELECTs must re-derive the tracked session db or browse operations \
+             act on a stale db"
+        );
+        let ops_source = include_str!("../redis_ops.rs");
+        assert!(
+            ops_source.contains("execute_command_tracked"),
+            "the console path on direct connections must use the tracked executor"
+        );
     }
 }

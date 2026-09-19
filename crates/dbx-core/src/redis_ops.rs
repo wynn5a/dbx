@@ -565,7 +565,7 @@ pub async fn redis_execute_command_core(
             RedisConnection::Direct(con) => {
                 let mut con = con.lock().await;
                 redis_driver::select_db(&mut *con, db).await?;
-                redis_driver::execute_command(&mut *con, command).await
+                redis_driver::execute_command_tracked(&mut *con, command).await
             }
             RedisConnection::Cluster(cluster) => {
                 redis_driver::ensure_cluster_db(db)?;
