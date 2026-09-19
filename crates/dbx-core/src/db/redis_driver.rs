@@ -9,6 +9,7 @@ use redis::{
     Value as RedisRawValue,
 };
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 use tokio::sync::Mutex;
 
 const STREAM_ENTRY_LIMIT: usize = 100;
@@ -1262,7 +1263,10 @@ fn redis_bytes_to_display(bytes: &[u8]) -> String {
         match byte {
             b'\\' => output.push_str("\\\\"),
             0x20..=0x7e => output.push(byte as char),
-            _ => output.push_str(&format!("\\x{:02x}", byte)),
+            // write! appends in place; format! would heap-allocate per byte.
+            _ => {
+                let _ = write!(output, "\\x{byte:02x}");
+            }
         }
     }
     output

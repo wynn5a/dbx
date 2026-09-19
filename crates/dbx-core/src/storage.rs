@@ -716,48 +716,64 @@ impl Storage {
             })
             .await?;
 
+        // One pass over the secrets table instead of a per-connection,
+        // per-key query each (startup pays this for every saved connection).
+        let secrets: std::collections::HashMap<(String, String), String> = self
+            .with_conn(|conn| {
+                let mut stmt = conn
+                    .prepare("SELECT connection_id, key, secret FROM connection_secrets")
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+                    })
+                    .map_err(|e| e.to_string())?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map(|rows| rows.into_iter().map(|(id, key, secret)| ((id, key), secret)).collect())
+                    .map_err(|e| e.to_string())
+            })
+            .await?;
+        let get_secret = |connection_id: &str, key: &str| -> Option<String> {
+            secrets.get(&(connection_id.to_string(), key.to_string())).cloned()
+        };
+
         let mut configs = Vec::new();
         for (id, json) in rows {
             let mut config: ConnectionConfig = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-            config.password = self.get_secret(&id, "password").await?.unwrap_or_default();
+            config.password = get_secret(&id, "password").unwrap_or_default();
             for index in 0..config.transport_layers.len() {
                 let layer_for_key = config.transport_layers[index].clone();
                 match &mut config.transport_layers[index] {
                     TransportLayerConfig::Ssh(ssh) => {
-                        ssh.password = self
-                            .get_secret(&id, &transport_layer_ssh_password_key(index, &layer_for_key))
-                            .await?
+                        ssh.password = get_secret(&id, &transport_layer_ssh_password_key(index, &layer_for_key))
                             .or(match &layer_for_key {
                                 TransportLayerConfig::Ssh(layer) if layer.id == "legacy" => {
-                                    self.get_secret(&id, "ssh_password").await?
+                                    get_secret(&id, "ssh_password")
                                 }
                                 TransportLayerConfig::Ssh(layer) => {
-                                    self.get_secret(&id, &ssh_tunnel_password_key(index, layer)).await?
+                                    get_secret(&id, &ssh_tunnel_password_key(index, layer))
                                 }
                                 TransportLayerConfig::Proxy(_) => None,
                             })
                             .unwrap_or_default();
-                        ssh.key_passphrase = self
-                            .get_secret(&id, &transport_layer_ssh_key_passphrase_key(index, &layer_for_key))
-                            .await?
-                            .or(match &layer_for_key {
-                                TransportLayerConfig::Ssh(layer) if layer.id == "legacy" => {
-                                    self.get_secret(&id, "ssh_key_passphrase").await?
-                                }
-                                TransportLayerConfig::Ssh(layer) => {
-                                    self.get_secret(&id, &ssh_tunnel_key_passphrase_key(index, layer)).await?
-                                }
-                                TransportLayerConfig::Proxy(_) => None,
-                            })
-                            .unwrap_or_default();
+                        ssh.key_passphrase =
+                            get_secret(&id, &transport_layer_ssh_key_passphrase_key(index, &layer_for_key))
+                                .or(match &layer_for_key {
+                                    TransportLayerConfig::Ssh(layer) if layer.id == "legacy" => {
+                                        get_secret(&id, "ssh_key_passphrase")
+                                    }
+                                    TransportLayerConfig::Ssh(layer) => {
+                                        get_secret(&id, &ssh_tunnel_key_passphrase_key(index, layer))
+                                    }
+                                    TransportLayerConfig::Proxy(_) => None,
+                                })
+                                .unwrap_or_default();
                     }
                     TransportLayerConfig::Proxy(proxy) => {
-                        proxy.password = self
-                            .get_secret(&id, &transport_layer_proxy_password_key(index, &layer_for_key))
-                            .await?
+                        proxy.password = get_secret(&id, &transport_layer_proxy_password_key(index, &layer_for_key))
                             .or(match &layer_for_key {
                                 TransportLayerConfig::Proxy(layer) if layer.id == "legacy-proxy" => {
-                                    self.get_secret(&id, "proxy_password").await?
+                                    get_secret(&id, "proxy_password")
                                 }
                                 _ => None,
                             })
@@ -765,8 +781,8 @@ impl Storage {
                     }
                 }
             }
-            config.redis_sentinel_password = self.get_secret(&id, "redis_sentinel_password").await?.unwrap_or_default();
-            config.connection_string = self.get_secret(&id, "connection_string").await?;
+            config.redis_sentinel_password = get_secret(&id, "redis_sentinel_password").unwrap_or_default();
+            config.connection_string = get_secret(&id, "connection_string");
             configs.push(config.canonicalized());
         }
         Ok(configs)

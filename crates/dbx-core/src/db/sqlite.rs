@@ -556,18 +556,22 @@ fn normalize_sqlite_sql(sql: &str) -> String {
         let boundary = !prev.is_alphanumeric() && prev != '_' && prev != '.';
 
         if boundary {
-            let remaining: String = chars[i..].iter().collect();
-            let remaining_lower = remaining.to_lowercase();
-
             let mut matched = false;
             for (source, replacement) in SQLITE_FUNCTION_ALIASES {
-                if remaining_lower.starts_with(*source) && chars.get(i + source.len()) != Some(&'_') {
-                    let mut j = i + source.len();
+                // Compare only the alias-length window: materializing the whole
+                // remaining suffix (for a lowercase pass) at every identifier
+                // boundary made normalization O(n²) on long scripts.
+                let end = i + source.len();
+                if end <= len
+                    && chars[i..end].iter().zip(source.chars()).all(|(a, b)| a.to_ascii_lowercase() == b)
+                    && chars.get(end) != Some(&'_')
+                {
+                    let mut j = end;
                     while j < len && chars[j].is_whitespace() {
                         j += 1;
                     }
                     if j < len && chars[j] == '(' {
-                        let whitespace: String = chars[i + source.len()..j].iter().collect();
+                        let whitespace: String = chars[end..j].iter().collect();
                         result.push_str(replacement);
                         result.push_str(&whitespace);
                         i = j;

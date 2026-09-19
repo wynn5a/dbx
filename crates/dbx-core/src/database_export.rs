@@ -350,8 +350,10 @@ pub async fn export_database_sql_core(
             .await?;
     let all_tables = filter_selected_table_infos(all_tables, &request.selected_tables);
 
-    // 4. Create file
-    let mut file = std::fs::File::create(&request.file_path).map_err(|e| format!("Failed to write file: {e}"))?;
+    // 4. Create file. Buffered: the export writes many small header/DDL/INSERT
+    // lines, which would otherwise hit the disk (or a network share) per line.
+    let file = std::fs::File::create(&request.file_path).map_err(|e| format!("Failed to write file: {e}"))?;
+    let mut file = std::io::BufWriter::new(file);
 
     // 5. Write header
     let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
@@ -732,6 +734,9 @@ pub async fn export_database_sql_core(
     if matches!(db_type, DatabaseType::Mysql) {
         writeln!(file, "SET FOREIGN_KEY_CHECKS = 1;").map_err(|e| format!("Failed to write file: {e}"))?;
     }
+
+    // BufWriter only flushes-on-drop ignoring errors; finish explicitly.
+    file.flush().map_err(|e| format!("Failed to write file: {e}"))?;
 
     // Emit Done progress
     on_progress(ExportProgress {

@@ -108,8 +108,10 @@ fn duckdb_value_to_json(row: &duckdb::Row<'_>, idx: usize) -> serde_json::Value 
             .map(|s| serde_json::Value::String(s.to_string()))
             .unwrap_or(serde_json::Value::Null),
         ValueRef::Blob(bytes) => {
-            let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
-            serde_json::Value::String(format!("\\x{hex}"))
+            let mut hex = String::with_capacity(bytes.len() * 2 + 2);
+            hex.push_str("\\x");
+            hex.push_str(&crate::db::hex_encode(bytes));
+            serde_json::Value::String(hex)
         }
         ValueRef::Interval { months, days, nanos } => {
             serde_json::Value::String(duckdb_interval_to_string(months, days, nanos))
@@ -148,8 +150,10 @@ fn duckdb_owned_value_to_json(value: &Value) -> serde_json::Value {
         }
         Value::Text(text) | Value::Enum(text) => serde_json::Value::String(text.clone()),
         Value::Blob(bytes) => {
-            let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
-            serde_json::Value::String(format!("\\x{hex}"))
+            let mut hex = String::with_capacity(bytes.len() * 2 + 2);
+            hex.push_str("\\x");
+            hex.push_str(&crate::db::hex_encode(bytes));
+            serde_json::Value::String(hex)
         }
         Value::Date32(days) => {
             duckdb_date32_to_string(*days).map(serde_json::Value::String).unwrap_or(serde_json::Value::Null)
