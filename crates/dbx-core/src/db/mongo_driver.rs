@@ -114,17 +114,29 @@ pub async fn find_documents(
 ) -> Result<MongoDocumentResult, String> {
     let col = client.database(database).collection::<Document>(collection);
 
-    let filter_doc: Document = match filter {
+    let (filter_doc, filter_is_empty) = match filter {
         Some(f) if !f.trim().is_empty() => {
             let json: serde_json::Value = serde_json::from_str(f).map_err(|e| format!("Invalid filter JSON: {e}"))?;
-            json_object_to_document(&json)?
+            (json_object_to_document(&json)?, false)
         }
-        _ => doc! {},
+        _ => (doc! {}, true),
     };
 
-    let total = col.count_documents(filter_doc.clone()).await.map_err(|e| e.to_string())?;
+    // Unfiltered browse totals come from collection metadata (O(1)); the
+    // accurate aggregation otherwise rescans the whole collection on every
+    // page load. Approximate totals are acceptable for a browse pager.
+    let total = if filter_is_empty {
+        col.estimated_document_count().await.map_err(|e| e.to_string())?
+    } else {
+        col.count_documents(filter_doc.clone()).await.map_err(|e| e.to_string())?
+    };
 
     let mut find = col.find(filter_doc).skip(skip).limit(limit);
+    // Serve the page in one getMore batch instead of the default small first
+    // batch plus follow-ups.
+    if limit > 0 && limit <= u32::MAX as i64 {
+        find = find.batch_size(limit as u32);
+    }
     if let Some(s) = sort {
         if !s.trim().is_empty() {
             let json: serde_json::Value = serde_json::from_str(s).map_err(|e| format!("Invalid sort JSON: {e}"))?;
@@ -160,9 +172,15 @@ pub async fn aggregate_documents(
         .map(|value| json_object_to_document(value).map_err(|e| format!("Invalid pipeline stage: {e}")))
         .collect::<Result<Vec<Document>, String>>()?;
     let col = client.database(database).collection::<Document>(collection);
-    let mut cursor = col.aggregate(pipeline).await.map_err(|e| e.to_string())?;
     let max_rows = max_rows.unwrap_or(100);
     let fetch_limit = max_rows.saturating_add(1);
+    let mut cursor = col
+        .aggregate(pipeline)
+        // Align the first batch with the fetch limit instead of the default
+        // small first batch plus follow-up getMores.
+        .batch_size(fetch_limit.min(u32::MAX as usize) as u32)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut documents = Vec::new();
     while documents.len() < fetch_limit && cursor.advance().await.map_err(|e| e.to_string())? {
         let doc = cursor.deserialize_current().map_err(|e| e.to_string())?;
@@ -371,5 +389,22 @@ mod tests {
 
         assert_eq!(filters.len(), 1);
         assert!(matches!(filters[0].get("_id"), Some(Bson::String(value)) if value == id));
+    }
+
+    #[test]
+    fn unfiltered_pages_count_via_collection_metadata() {
+        let source = include_str!("mongo_driver.rs");
+        let body = source.split("pub async fn find_documents").nth(1).unwrap();
+        let body = body.split("\npub async fn ").next().unwrap();
+        assert!(
+            body.contains("estimated_document_count"),
+            "unfiltered browse totals must come from collection metadata; an accurate \
+             count_documents rescan per page load is O(collection)"
+        );
+        assert!(
+            body.contains("batch_size"),
+            "document pages should serve from one getMore batch instead of the default \
+             small first batch"
+        );
     }
 }
