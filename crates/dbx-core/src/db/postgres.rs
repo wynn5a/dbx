@@ -871,9 +871,7 @@ async fn execute_select_prepared(
     // transaction wrapper fails fast outside real transactions, hence the raw
     // SQL here.
     let cursor_name = format!("dbx_export_cursor_{}", start.elapsed().as_nanos());
-    if let Err(err) = client.batch_execute("BEGIN").await {
-        return Err(err);
-    }
+    client.batch_execute("BEGIN").await?;
     let declare_sql = format!("DECLARE {cursor_name} NO SCROLL CURSOR FOR {sql}");
     if let Err(err) = client.batch_execute(&declare_sql).await {
         let _ = client.batch_execute("ROLLBACK").await;
@@ -907,12 +905,11 @@ async fn execute_select_prepared(
             }
         }
     }
-    drop(stream);
-    // Instant: no rows fetched, just closes the abandoned cursor. The pooled
+    // End the borrow of `client` held by the pinned stream, then roll back:
+    // instant, no rows fetched, just closes the abandoned cursor. The pooled
     // session stays clean and reusable with no extra round trip.
-    if let Err(err) = client.batch_execute("ROLLBACK").await {
-        return Err(err);
-    }
+    let _ = stream;
+    client.batch_execute("ROLLBACK").await?;
     if let Some(err) = stream_error {
         return Err(err);
     }
@@ -960,9 +957,7 @@ async fn execute_select_text(
     // backend stop after the rows we keep instead of materializing the full
     // result for us to discard.
     let cursor_name = format!("dbx_text_cursor_{}", start.elapsed().as_nanos());
-    if let Err(err) = client.batch_execute("BEGIN").await.map_err(pg_error_to_string) {
-        return Err(err);
-    }
+    client.batch_execute("BEGIN").await.map_err(pg_error_to_string)?;
     let declare_sql = format!("DECLARE {cursor_name} NO SCROLL CURSOR FOR {sql}");
     if let Err(err) = client.batch_execute(&declare_sql).await.map_err(pg_error_to_string) {
         let _ = client.batch_execute("ROLLBACK").await;
@@ -998,13 +993,13 @@ async fn execute_select_text(
             }
         }
     }
-    drop(stream);
+    // End the borrow of `client` held by the pinned stream before ROLLBACK.
+    let _ = stream;
     // Always closes the abandoned cursor; the pooled session stays reusable.
-    let rollback_result = client.batch_execute("ROLLBACK").await.map_err(pg_error_to_string);
+    client.batch_execute("ROLLBACK").await.map_err(pg_error_to_string)?;
     if let Some(err) = stream_error {
         return Err(err);
     }
-    rollback_result?;
     // FETCH asked for exactly `row_limit` rows; a full page may mean more.
     let truncated = result_rows.len() >= row_limit;
 
