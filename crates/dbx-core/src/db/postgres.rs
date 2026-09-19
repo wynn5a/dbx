@@ -846,23 +846,11 @@ fn should_retry_postgres_text_query(err: &tokio_postgres::Error) -> bool {
 
 async fn execute_select_prepared(
     client: &deadpool_postgres::Client,
+    schema: Option<&str>,
     sql: &str,
     start: Instant,
     row_limit: usize,
 ) -> Result<QueryResult, tokio_postgres::Error> {
-    let prepared_start = Instant::now();
-    let stmt = client.prepare_cached(sql).await?;
-    log::info!(
-        "[postgres][select:prepare_cached:done] elapsed_ms={} total_ms={}",
-        prepared_start.elapsed().as_millis(),
-        start.elapsed().as_millis()
-    );
-    let columns: Vec<String> = stmt.columns().iter().map(|c| c.name().to_string()).collect();
-    let column_types: Vec<String> = stmt.columns().iter().map(|c| c.type_().name().to_string()).collect();
-    // Uppercased once per column; pg_value_to_json dispatches on this per cell.
-    let column_types_upper: Vec<String> = column_types.iter().map(|t| t.to_uppercase()).collect();
-
-    let query_start = Instant::now();
     // Server-side cursor instead of an unbounded portal stream: a transaction
     // holding a declared cursor with FETCH `row_limit` stops the backend after
     // the rows we keep, so a 10k-row preview of a huge table no longer waits
@@ -870,16 +858,35 @@ async fn execute_select_prepared(
     // (success or failure), closing the abandoned cursor; the implicit
     // transaction wrapper fails fast outside real transactions, hence the raw
     // SQL here.
+    //
+    // BEGIN, the schema scoping and the DECLARE go out as one batch (one round
+    // trip): `SET LOCAL search_path` replaces the old session-level
+    // SET/RESET bracket, scoping the schema to this transaction only — no
+    // reset round trip and no leaked state across pool connections.
     let cursor_name = format!("dbx_export_cursor_{}", start.elapsed().as_nanos());
-    client.batch_execute("BEGIN").await?;
-    let declare_sql = format!("DECLARE {cursor_name} NO SCROLL CURSOR FOR {sql}");
-    if let Err(err) = client.batch_execute(&declare_sql).await {
+    let mut opening = String::from("BEGIN");
+    if let Some(schema) = schema {
+        opening.push_str(&format!("; SET LOCAL search_path TO {}", pg_quote_ident(schema)));
+    }
+    opening.push_str(&format!("; DECLARE {cursor_name} NO SCROLL CURSOR FOR {sql}"));
+    if let Err(err) = client.batch_execute(&opening).await {
+        // The batch may have failed before or inside BEGIN; ROLLBACK without
+        // a transaction just errors and is ignored.
         let _ = client.batch_execute("ROLLBACK").await;
         return Err(err);
     }
+
+    // Metadata must be prepared after the SET LOCAL above so unqualified
+    // references resolve inside the same schema as the cursor declaration.
+    let prepared_start = Instant::now();
+    let stmt = client.prepare_cached(sql).await?;
+    let columns: Vec<String> = stmt.columns().iter().map(|c| c.name().to_string()).collect();
+    let column_types: Vec<String> = stmt.columns().iter().map(|c| c.type_().name().to_string()).collect();
+    // Uppercased once per column; pg_value_to_json dispatches on this per cell.
+    let column_types_upper: Vec<String> = column_types.iter().map(|t| t.to_uppercase()).collect();
     log::info!(
-        "[postgres][select:query_raw:done] elapsed_ms={} total_ms={} column_count={}",
-        query_start.elapsed().as_millis(),
+        "[postgres][select:prepare_cached:done] elapsed_ms={} total_ms={} column_count={}",
+        prepared_start.elapsed().as_millis(),
         start.elapsed().as_millis(),
         columns.len()
     );
@@ -938,15 +945,28 @@ async fn execute_select_prepared(
 
 async fn execute_select_text(
     client: &deadpool_postgres::Client,
+    schema: Option<&str>,
     sql: &str,
     start: Instant,
     row_limit: usize,
-) -> Result<QueryResult, String> {
+) -> Result<QueryResult, tokio_postgres::Error> {
     // simple_query buffers every row before returning, so a row limit cannot
     // stop the transfer. Use the extended protocol instead: prepare a
     // (temporary) statement and pull rows from the portal, which lets us stop
     // reading once the limit is met instead of materializing the full result.
-    let stmt = client.prepare(sql).await.map_err(pg_error_to_string)?;
+    // BEGIN, schema scoping and DECLARE share one round trip via `SET LOCAL`
+    // (see execute_select_prepared).
+    let cursor_name = format!("dbx_text_cursor_{}", start.elapsed().as_nanos());
+    let mut opening = String::from("BEGIN");
+    if let Some(schema) = schema {
+        opening.push_str(&format!("; SET LOCAL search_path TO {}", pg_quote_ident(schema)));
+    }
+    opening.push_str(&format!("; DECLARE {cursor_name} NO SCROLL CURSOR FOR {sql}"));
+    if let Err(err) = client.batch_execute(&opening).await {
+        let _ = client.batch_execute("ROLLBACK").await;
+        return Err(err);
+    }
+    let stmt = client.prepare(sql).await?;
     let columns: Vec<String> = stmt.columns().iter().map(|c| c.name().to_string()).collect();
     let column_types: Vec<String> = stmt.columns().iter().map(|c| c.type_().name().to_string()).collect();
 
@@ -956,28 +976,14 @@ async fn execute_select_text(
     // Same server-side cursor as the prepared path: FETCH `row_limit` lets the
     // backend stop after the rows we keep instead of materializing the full
     // result for us to discard.
-    let cursor_name = format!("dbx_text_cursor_{}", start.elapsed().as_nanos());
-    client.batch_execute("BEGIN").await.map_err(pg_error_to_string)?;
-    let declare_sql = format!("DECLARE {cursor_name} NO SCROLL CURSOR FOR {sql}");
-    if let Err(err) = client.batch_execute(&declare_sql).await.map_err(pg_error_to_string) {
-        let _ = client.batch_execute("ROLLBACK").await;
-        return Err(err);
-    }
     let fetch_sql = format!("FETCH {row_limit} FROM {cursor_name}");
-    let fetch_stmt = client.prepare(&fetch_sql).await.map_err(pg_error_to_string)?;
+    let fetch_stmt = client.prepare(&fetch_sql).await?;
     let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
-    let stream_result = client.query_raw(&fetch_stmt, params).await.map_err(pg_error_to_string);
-    let stream = match stream_result {
-        Ok(stream) => stream,
-        Err(err) => {
-            let _ = client.batch_execute("ROLLBACK").await;
-            return Err(err);
-        }
-    };
+    let stream = client.query_raw(&fetch_stmt, params).await?;
     tokio::pin!(stream);
 
     let mut result_rows: Vec<Vec<serde_json::Value>> = Vec::new();
-    let mut stream_error: Option<String> = None;
+    let mut stream_error: Option<tokio_postgres::Error> = None;
     while let Some(row_result) = stream.next().await {
         match row_result {
             Ok(row) => {
@@ -988,7 +994,7 @@ async fn execute_select_text(
                 result_rows.push(values);
             }
             Err(err) => {
-                stream_error = Some(pg_error_to_string(err));
+                stream_error = Some(err);
                 break;
             }
         }
@@ -996,7 +1002,7 @@ async fn execute_select_text(
     // End the borrow of `client` held by the pinned stream before ROLLBACK.
     let _ = stream;
     // Always closes the abandoned cursor; the pooled session stays reusable.
-    client.batch_execute("ROLLBACK").await.map_err(pg_error_to_string)?;
+    client.batch_execute("ROLLBACK").await?;
     if let Some(err) = stream_error {
         return Err(err);
     }
@@ -1015,18 +1021,59 @@ async fn execute_select_text(
     })
 }
 
-async fn execute_select_query(
+/// SELECT-class failures that are safe to retry on a fresh connection: the
+/// statement either never reached the wire (closed) or never mutated state
+/// (SELECT with a transport-level failure).
+fn select_error_reconnect_safe(err: &tokio_postgres::Error) -> bool {
+    err.is_closed() || err.as_db_error().is_none()
+}
+
+async fn run_select(
     client: &deadpool_postgres::Client,
+    schema: Option<&str>,
+    sql: &str,
+    start: Instant,
+    row_limit: usize,
+) -> Result<QueryResult, tokio_postgres::Error> {
+    match execute_select_prepared(client, schema, sql, start, row_limit).await {
+        Ok(result) => Ok(result),
+        Err(err) if should_retry_postgres_text_query(&err) => {
+            execute_select_text(client, schema, sql, start, row_limit).await
+        }
+        Err(err) => Err(err),
+    }
+}
+
+async fn execute_select_query(
+    pool: &Pool,
+    schema: Option<&str>,
     sql: &str,
     start: Instant,
     row_limit: usize,
 ) -> Result<QueryResult, String> {
-    match execute_select_prepared(client, sql, start, row_limit).await {
+    let client = pool.get().await.map_err(|e| e.to_string())?;
+    match run_select(&client, schema, sql, start, row_limit).await {
         Ok(result) => Ok(result),
-        Err(err) if should_retry_postgres_text_query(&err) => execute_select_text(client, sql, start, row_limit).await,
+        Err(err) if select_error_reconnect_safe(&err) => {
+            // Fast recycling does not validate idle connections at checkout, so
+            // a connection killed while idle (server restart, network drop)
+            // surfaces here. The pool has already discarded it; one fresh
+            // checkout transparently absorbs the failure. The cursor's
+            // transaction never committed, so re-running is safe.
+            log::warn!("[postgres][select] pooled connection lost ({err}); retrying once on a fresh connection");
+            let client = pool.get().await.map_err(|e| e.to_string())?;
+            run_select(&client, schema, sql, start, row_limit).await.map_err(pg_error_to_string)
+        }
         Err(err) => Err(pg_error_to_string(err)),
     }
 }
+
+/// Query pools for one database keep a few connections so metadata loads,
+/// background tasks and user queries don't serialize behind a single socket
+/// (MySQL query pools use the same limit). Interactive multi-statement
+/// transactions already pin one dedicated connection for their duration and
+/// work with any pool size.
+const QUERY_POOL_MAX_SIZE: usize = 3;
 
 pub async fn connect(url: &str, fallback_timeout: Duration) -> Result<Pool, String> {
     let postgres_url = postgres_connection_url(url)?;
@@ -1045,7 +1092,19 @@ pub async fn connect(url: &str, fallback_timeout: Duration) -> Result<Pool, Stri
             pg_config.application_name(super::CONNECTION_APP_NAME);
         }
 
-        let mgr_config = ManagerConfig { recycling_method: RecyclingMethod::Verified };
+        // Apply the session timezone at backend start so every pooled
+        // connection gets it — a checkout-time SET would only cover the one
+        // connection that happened to be checked out first. Respect a
+        // user-supplied timezone (e.g. options=-c timezone=...).
+        if !pg_url_has_timezone_setting(url) {
+            let tz_arg = format!("-c timezone={}", safe_startup_timezone(&tz));
+            match pg_config.get_options() {
+                Some(existing) => pg_config.options(format!("{existing} {tz_arg}")),
+                None => pg_config.options(tz_arg),
+            };
+        }
+
+        let mgr_config = ManagerConfig { recycling_method: RecyclingMethod::Fast };
         let tls_config = postgres_tls_config(
             &pg_config,
             &postgres_url.ssl_files,
@@ -1058,21 +1117,15 @@ pub async fn connect(url: &str, fallback_timeout: Duration) -> Result<Pool, Stri
             mgr_config,
         );
         let pool = Pool::builder(mgr)
-            .max_size(1)
+            .max_size(QUERY_POOL_MAX_SIZE)
             .runtime(Runtime::Tokio1)
             .wait_timeout(Some(timeout))
             .build()
             .map_err(|e| format!("Failed to create PostgreSQL pool: {e}"))?;
 
-        // Verify connectivity and set timezone. Only set timezone if the user
-        // hasn't already specified one via connection parameters (e.g. options=-c timezone=...)
-        let client = pool.get().await.map_err(|e| format!("PostgreSQL connection failed: {e}"))?;
-        if !pg_url_has_timezone_setting(url) {
-            client
-                .execute(&format!("SET timezone = '{}'", tz.replace('\'', "''")), &[])
-                .await
-                .map_err(|e| format!("PostgreSQL SET timezone failed: {e}"))?;
-        }
+        // Connectivity check only; every session setting now travels in the
+        // startup packet, so there is nothing to configure per connection.
+        let _client = pool.get().await.map_err(|e| format!("PostgreSQL connection failed: {e}"))?;
 
         Ok(pool)
     })
@@ -1375,6 +1428,20 @@ fn pg_url_has_timezone_setting(url: &str) -> bool {
         }
     }
     false
+}
+
+/// The startup `options` string is word-split by the server, so the timezone
+/// value must survive as a single plain token. IANA identifiers only ever use
+/// `[A-Za-z0-9_+/.-]`; anything else (quotes, whitespace) would corrupt the
+/// startup packet, so fall back to UTC instead.
+fn safe_startup_timezone(tz: &str) -> String {
+    let is_plain =
+        !tz.is_empty() && tz.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '+' | '-' | '/' | '.'));
+    if is_plain {
+        tz.to_string()
+    } else {
+        "UTC".to_string()
+    }
 }
 
 #[cfg(test)]
@@ -1709,6 +1776,8 @@ pub(crate) fn pg_quote_ident(ident: &str) -> String {
 
 use crate::query::query_result_row_limit;
 
+const SELECT_CLASS_KEYWORDS: &[&str] = &["SELECT", "SHOW", "EXPLAIN", "WITH", "TABLE"];
+
 pub async fn execute_query(pool: &Pool, sql: &str) -> Result<QueryResult, String> {
     execute_query_with_max_rows(pool, sql, None).await
 }
@@ -1721,23 +1790,35 @@ pub async fn execute_query_with_max_rows(
     let start = Instant::now();
     let row_limit = query_result_row_limit(max_rows);
 
-    if starts_with_executable_sql_keyword(sql, &["SELECT", "SHOW", "EXPLAIN", "WITH", "TABLE"]) {
-        let client = pool.get().await.map_err(|e| e.to_string())?;
-        execute_select_query(&client, sql, start, row_limit).await
+    if starts_with_executable_sql_keyword(sql, SELECT_CLASS_KEYWORDS) {
+        execute_select_query(pool, None, sql, start, row_limit).await
     } else {
         let client = pool.get().await.map_err(|e| e.to_string())?;
-        let affected = client.execute(sql, &[]).await.map_err(pg_error_to_string)?;
+        match client.execute(sql, &[]).await {
+            Ok(affected) => Ok(non_select_result(affected, start)),
+            Err(err) if err.is_closed() => {
+                // Closed before the statement could be sent (stale idle
+                // connection): retrying cannot double-apply anything.
+                log::warn!("[postgres][execute] pooled connection lost; retrying once on a fresh connection");
+                let client = pool.get().await.map_err(|e| e.to_string())?;
+                let affected = client.execute(sql, &[]).await.map_err(pg_error_to_string)?;
+                Ok(non_select_result(affected, start))
+            }
+            Err(err) => Err(pg_error_to_string(err)),
+        }
+    }
+}
 
-        Ok(QueryResult {
-            columns: vec![],
-            rows: vec![],
-            affected_rows: affected,
-            execution_time_ms: start.elapsed().as_millis(),
-            truncated: false,
-            session_id: None,
-            has_more: false,
-            column_types: Vec::new(),
-        })
+fn non_select_result(affected: u64, start: Instant) -> QueryResult {
+    QueryResult {
+        columns: vec![],
+        rows: vec![],
+        affected_rows: affected,
+        execution_time_ms: start.elapsed().as_millis(),
+        truncated: false,
+        session_id: None,
+        has_more: false,
+        column_types: Vec::new(),
     }
 }
 
@@ -1752,6 +1833,7 @@ pub async fn execute_query_with_schema_and_max_rows(
     max_rows: Option<usize>,
 ) -> Result<QueryResult, String> {
     let start = Instant::now();
+    let row_limit = query_result_row_limit(max_rows);
     let checkout_start = Instant::now();
     let client = pool.get().await.map_err(|e| e.to_string())?;
     log::info!(
@@ -1765,66 +1847,56 @@ pub async fn execute_query_with_schema_and_max_rows(
             "[postgres][execute_with_schema:skip-search-path] total_ms={} reason=transaction-recovery",
             start.elapsed().as_millis()
         );
-        return execute_query_with_max_rows_inner(&client, sql, max_rows).await;
+        drop(client);
+        return execute_query_with_max_rows(pool, sql, max_rows).await;
+    }
+
+    if starts_with_executable_sql_keyword(sql, SELECT_CLASS_KEYWORDS) {
+        drop(client);
+        // Schema scoping rides inside the cursor's transaction via
+        // `SET LOCAL search_path` — one round trip instead of the old
+        // session-level SET + RESET bracket, and no state can leak across
+        // pool connections.
+        return execute_select_query(pool, Some(schema), sql, start, row_limit).await;
     }
 
     let set_schema_start = Instant::now();
-    client.execute(&format!("SET search_path TO {}", pg_quote_ident(schema)), &[]).await.map_err(pg_error_to_string)?;
+    let query_result = match execute_non_select_with_search_path(&client, schema, sql).await {
+        Ok(affected) => Ok(non_select_result(affected, start)),
+        Err(err) if err.is_closed() => {
+            log::warn!("[postgres][execute] pooled connection lost; retrying once on a fresh connection");
+            let client = pool.get().await.map_err(|e| e.to_string())?;
+            execute_non_select_with_search_path(&client, schema, sql)
+                .await
+                .map(|affected| non_select_result(affected, start))
+                .map_err(pg_error_to_string)
+        }
+        Err(err) => Err(pg_error_to_string(err)),
+    };
     log::info!(
         "[postgres][execute_with_schema:set-search-path:done] elapsed_ms={} total_ms={}",
         set_schema_start.elapsed().as_millis(),
         start.elapsed().as_millis()
     );
+    query_result
+}
 
-    let query_start = Instant::now();
-    let result = execute_query_with_max_rows_inner(&client, sql, max_rows).await;
-    log::info!(
-        "[postgres][execute_with_schema:query:done] elapsed_ms={} total_ms={} ok={}",
-        query_start.elapsed().as_millis(),
-        start.elapsed().as_millis(),
-        result.is_ok()
-    );
-
-    // Always reset search_path so the connection is clean when returned to the pool
-    let reset_start = Instant::now();
+/// DML/DDL keeps an explicit session-level search_path bracket: the statement
+/// runs in autocommit, so there is no transaction to scope `SET LOCAL` to.
+/// SET and RESET share one connection; RESET stays best-effort.
+async fn execute_non_select_with_search_path(
+    client: &deadpool_postgres::Client,
+    schema: &str,
+    sql: &str,
+) -> Result<u64, tokio_postgres::Error> {
+    client.execute(&format!("SET search_path TO {}", pg_quote_ident(schema)), &[]).await?;
+    let affected = client.execute(sql, &[]).await;
     let _ = client.execute("RESET search_path", &[]).await;
-    log::info!(
-        "[postgres][execute_with_schema:reset-search-path:done] elapsed_ms={} total_ms={}",
-        reset_start.elapsed().as_millis(),
-        start.elapsed().as_millis()
-    );
-
-    result
+    affected
 }
 
 fn is_transaction_recovery_statement(sql: &str) -> bool {
     starts_with_executable_sql_keyword(sql, &["ROLLBACK", "ABORT", "COMMIT", "END"])
-}
-
-async fn execute_query_with_max_rows_inner(
-    client: &deadpool_postgres::Client,
-    sql: &str,
-    max_rows: Option<usize>,
-) -> Result<QueryResult, String> {
-    let start = Instant::now();
-    let row_limit = query_result_row_limit(max_rows);
-
-    if starts_with_executable_sql_keyword(sql, &["SELECT", "SHOW", "EXPLAIN", "WITH", "TABLE"]) {
-        execute_select_query(client, sql, start, row_limit).await
-    } else {
-        let affected = client.execute(sql, &[]).await.map_err(pg_error_to_string)?;
-
-        Ok(QueryResult {
-            columns: vec![],
-            rows: vec![],
-            affected_rows: affected,
-            execution_time_ms: start.elapsed().as_millis(),
-            truncated: false,
-            session_id: None,
-            has_more: false,
-            column_types: Vec::new(),
-        })
-    }
 }
 
 const POSTGRES_INDEXES_SQL: &str = "SELECT i.relname AS index_name, \
@@ -2343,6 +2415,35 @@ mod tests {
             "execute_select_prepared must always close the cursor's transaction so the pooled \
              session stays reusable"
         );
+        assert!(
+            body.contains("SET LOCAL search_path"),
+            "schema-scoped selects must scope search_path inside the cursor transaction; \
+             session-level SET/RESET costs two extra round trips per query"
+        );
+    }
+
+    #[test]
+    fn query_pool_keeps_more_than_one_connection() {
+        let source = include_str!("postgres.rs");
+        let body = source.split("pub async fn connect(").nth(1).unwrap();
+        let body = body.split("\npub async fn ").next().unwrap();
+        assert!(
+            !body.contains("max_size(1)"),
+            "the query pool must not serialize every query and metadata load behind \
+             one physical connection"
+        );
+    }
+
+    #[test]
+    fn select_path_retries_once_on_lost_connections() {
+        let source = include_str!("postgres.rs");
+        let body = source.split("async fn execute_select_query").nth(1).unwrap();
+        let body = body.split("\nasync fn ").next().unwrap();
+        assert!(
+            body.contains("retrying once on a fresh connection"),
+            "fast recycling skips checkout validation, so a connection lost while idle \
+             must be absorbed by one transparent retry"
+        );
     }
 
     #[test]
@@ -2644,20 +2745,42 @@ mod tests {
         assert_eq!(combined, "SELECT 1;\nSELECT 2");
     }
 
-    // --- SET timezone escaping ---
+    // --- startup options timezone ---
 
     #[test]
-    fn timezone_single_quotes_are_doubled() {
-        let tz = "UTC";
-        let escaped = tz.replace('\'', "''");
-        assert_eq!(escaped, "UTC");
+    fn safe_startup_timezone_keeps_iana_identifiers() {
+        assert_eq!(safe_startup_timezone("UTC"), "UTC");
+        assert_eq!(safe_startup_timezone("Asia/Shanghai"), "Asia/Shanghai");
+        // Plus/minus signs appear in Etc/GMT zone names.
+        assert_eq!(safe_startup_timezone("Etc/GMT+8"), "Etc/GMT+8");
+        assert_eq!(safe_startup_timezone("America/Argentina/Buenos_Aires"), "America/Argentina/Buenos_Aires");
     }
 
     #[test]
-    fn timezone_with_quote_is_escaped() {
-        let tz = "Some'Zone";
-        let escaped = tz.replace('\'', "''");
-        assert_eq!(escaped, "Some''Zone");
+    fn safe_startup_timezone_falls_back_to_utc_on_unsafe_values() {
+        // Quotes or whitespace would break the server's word-splitting of the
+        // startup options string.
+        assert_eq!(safe_startup_timezone("Some'Zone"), "UTC");
+        assert_eq!(safe_startup_timezone("Asia Shanghai"), "UTC");
+        assert_eq!(safe_startup_timezone(""), "UTC");
+    }
+
+    #[test]
+    fn timezone_options_merge_appends_to_existing_options() {
+        // Mirrors the connect() merge: existing options must be preserved.
+        let existing = Some("-c statement_timeout=5000");
+        let tz_arg = format!("-c timezone={}", safe_startup_timezone("Asia/Shanghai"));
+        let merged = match existing {
+            Some(opts) => format!("{opts} {tz_arg}"),
+            None => tz_arg.clone(),
+        };
+        assert_eq!(merged, "-c statement_timeout=5000 -c timezone=Asia/Shanghai");
+
+        let merged_fresh = match Option::<&str>::None {
+            Some(opts) => format!("{opts} {tz_arg}"),
+            None => tz_arg,
+        };
+        assert_eq!(merged_fresh, "-c timezone=Asia/Shanghai");
     }
 
     // --- pg_url_has_timezone_setting ---
