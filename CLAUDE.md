@@ -15,7 +15,7 @@ Dual monorepo: a **pnpm workspace** (Node) overlaid on a **cargo workspace** (Ru
 - `crates/dbx-core/` — shared Rust database core (drivers, schema/query logic, import/export, transfer, plugins). Depended on by `src-tauri`.
 - `packages/` — Node packages: `node-core` (shared), `mcp-server` (`@dbx-app/mcp-server`), `app-tests` (the frontend test suite — see Testing).
 - `plugins/jdbc/` — optional JDBC plugin (needs Java 17 to build).
-- `docs/` — Next.js documentation site (separate pnpm project with its own lockfile).
+- `perf/` — performance docs: the optimization plan, DOM-density audit, and the desktop-excellence assessment/roadmap.
 
 ## Commands
 
