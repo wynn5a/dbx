@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_postgres::config::SslMode;
 use tokio_postgres::types::{FromSql, Type};
-use tokio_postgres::{Row, SimpleQueryMessage};
+use tokio_postgres::Row;
 
 use super::file_validator::validate_file_path;
 use crate::sql::starts_with_executable_sql_keyword;
@@ -914,36 +914,34 @@ async fn execute_select_text(
     start: Instant,
     row_limit: usize,
 ) -> Result<QueryResult, String> {
-    let messages = client.simple_query(sql).await.map_err(pg_error_to_string)?;
-    let mut columns: Vec<String> = Vec::new();
+    // simple_query buffers every row before returning, so a row limit cannot
+    // stop the transfer. Use the extended protocol instead: prepare a
+    // (temporary) statement and pull rows from the portal, which lets us stop
+    // reading once the limit is met instead of materializing the full result.
+    let stmt = client.prepare(sql).await.map_err(pg_error_to_string)?;
+    let columns: Vec<String> = stmt.columns().iter().map(|c| c.name().to_string()).collect();
+    let column_types: Vec<String> = stmt.columns().iter().map(|c| c.type_().name().to_string()).collect();
+
+    // Uppercased once per column; pg_value_to_json dispatches on this per cell.
+    let column_types_upper: Vec<String> = column_types.iter().map(|t| t.to_uppercase()).collect();
+
+    let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
+    let stream = client.query_raw(&stmt, params).await.map_err(pg_error_to_string)?;
+    tokio::pin!(stream);
+
     let mut result_rows: Vec<Vec<serde_json::Value>> = Vec::new();
     let mut truncated = false;
-
-    for message in messages {
-        match message {
-            SimpleQueryMessage::RowDescription(cols) => {
-                columns = cols.iter().map(|c| c.name().to_string()).collect();
-            }
-            SimpleQueryMessage::Row(row) => {
-                if columns.is_empty() {
-                    columns = row.columns().iter().map(|c| c.name().to_string()).collect();
-                }
-                if result_rows.len() >= row_limit {
-                    truncated = true;
-                    continue;
-                }
-                let mut values = Vec::with_capacity(row.len());
-                for i in 0..row.len() {
-                    values.push(match row.try_get(i).map_err(pg_error_to_string)? {
-                        Some(value) => serde_json::Value::String(value.to_string()),
-                        None => serde_json::Value::Null,
-                    });
-                }
-                result_rows.push(values);
-            }
-            SimpleQueryMessage::CommandComplete(_) => {}
-            _ => {}
+    while let Some(row_result) = stream.next().await {
+        if result_rows.len() >= row_limit {
+            truncated = true;
+            break;
         }
+        let row = row_result.map_err(pg_error_to_string)?;
+        let mut values = Vec::with_capacity(row.len());
+        for i in 0..row.len() {
+            values.push(pg_value_to_json(&row, i, column_types_upper.get(i).map(String::as_str).unwrap_or("")));
+        }
+        result_rows.push(values);
     }
 
     Ok(QueryResult {
@@ -954,7 +952,7 @@ async fn execute_select_text(
         truncated,
         session_id: None,
         has_more: false,
-        column_types: Vec::new(),
+        column_types,
     })
 }
 
@@ -2246,6 +2244,24 @@ mod tests {
     #[test]
     fn row_limit_allows_max_rows_override() {
         assert_eq!(query_result_row_limit(Some(5)), 5);
+    }
+
+    #[test]
+    fn postgres_text_fallback_stops_reading_at_row_limit() {
+        let source = include_str!("postgres.rs");
+        let body = source.split("async fn execute_select_text").nth(1).unwrap();
+        // Truncate at the next function so a later `break` can't satisfy this.
+        let body = body.split("\nasync fn ").next().unwrap();
+        assert!(
+            !body.contains("client.simple_query("),
+            "execute_select_text must not use simple_query: it buffers the entire result set, \
+             so a row limit cannot stop the transfer"
+        );
+        assert!(
+            body.contains("break;"),
+            "execute_select_text must stop reading once the row limit is met; otherwise huge \
+             results keep streaming and get parsed just to be dropped"
+        );
     }
 
     #[test]
