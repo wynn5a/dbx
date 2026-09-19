@@ -121,6 +121,14 @@ import {
 } from "@/lib/dataGridTranspose";
 import { matchesRowStatusFilter, type RowStatus, type RowStatusFilter } from "@/lib/gridRowStatus";
 import { displayCellValue, type CellValue } from "@/lib/cellValue";
+import {
+  createGridDisplayRefCache,
+  createGridProjectionCache,
+  createGridRowItemCache,
+  createGridRowSearchCache,
+  gridDirtySnapshot,
+  type GridDisplayRowRef,
+} from "@/lib/dataGridRowItems";
 import { getApplicablePreviewActions } from "@/lib/resultPreviewRegistry";
 import "@/lib/previewHandlers/geometryMapPreview";
 import {
@@ -2146,23 +2154,7 @@ interface RowItem {
   status: RowStatus;
 }
 
-type DisplayRowRef =
-  | {
-      id: number;
-      displayIndex: number;
-      sourceIndex: number;
-      isNew: false;
-      isDeleted: boolean;
-      status: RowStatus;
-    }
-  | {
-      id: number;
-      displayIndex: number;
-      newIndex: number;
-      isNew: true;
-      isDeleted: false;
-      status: RowStatus;
-    };
+type DisplayRowRef = GridDisplayRowRef;
 
 const editor = useDataGridEditor({
   result: computed(() => props.result),
@@ -2206,6 +2198,7 @@ const {
   newRows,
   deletedRows,
   rowsRevision,
+  newRowsRevision,
   pendingChangeCount,
   hasPendingChanges,
   transactionActive,
@@ -2394,6 +2387,17 @@ function dirtyColumnsForRow(dirty: Map<number, CellValue> | undefined, columnCou
   return flags;
 }
 
+// Per-row caches (see lib/dataGridRowItems): a cell commit rebuilds only the
+// touched row instead of every ref and item. Cached objects are frozen.
+const displayRefCache = createGridDisplayRefCache();
+const displayItemCache = createGridRowItemCache<RowItem>({
+  rowsRevision: () => rowsRevision.value,
+  newRowsRevision: () => newRowsRevision.value,
+  baseRowFor: (ref) => props.result.rows[ref.sourceIndex ?? -1],
+  dirtySnapshotFor: (ref) => gridDirtySnapshot(dirtyRows.value.get(ref.sourceIndex ?? -1)),
+  build: rowItemFromDisplayRef,
+});
+
 const displayRowRefs = computed<DisplayRowRef[]>(() => {
   const refs: DisplayRowRef[] = [];
   const rowCount = props.result.rows.length;
@@ -2404,22 +2408,13 @@ const displayRowRefs = computed<DisplayRowRef[]>(() => {
     const dirty = dirtyRows.value.get(sourceIndex);
     const isDeleted = deletedRows.value.has(sourceIndex);
     const status: RowStatus = isDeleted ? "deleted" : dirty?.size ? "edited" : "clean";
-    if (matchesRowStatusFilter(status, rowStatusFilter.value)) {
-      refs.push({ id: sourceIndex, displayIndex: refs.length, sourceIndex, isNew: false, isDeleted, status });
-    }
+    if (!matchesRowStatusFilter(status, rowStatusFilter.value)) continue;
+    refs.push(displayRefCache.existingRow(sourceIndex, refs.length, isDeleted, status));
   }
   newRows.value.forEach((row, i) => {
     if (!rowMatchesLocalColumnFilters(row)) return;
-    const status: RowStatus = "new";
-    if (!matchesRowStatusFilter(status, rowStatusFilter.value)) return;
-    refs.push({
-      id: -(i + 1),
-      displayIndex: refs.length,
-      newIndex: i,
-      isNew: true,
-      isDeleted: false,
-      status,
-    });
+    if (!matchesRowStatusFilter("new", rowStatusFilter.value)) return;
+    refs.push(displayRefCache.newRow(i, refs.length));
   });
   return refs;
 });
@@ -2445,14 +2440,19 @@ function rowItemFromDisplayRef(ref: DisplayRowRef): RowItem {
 
 function displayItemAt(rowIndex: number): RowItem | undefined {
   const ref = displayRowRefs.value[rowIndex];
-  return ref ? rowItemFromDisplayRef(ref) : undefined;
+  return ref ? displayItemCache.get(ref) : undefined;
 }
 
 function displayRowIndexById(rowId: number): number {
   return displayRowRefs.value.findIndex((ref) => ref.id === rowId);
 }
 
-const displayItems = computed<RowItem[]>(() => displayRowRefs.value.map(rowItemFromDisplayRef));
+const displayItems = computed<RowItem[]>(() => {
+  const refs = displayRowRefs.value;
+  const items: RowItem[] = [];
+  for (let i = 0; i < refs.length; i++) items.push(displayItemCache.get(refs[i]));
+  return items;
+});
 
 watch(
   () => displayRowCount.value,
@@ -2493,18 +2493,38 @@ interface SearchMatch {
   col: number;
 }
 
+// Search scans raw row data (via the item cache) one row at a time; a cell
+// commit only rescans the row whose content changed instead of the whole grid.
+const searchRowCache = createGridRowSearchCache<RowItem>((item, q) => {
+  const matches: number[] = [];
+  const data = item.data;
+  for (let c = 0; c < data.length; c++) {
+    if (data[c] !== null && formatCellLowerCached(data[c], c).includes(q)) matches.push(c);
+  }
+  return matches;
+});
+
+// Release cached refs/items (and the old rows they pin) whenever the result
+// set is replaced; validity checks alone would keep stale entries alive.
+watch(
+  () => props.result.rows,
+  () => {
+    displayRefCache.clear();
+    displayItemCache.clear();
+    visibleProjectionCache.clear();
+    searchRowCache.clear();
+  },
+);
+
 const searchMatches = computed<SearchMatch[]>(() => {
   const q = deferredClientSearchText.value;
   if (!q) return [];
-  const items = displayItems.value;
+  const refs = displayRowRefs.value;
   const matches: SearchMatch[] = [];
-  for (let r = 0; r < items.length; r++) {
-    const data = items[r].data;
-    for (let c = 0; c < data.length; c++) {
-      if (data[c] !== null && formatCellLowerCached(data[c], c).includes(q)) {
-        matches.push({ displayRow: r, col: c });
-      }
-    }
+  for (let r = 0; r < refs.length; r++) {
+    const ref = refs[r];
+    const columns = searchRowCache.matchesFor(ref, displayItemCache.get(ref), q);
+    for (const col of columns) matches.push({ displayRow: r, col });
   }
   return matches;
 });
@@ -2585,16 +2605,30 @@ function visibleDirtyColumns(row: boolean[]): boolean[] {
 
 const allColumnsVisible = computed(() => visibleColumnIndexes.value.length === props.result.columns.length);
 
+const visibleProjectionCache = createGridProjectionCache(
+  (item: RowItem): RowItem =>
+    Object.freeze({
+      ...item,
+      data: visibleRowData(item.data),
+      isDirtyCol: visibleDirtyColumns(item.isDirtyCol),
+    }),
+);
+let visibleProjectionColumns: readonly number[] | null = null;
+
 const visibleDisplayItems = computed<RowItem[]>(() => {
   // Fast path: with every column shown the projection copies each row onto
   // itself, so share the materialized items instead of rebuilding
   // rows×columns arrays on every cell edit.
   if (allColumnsVisible.value) return displayItems.value;
-  return displayItems.value.map((item) => ({
-    ...item,
-    data: visibleRowData(item.data),
-    isDirtyCol: visibleDirtyColumns(item.isDirtyCol),
-  }));
+  const columns = visibleColumnIndexes.value;
+  if (columns !== visibleProjectionColumns) {
+    visibleProjectionColumns = columns;
+    visibleProjectionCache.invalidate();
+  }
+  const items = displayItems.value;
+  const projected: RowItem[] = [];
+  for (let i = 0; i < items.length; i++) projected.push(visibleProjectionCache.get(items[i]));
+  return projected;
 });
 const exportContextCell = computed(() => {
   if (!contextCell.value) return null;
@@ -3121,6 +3155,7 @@ function commitDetailEdit() {
       oldVal,
       detail.colIndex,
     );
+    newRowsRevision.value++;
     return;
   }
 
@@ -3185,6 +3220,7 @@ function restoreDetailOriginalValue() {
   if (item.isNew && item.newIndex !== undefined) {
     newRows.value[item.newIndex][detail.colIndex] = null;
     newRows.value = [...newRows.value];
+    newRowsRevision.value++;
   } else if (item.sourceIndex !== undefined) {
     restoredValue = props.result.rows[item.sourceIndex]?.[detail.colIndex] ?? null;
     const rowChanges = dirtyRows.value.get(item.sourceIndex);
@@ -3227,6 +3263,7 @@ function setDetailNull() {
   if (item.isNew && item.newIndex !== undefined) {
     newRows.value[item.newIndex][detail.colIndex] = null;
     newRows.value = [...newRows.value];
+    newRowsRevision.value++;
     resetDetailEdit();
     detailCell.value = { ...detailCell.value! };
     return;

@@ -173,6 +173,9 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
   // result.rows is non-reactive (markRaw); bumped whenever a save mutates its
   // contents in place so computeds reading the rows directly can depend on it.
   const rowsRevision = ref(0);
+  // New rows are mutated in place (cell edits) without changing any array
+  // identity; bumped so row-item caches can detect the change.
+  const newRowsRevision = ref(0);
   let restoredEditingCell = false;
   let restoredTransactionActive = false;
   let suppressNextBlurCommit = false;
@@ -446,6 +449,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
       const newVal = coerceCellValue(editValue.value, oldVal, col);
       if (newRows.value[item.newIndex]) {
         newRows.value[item.newIndex][col] = newVal;
+        newRowsRevision.value++;
       }
       editingCell.value = null;
       return;
@@ -493,6 +497,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
       const oldVal = newRows.value[item.newIndex]?.[col];
       newRows.value[item.newIndex][col] = value === null ? null : coerceCellValue(value, oldVal, col);
       newRows.value = [...newRows.value];
+      newRowsRevision.value++;
       return;
     }
 
@@ -985,6 +990,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
     newRows,
     deletedRows,
     rowsRevision,
+    newRowsRevision,
     dirtyRowCount,
     newRowCount,
     deletedRowCount,
