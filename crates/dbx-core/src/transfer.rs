@@ -1791,7 +1791,13 @@ pub async fn execute_on_pool_with_max_rows(
             let p = p.clone();
             let bare = *mode == crate::connection::MysqlMode::Bare;
             drop(connections);
-            db::mysql::execute_query_with_max_rows(&p, sql, bare, max_rows, Default::default()).await
+            // Transfer batches read well under the row limit, so the
+            // abandoned-wire flag is not expected here; the pool stays in
+            // place (dropping it mid-transfer would break the caller's cached
+            // pool handle).
+            db::mysql::execute_query_with_max_rows(&p, sql, bare, max_rows, Default::default())
+                .await
+                .map(|(result, _)| result)
         }
         PoolKind::Postgres(p) => {
             let p = p.clone();

@@ -512,13 +512,13 @@ where
     wait_for_query_with_timeout(cancel_token, QUERY_TIMEOUT, future).await
 }
 
-pub async fn wait_for_query_with_timeout<F>(
+pub async fn wait_for_query_with_timeout<F, T>(
     cancel_token: Option<CancellationToken>,
     timeout_duration: Duration,
     future: F,
-) -> Result<db::QueryResult, String>
+) -> Result<T, String>
 where
-    F: Future<Output = Result<db::QueryResult, String>>,
+    F: Future<Output = Result<T, String>>,
 {
     if let Some(token) = cancel_token {
         tokio::select! {
@@ -548,13 +548,13 @@ where
 
 /// Like `wait_for_query_with_timeout` but with an optional timeout.
 /// `None` means no timeout (only cancellation can stop the query).
-pub async fn wait_for_query_opt<F>(
+pub async fn wait_for_query_opt<F, T>(
     cancel_token: Option<CancellationToken>,
     timeout_duration: Option<Duration>,
     future: F,
-) -> Result<db::QueryResult, String>
+) -> Result<T, String>
 where
-    F: Future<Output = Result<db::QueryResult, String>>,
+    F: Future<Output = Result<T, String>>,
 {
     match timeout_duration {
         Some(d) => wait_for_query_with_timeout(cancel_token, d, future).await,
@@ -644,12 +644,31 @@ pub async fn do_execute(
             let bare = *mode == crate::connection::MysqlMode::Bare;
             let max_rows = options.max_rows;
             drop(connections);
-            wait_for_query_opt(
-                cancel_token,
-                query_timeout,
-                db::mysql::execute_query_with_max_rows(&p, sql, bare, max_rows, mysql_dialect),
-            )
-            .await
+            let mut abandoned_wire = false;
+            let outcome = wait_for_query_opt(cancel_token, query_timeout, async {
+                let (result, abandoned) =
+                    db::mysql::execute_query_with_max_rows(&p, sql, bare, max_rows, mysql_dialect).await?;
+                abandoned_wire = abandoned;
+                Ok(result)
+            })
+            .await;
+            match outcome {
+                Ok(result) => {
+                    if abandoned_wire {
+                        // The row limit made the driver drop the response
+                        // stream: unread packets are left on this connection
+                        // and the next statement would fail or stall on the
+                        // desynced wire. Rebuild the pool (same treatment as a
+                        // query-execution timeout).
+                        log::warn!(
+                            "[query][do_execute] discarding protocol-stateful pool '{pool_key}' after row-limit stream break"
+                        );
+                        state.discard_pool(pool_key).await;
+                    }
+                    Ok(result)
+                }
+                Err(e) => Err(e),
+            }
         }
         PoolKind::Postgres(p) => {
             let p = p.clone();
@@ -1140,7 +1159,7 @@ async fn execute_multi_mysql(
         )
         .await
         {
-            Ok(result) => results.push(result),
+            Ok((result, _abandoned)) => results.push(result),
             Err(err) => results.push(error_query_result(err)),
         }
     }

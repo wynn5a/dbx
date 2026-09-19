@@ -1507,7 +1507,7 @@ async fn execute_result_set_with_text_protocol_on_conn(
     sql: &str,
     row_limit: usize,
     start: Instant,
-) -> Result<QueryResult, String> {
+) -> Result<(QueryResult, bool), String> {
     let mut result = conn.query_iter(sql).await.map_err(|e| e.to_string())?;
     let columns: Vec<String> = result.columns_ref().iter().map(|c| c.name_str().to_string()).collect();
     let column_types: Vec<String> =
@@ -1525,6 +1525,10 @@ async fn execute_result_set_with_text_protocol_on_conn(
         let values: Vec<serde_json::Value> = (0..row.len()).map(|i| mysql_value_to_json(&row, i)).collect();
         result_rows.push(values);
         if result_rows.len() > row_limit {
+            // The row limit is met and another row arrived: stop reading.
+            // Dropping the stream mid-response leaves the remaining packets
+            // unconsumed on this connection, so the caller must rebuild the
+            // pool instead of letting the next statement stall draining them.
             break;
         }
     }
@@ -1534,16 +1538,19 @@ async fn execute_result_set_with_text_protocol_on_conn(
         result_rows.truncate(row_limit);
     }
 
-    Ok(QueryResult {
-        columns,
-        column_types,
-        rows: result_rows,
-        affected_rows: 0,
-        execution_time_ms: start.elapsed().as_millis(),
+    Ok((
+        QueryResult {
+            columns,
+            column_types,
+            rows: result_rows,
+            affected_rows: 0,
+            execution_time_ms: start.elapsed().as_millis(),
+            truncated,
+            session_id: None,
+            has_more: false,
+        },
         truncated,
-        session_id: None,
-        has_more: false,
-    })
+    ))
 }
 
 async fn execute_result_set_with_prepared_protocol_on_conn(
@@ -1551,7 +1558,7 @@ async fn execute_result_set_with_prepared_protocol_on_conn(
     sql: &str,
     row_limit: usize,
     start: Instant,
-) -> Result<QueryResult, String> {
+) -> Result<(QueryResult, bool), String> {
     let mut result = conn.exec_iter(sql, ()).await.map_err(|e| e.to_string())?;
     let columns: Vec<String> = result.columns_ref().iter().map(|c| c.name_str().to_string()).collect();
     let column_types: Vec<String> =
@@ -1569,6 +1576,8 @@ async fn execute_result_set_with_prepared_protocol_on_conn(
         let values: Vec<serde_json::Value> = (0..row.len()).map(|i| mysql_value_to_json(&row, i)).collect();
         result_rows.push(values);
         if result_rows.len() > row_limit {
+            // Row limit met: stop reading; the connection now has unread
+            // packets and its pool must be rebuilt (see text-protocol path).
             break;
         }
     }
@@ -1578,29 +1587,36 @@ async fn execute_result_set_with_prepared_protocol_on_conn(
         result_rows.truncate(row_limit);
     }
 
-    Ok(QueryResult {
-        columns,
-        column_types,
-        rows: result_rows,
-        affected_rows: 0,
-        execution_time_ms: start.elapsed().as_millis(),
+    Ok((
+        QueryResult {
+            columns,
+            column_types,
+            rows: result_rows,
+            affected_rows: 0,
+            execution_time_ms: start.elapsed().as_millis(),
+            truncated,
+            session_id: None,
+            has_more: false,
+        },
         truncated,
-        session_id: None,
-        has_more: false,
-    })
+    ))
 }
 
 pub async fn execute_query(pool: &MySqlPool, sql: &str, bare: bool) -> Result<QueryResult, String> {
-    execute_query_with_max_rows(pool, sql, bare, None, MySqlQueryDialect::default()).await
+    execute_query_with_max_rows(pool, sql, bare, None, MySqlQueryDialect::default()).await.map(|(result, _)| result)
 }
 
+/// Executes a query and reports, alongside the result, whether the row limit
+/// made us abandon the response stream mid-flight. An abandoned stream leaves
+/// unread packets on the connection, so callers must rebuild the pool (the
+/// next statement would otherwise fail or stall on the desynced wire).
 pub async fn execute_query_with_max_rows(
     pool: &MySqlPool,
     sql: &str,
     bare: bool,
     max_rows: Option<usize>,
     dialect: MySqlQueryDialect,
-) -> Result<QueryResult, String> {
+) -> Result<(QueryResult, bool), String> {
     log::debug!("[mysql][exec] phase=acquire start sql={}", sql_log_preview(sql));
     let acquire_start = Instant::now();
     let mut conn = get_conn_with_health_check(pool).await?;
@@ -1610,7 +1626,7 @@ pub async fn execute_query_with_max_rows(
     let execute_start = Instant::now();
     let result = execute_query_on_conn_with_max_rows(&mut conn, sql, bare, max_rows, dialect).await;
     match &result {
-        Ok(r) => log::debug!(
+        Ok((r, _)) => log::debug!(
             "[mysql][exec] phase=execute done in {}ms rows={} (acquire {acquire_ms}ms)",
             execute_start.elapsed().as_millis(),
             r.rows.len()
@@ -1640,7 +1656,7 @@ pub async fn execute_query_on_conn_with_max_rows(
     bare: bool,
     max_rows: Option<usize>,
     dialect: MySqlQueryDialect,
-) -> Result<QueryResult, String> {
+) -> Result<(QueryResult, bool), String> {
     let start = Instant::now();
     let row_limit = query_result_row_limit(max_rows);
 
@@ -1674,16 +1690,19 @@ pub async fn execute_query_on_conn_with_max_rows(
         restore_explicit_timestamp_defaults_for_query(conn, previous_explicit_timestamp_defaults).await;
         drop_result.map_err(|e| e.to_string())?;
 
-        Ok(QueryResult {
-            columns: vec![],
-            column_types: Vec::new(),
-            rows: vec![],
-            affected_rows,
-            execution_time_ms: start.elapsed().as_millis(),
-            truncated: false,
-            session_id: None,
-            has_more: false,
-        })
+        Ok((
+            QueryResult {
+                columns: vec![],
+                column_types: Vec::new(),
+                rows: vec![],
+                affected_rows,
+                execution_time_ms: start.elapsed().as_millis(),
+                truncated: false,
+                session_id: None,
+                has_more: false,
+            },
+            false,
+        ))
     }
 }
 
@@ -2368,6 +2387,41 @@ mod tests {
         assert_eq!(
             mysql_setup_queries("mysql://host:3306/db?time_zone=%2B08%3A00%27%3BDROP%20TABLE%20users"),
             vec!["USE `db`", "SET NAMES utf8mb4"]
+        );
+    }
+
+    #[test]
+    fn mysql_result_set_collectors_abandon_stream_at_row_limit() {
+        let source = include_str!("mysql.rs");
+        for collector in [
+            "async fn execute_result_set_with_text_protocol_on_conn",
+            "async fn execute_result_set_with_prepared_protocol_on_conn",
+        ] {
+            let body = source.split(collector).nth(1).unwrap();
+            // Truncate at the next function so a later `break` can't satisfy this.
+            let body = body.split("\nasync fn ").next().unwrap();
+            let body = body.split("\npub async fn ").next().unwrap();
+            assert!(
+                body.contains("break;"),
+                "{collector} must stop reading once the row limit is met; otherwise huge results \
+                 keep streaming over the wire and get parsed just to be dropped"
+            );
+            assert!(
+                body.contains("Result<(QueryResult, bool), String>") || body.contains("truncated,"),
+                "{collector} must surface the abandoned-wire flag so pools get rebuilt"
+            );
+        }
+    }
+
+    #[test]
+    fn mysql_query_entry_points_propagate_abandoned_wire_flag() {
+        let source = include_str!("mysql.rs");
+        let section = source.split("pub async fn execute_query_with_max_rows").nth(1).unwrap();
+        let section = section.split("\npub async fn ").nth(1).unwrap_or("");
+        assert!(
+            section.contains("Result<(QueryResult, bool), String>"),
+            "execute_query_with_max_rows must return the abandoned-wire flag so the query layer \
+             can discard the protocol-stateful pool (same treatment as a query timeout)"
         );
     }
 }
