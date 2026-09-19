@@ -862,32 +862,63 @@ async fn execute_select_prepared(
     // Uppercased once per column; pg_value_to_json dispatches on this per cell.
     let column_types_upper: Vec<String> = column_types.iter().map(|t| t.to_uppercase()).collect();
 
-    let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
     let query_start = Instant::now();
-    let stream = client.query_raw(&stmt, params).await?;
+    // Server-side cursor instead of an unbounded portal stream: a transaction
+    // holding a declared cursor with FETCH `row_limit` stops the backend after
+    // the rows we keep, so a 10k-row preview of a huge table no longer waits
+    // on the skipped transfer. The transaction always rolls back at the end
+    // (success or failure), closing the abandoned cursor; the implicit
+    // transaction wrapper fails fast outside real transactions, hence the raw
+    // SQL here.
+    let cursor_name = format!("dbx_export_cursor_{}", start.elapsed().as_nanos());
+    if let Err(err) = client.batch_execute("BEGIN").await {
+        return Err(err);
+    }
+    let declare_sql = format!("DECLARE {cursor_name} NO SCROLL CURSOR FOR {sql}");
+    if let Err(err) = client.batch_execute(&declare_sql).await {
+        let _ = client.batch_execute("ROLLBACK").await;
+        return Err(err);
+    }
     log::info!(
         "[postgres][select:query_raw:done] elapsed_ms={} total_ms={} column_count={}",
         query_start.elapsed().as_millis(),
         start.elapsed().as_millis(),
         columns.len()
     );
+    let fetch_sql = format!("FETCH {row_limit} FROM {cursor_name}");
+    let fetch_stmt = client.prepare_cached(&fetch_sql).await?;
+    let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
+    let stream = client.query_raw(&fetch_stmt, params).await?;
     tokio::pin!(stream);
     let mut result_rows: Vec<Vec<serde_json::Value>> = Vec::new();
-    let mut truncated = false;
+    let mut stream_error: Option<tokio_postgres::Error> = None;
 
     let rows_start = Instant::now();
     while let Some(row_result) = stream.next().await {
-        if result_rows.len() >= row_limit {
-            truncated = true;
-            break;
+        match row_result {
+            Ok(row) => result_rows.push(
+                (0..row.columns().len())
+                    .map(|i| pg_value_to_json(&row, i, column_types_upper.get(i).map(String::as_str).unwrap_or("")))
+                    .collect(),
+            ),
+            Err(err) => {
+                stream_error = Some(err);
+                break;
+            }
         }
-        let row = row_result?;
-        result_rows.push(
-            (0..row.columns().len())
-                .map(|i| pg_value_to_json(&row, i, column_types_upper.get(i).map(String::as_str).unwrap_or("")))
-                .collect(),
-        );
     }
+    drop(stream);
+    // Instant: no rows fetched, just closes the abandoned cursor. The pooled
+    // session stays clean and reusable with no extra round trip.
+    if let Err(err) = client.batch_execute("ROLLBACK").await {
+        return Err(err);
+    }
+    if let Some(err) = stream_error {
+        return Err(err);
+    }
+    // FETCH asked the server for exactly `row_limit` rows; a full page means
+    // more rows may remain in the abandoned cursor.
+    let truncated = result_rows.len() >= row_limit;
     log::info!(
         "[postgres][select:rows:done] elapsed_ms={} total_ms={} row_count={} truncated={}",
         rows_start.elapsed().as_millis(),
@@ -925,24 +956,57 @@ async fn execute_select_text(
     // Uppercased once per column; pg_value_to_json dispatches on this per cell.
     let column_types_upper: Vec<String> = column_types.iter().map(|t| t.to_uppercase()).collect();
 
+    // Same server-side cursor as the prepared path: FETCH `row_limit` lets the
+    // backend stop after the rows we keep instead of materializing the full
+    // result for us to discard.
+    let cursor_name = format!("dbx_text_cursor_{}", start.elapsed().as_nanos());
+    if let Err(err) = client.batch_execute("BEGIN").await.map_err(pg_error_to_string) {
+        return Err(err);
+    }
+    let declare_sql = format!("DECLARE {cursor_name} NO SCROLL CURSOR FOR {sql}");
+    if let Err(err) = client.batch_execute(&declare_sql).await.map_err(pg_error_to_string) {
+        let _ = client.batch_execute("ROLLBACK").await;
+        return Err(err);
+    }
+    let fetch_sql = format!("FETCH {row_limit} FROM {cursor_name}");
+    let fetch_stmt = client.prepare(&fetch_sql).await.map_err(pg_error_to_string)?;
     let params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = Vec::new();
-    let stream = client.query_raw(&stmt, params).await.map_err(pg_error_to_string)?;
+    let stream_result = client.query_raw(&fetch_stmt, params).await.map_err(pg_error_to_string);
+    let stream = match stream_result {
+        Ok(stream) => stream,
+        Err(err) => {
+            let _ = client.batch_execute("ROLLBACK").await;
+            return Err(err);
+        }
+    };
     tokio::pin!(stream);
 
     let mut result_rows: Vec<Vec<serde_json::Value>> = Vec::new();
-    let mut truncated = false;
+    let mut stream_error: Option<String> = None;
     while let Some(row_result) = stream.next().await {
-        if result_rows.len() >= row_limit {
-            truncated = true;
-            break;
+        match row_result {
+            Ok(row) => {
+                let mut values = Vec::with_capacity(row.len());
+                for i in 0..row.len() {
+                    values.push(pg_value_to_json(&row, i, column_types_upper.get(i).map(String::as_str).unwrap_or("")));
+                }
+                result_rows.push(values);
+            }
+            Err(err) => {
+                stream_error = Some(pg_error_to_string(err));
+                break;
+            }
         }
-        let row = row_result.map_err(pg_error_to_string)?;
-        let mut values = Vec::with_capacity(row.len());
-        for i in 0..row.len() {
-            values.push(pg_value_to_json(&row, i, column_types_upper.get(i).map(String::as_str).unwrap_or("")));
-        }
-        result_rows.push(values);
     }
+    drop(stream);
+    // Always closes the abandoned cursor; the pooled session stays reusable.
+    let rollback_result = client.batch_execute("ROLLBACK").await.map_err(pg_error_to_string);
+    if let Some(err) = stream_error {
+        return Err(err);
+    }
+    rollback_result?;
+    // FETCH asked for exactly `row_limit` rows; a full page may mean more.
+    let truncated = result_rows.len() >= row_limit;
 
     Ok(QueryResult {
         columns,
@@ -2250,7 +2314,7 @@ mod tests {
     fn postgres_text_fallback_stops_reading_at_row_limit() {
         let source = include_str!("postgres.rs");
         let body = source.split("async fn execute_select_text").nth(1).unwrap();
-        // Truncate at the next function so a later `break` can't satisfy this.
+        // Truncate at the next function so a later statement can't satisfy this.
         let body = body.split("\nasync fn ").next().unwrap();
         assert!(
             !body.contains("client.simple_query("),
@@ -2258,9 +2322,31 @@ mod tests {
              so a row limit cannot stop the transfer"
         );
         assert!(
-            body.contains("break;"),
-            "execute_select_text must stop reading once the row limit is met; otherwise huge \
-             results keep streaming and get parsed just to be dropped"
+            body.contains("CURSOR FOR"),
+            "execute_select_text must page through a server-side cursor so the backend stops \
+             after the row limit instead of materializing the full result"
+        );
+        assert!(
+            body.contains("ROLLBACK"),
+            "execute_select_text must always close the cursor's transaction so the pooled \
+             session stays reusable"
+        );
+    }
+
+    #[test]
+    fn postgres_prepared_select_pages_through_server_cursor() {
+        let source = include_str!("postgres.rs");
+        let body = source.split("async fn execute_select_prepared").nth(1).unwrap();
+        let body = body.split("\nasync fn ").next().unwrap();
+        assert!(
+            body.contains("CURSOR FOR"),
+            "execute_select_prepared must page through a server-side cursor so a row limit \
+             stops the backend instead of streaming the full result to be dropped"
+        );
+        assert!(
+            body.contains("ROLLBACK"),
+            "execute_select_prepared must always close the cursor's transaction so the pooled \
+             session stays reusable"
         );
     }
 
