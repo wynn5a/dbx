@@ -1,0 +1,128 @@
+# DBX 性能优化计划
+
+> 状态：持续更新。已完成项随提交落地并推送至 `app-only` 分支，每项均附带测试与回归验证。
+> 相关文档：[DOM 密度审计](dom-density-audit.md)。
+
+## 背景
+
+本计划源自 2026-09 的一次全量性能审查，覆盖两条线：
+
+- **Rust 后端**（`crates/dbx-core` + `src-tauri`）：查询执行路径、连接管理、Tauri 命令层、导出/导入/迁移、Agent 驱动运行时。
+- **Vue 前端**（`apps/desktop/src`）：数据网格、Pinia store、CodeMirror 编辑器、IPC 调用、缓存层。
+
+先说结论：代码库已做了大量正确的性能工程（见文末"已有良好实践"），以下条目是审查后剩余的真实热点，按影响排序逐项落地。
+
+---
+
+## 已完成 ✅
+
+以下 7 项已全部实施、测试、提交并推送（分支 `app-only`）。
+
+### 1. Agent 守护进程：全局互斥锁改为按 daemon 分片 `d64c3b4c`
+
+**问题** `call_daemon`（`crates/dbx-core/src/agent_runtime.rs`）持有 `daemons` HashMap 的锁跨越整个 RPC——包括冷启动 spawn JVM。所有走 Agent 协议的数据库（Oracle、达梦、金仓、Hive、DB2、Snowflake…）共享一个 `AgentManager`，一个连接上的慢调用会阻塞**所有其他** Agent 连接的连接测试。
+
+**修复** 每个 daemon 客户端放 进自己的 `Arc<tokio::sync::Mutex>`：外层 map 锁只保护 lookup/insert；不同 daemon 的调用并行，同一 daemon 的调用保持串行（stdio JSON-RPC 管道的要求）。失败重启不再先销毁旧进程（重启失败时旧 daemon 仍可用），并用 `Arc::ptr_eq` 防止并发双重启。
+
+**验证** 新增 `agent_runtime::tests`（非法 db_type 拒绝、失败不残留注册项）；`cargo test -p dbx-core` 全量回归。
+
+### 2. SQL Server：行数限制后提前终止 TDS 流 `ef461a49`
+
+**问题** `collect_first_result_limited`（`db/sqlserver.rs`）达到 `row_limit` 后只是停止*收集*，仍继续消费 TDS 流直到耗尽——对大表设了 1 万行限制，网络传输和行解析照样全量发生。
+
+**修复** 收集器到达限制立即 `break`。由于放弃的流会在连接上留下未读 TDS 包，`execute_query_with_max_rows` / `execute_batch_with_max_rows` 返回 abandoned-wire 标志，查询路径复用既有的"协议状态污染即丢弃连接池"机制（与查询超时同路径）重建连接；多语句批处理保持完整排空（保证每个语句结果可见），池的丢弃延迟到整个脚本结束。
+
+**验证** 新增源码守卫测试（防回退到全量收集）+ 全量回归。新增防回退测试锁定"截断必须 break"与"abandoned-wire 必须传播"。
+
+### 3. 数据迁移：批次 SQL 生成去 O(n²) `6897e326`
+
+**问题** `generate_transfer_write_sql_batches`（`transfer.rs`）为检查 512 KiB 语句上限，每加一行就从头重新格式化整条多行 INSERT/MERGE 再丢弃——默认 batch_size=1000 时每批约 50 万次行片段格式化，是跨库迁移的主要 CPU 开销。
+
+**修复** 拆出 `prefix + fragments + suffix` 语句骨架，每行片段只格式化一次，按前缀和字节预算装箱成语句。对照测试证明与旧算法在 MySQL/Postgres/SQLite/DuckDB/SQL Server/Oracle/Hive（含行数上限路径）上**逐字节一致**。
+
+**附带 bug 修复** 无主键表的 upsert 原先生成空语句、整批数据被静默跳过；现在退化为普通 INSERT（实际迁移路径上游已有回退 append 的守卫，此处是生成器层的兜底）。
+
+### 4. XLSX 导出：消除每字符堆分配 `9f91cd91`
+
+**问题** `escape_xml`（`xlsx_export.rs`）对每个字符分配一个 `Vec<char>`，且非字符串单元格跑两遍——万行 × 20 列导出是数百万次小分配。
+
+**修复** 先扫描判断是否需要处理：干净文本走零分配拷贝快速路径；需要转义时用预分配缓冲 `push_str` 实体。worksheet body 也改为预预留容量，替代反复 collect 扩容。行为不变（同样的实体转义与控制字符剥离），有测试锁定。
+
+### 5. 前端调试日志：内存缓冲 + 合并落盘 `98d839d6`
+
+**问题** `appendDebugLog`（`lib/debugLog.ts`）每条日志同步全量读+解析+序列化+写回 localStorage（上限 1500 条）。开启调试日志后，每次点击、每次 API 调用（2 条）、每行 console、每个 long task 都触发——恰恰在排查性能问题时最伤性能。
+
+**修复** 日志驻留内存缓冲：enabled 标志与既有条目只加载一次；追加原地 splice；500ms 防抖合并写盘。`pagehide` / `visibilitychange(hidden)` 强制落盘，关闭日志开关时先 flush，`clearDebugLogs` 重置缓冲防止旧条目复活。导出直接读内存。
+
+**验证** 新增 `packages/app-tests/debugLog.test.ts`（6 个用例：合并写入、禁用零写入、立即 flush、导出含未落盘条目、clear 语义、1500 条截断）。
+
+### 6. 标签页结果缓存：驱逐路径去掉冗余拷贝 `862497cd`
+
+**问题** 驱逐大结果集标签页时（保留 5 个在内存，超出即落盘），`buildTabResultSnapshot` → msgpack 编码链路做约 3 次全量拷贝：`stripSessionIds` 逐行克隆、列式转置重建、`removeUndefinedFields` 再递归重建整个 payload，且编码同步在主线程——切标签页会卡 UI。
+
+**修复** 快照只读（构建与编码同步完成、中间无 await），行数组与分析/元数据树共享引用（`toRaw`）；原始类型数组跳过 undefined 清理遍历；payload 层的二次 strip 合并进 envelope 层。驱逐成本从 3 次拷贝 + 编码降为 1 次转置 + 编码。测试契约同步更新（行共享身份断言）。
+
+### 7. 数据网格：全列可见时跳过投影拷贝 `5795fee5`
+
+**问题** `visibleDisplayItems`（`DataGrid.vue`）在 `displayItems` 每次失效（包括每次单元格提交）时，为每行重建投影拷贝（新的 data 与 dirty 标志数组）——即使没有任何隐藏列，投影等于逐行自我拷贝。
+
+**修复** 全列可见（默认场景）时直接共享物化项；有隐藏列才走逐行投影。选择/导出等消费方均为只读，已核实无变异。
+
+---
+
+## 待办 📋
+
+按预期收益排序。前置事实：前端结果分页默认 100 行，但用户可调到 `MAX_RESULT_PAGE_SIZE = 100000`（`lib/paginationPageSize.ts`）——大部分前端热点在这个配置下才咬人；后端默认 `MAX_ROWS = 10000`（`query.rs:15`）。
+
+### 后端
+
+- **[高] PG 连接池 `max_size(1)`**（`db/postgres.rs:1014-1020`）：单库所有查询与元数据共用一条物理连接互相排队；每次 checkout 还有 `SET search_path`/`RESET`（+2 RTT）与 `RecyclingMethod::Verified` 校验往返。建议：小池（2-4）+ 仅在 search_path 实际变化时设置（或改用全限定名，代码库他处已生成）。MySQL 侧每次 checkout 都 ping（`mysql.rs:1454-1470`，上限 3s）。
+- **[高] `fetch_size` 未接入原生驱动**：`QueryExecutionOptions.fetch_size` 字段已存在（`query.rs:56`）但只转发给 agent/插件驱动。MySQL/PG 的行数限制目前是客户端截断，剩余行仍在网络传输；接上后可用服务端游标（PG portal / MySQL `set_fetch_size`）真正截断。只有 ClickHouse 已做服务端限制（`max_result_rows` + `result_overflow_mode=break`）。
+- **[中] 表导入整文件进内存**（`table_import.rs:435,307-316,472-492`）：CSV/JSON 先整读 `Vec<Vec<Value>>`，再为整个文件物化全部 INSERT 语句才执行——GB 级文件 OOM；无事务包裹，失败留半截数据。csv crate 支持流式读取，改为按块 流式构建-执行-提交。
+- **[中] XLSX 导出无内存上限**（`table_export.rs:330-403`）：xlsx 分支把所有分页批次累积进 `all_rows`，worksheet XML 整个构建为一个 String；csv/json/markdown/sql 分支已是逐批流式写出，xlsx 应对齐（或接流式 xlsx writer）。
+- **[中] 导出用 OFFSET 分页**（`database_export.rs:493-567`、`csv_export.rs:83-135`）：服务端每页重扫 offset 行，另有每表无条件 `SELECT COUNT(*)`。`table_export.rs:195-208` 已实现 keyset 分页（`keyset_pagination_sql`），复用即可。
+- **[中] Redis 每操作先 `SELECT db`**（`redis_ops.rs` 多处，实现 `redis_driver.rs:419-424`）：db 未变时重复 SELECT 白付一个 RTT；单连接被全局 mutex 串行化，而 `MultiplexedConnection` 可 clone + pipeline。集群路径逐 key 删除（`redis_ops.rs:526-531`）可改 UNLINK pipeline。
+- **[中] 同步 Tauri 命令在主线程拼接大字符串**（`commands/query.rs:484-502` 的 INSERT 导出构建器是同步命令；`commands/csv_export.rs`/`xlsx_export.rs` 让整个结果集作为 JSON 跨 IPC 往返）。重活应走 async + 事件进度（导出/导入/迁移的其余部分已正确这么做）。
+- **[低] MongoDB 每页 `count_documents`**（`db/mongo_driver.rs:125-145`，无索引时全扫描）且 find 未设 `batch_size`；ES SQL 无 `fetch_size` 全量缓冲响应（`elasticsearch_driver.rs:768-788`，DSL 路径已正确分页）。
+- **[低] 杂项**：`schema.rs:575` 通用 get_table_comment 兜底列出 256 张表找一个注释；`sqlite.rs:506-589` SQL 规范化逐字符 + 每位置 to_lowercase；`query.rs:111,151` blob 十六进制编码逐字节 `format!`（应使用 `db/mod.rs:56-64` 的共享 `hex_encode`）；`database_export.rs:354` 文件写入未包 `BufWriter`（Windows/网络盘明显）；`storage.rs:708-773` 启动时逐 secret 逐条查询可合并为一次。
+
+### 前端
+
+- **[高] DataGrid 编辑路径全量重建**（`DataGrid.vue:2455`、`useDataGridEditor.ts:515`、`DataGrid.vue:2497-2509`）：每次单元格提交替换整个 `dirtyRows` Map → `displayRowRefs`/`displayItems` 全量失效重建；搜索激活时 `searchMatches` 随之 O(行×列) 重扫。10 万行页大小时每次击键在主线程分配 10 万个对象。方向：行项按需构建（canvas 路径已有 `displayItemAt(rowIndex)`，DOM 路径与搜索改用它）、搜索基于原始行数组 + 修订计数器。（Task 7 已消除全列可见时的投影拷贝，此处是更深一层的惰性化。）
+- **[中] 重命名对话框每击键一次 IPC + 一次 Shiki 高亮**（`TreeItem.vue:1448-1463` → `buildRenameObjectSql` invoke，`v-html` 同步 `codeToHtml`）：全库唯一未防抖的击键→IPC 路径。
+- **[中] Mongo 文档浏览器 / 数据库搜索 / 数据对比列表未虚拟化**（`MongoDocBrowser.vue:1211` 平铺 v-for + 每次渲染对每个文档前 3 键跑 `JSON.stringify`；`DatabaseSearchDialog.vue:363` 结果可累计数千；`DataCompareDialog.vue` 三处列表）。应用已有的 RecycleScroller 模式。
+- **[中] KeepAlive max=4 重建编辑器**（`App.vue:1070-1073`）：超过 4 个查询标签时每次切换销毁/重建 CodeMirror 实例并重新拉补全元数据，而进程级缓存 `connectionStore.completionObjectsCache`（上限 50）已存在，可共享。
+- **[低] connectionStore 树全量深响应**（`stores/connectionStore.ts:125`）：数千表的 schema 每个节点都是响应式代理。改 `shallowRef` + 不可变节点替换可消除代理开销（树已虚拟化，影响有界）。
+- **[低] 杂项**：`useDataGridExport.ts:457,491,779` 全量导出同步拼接大字符串（用户触发，10 万行可感知）；`QueryEditor.vue:2226-2248` 深度 watcher 监听整个 editorSettings 对象、任何嵌套变化重建 CodeMirror 主题。
+
+---
+
+## 已有良好实践（勿重复建设）
+
+审查确认以下方面已到位，新工作应复用这些模式而非另起炉灶：
+
+**前端**
+- 虚拟化：网格行 RecycleScroller（canvas 渲染为默认，rAF 批量绘制）、侧栏树扁平化 + RecycleScroller、QueryHistory/ObjectBrowser/Redis 各浏览器均已虚拟化；DOM 网格水平列窗口化（二分偏移）。
+- 大数据隔离：`markRaw(result.rows)` 后才入 store/缓存；脏追踪用 per-cell Map 原地改行不克隆。
+- 格式化缓存：2 万条原始值缓存 + WeakMap 对象缓存，列/格式器变更才失效。
+- 结果缓存：IndexedDB + msgpack 列式快照，内存上限 5，磁盘逐出/恢复。
+- 防抖/纪元：侧栏搜索 120ms、网格搜索 150ms、补全元数据 150ms、语义诊断 500ms + run-id 守卫、标签/布局持久化 300ms、AI 流式 ~10fps 且流式期间禁用 Shiki。
+- 高亮器为模块级懒加载单例（动态 import），绝不 per-editor 实例化。
+- 编辑器失活时暂停后台工作；i18n 除默认语言外全部懒加载；DataGrid 异步导入 + 定向预加载。
+
+**后端**
+- 连接池按 (connection, database) 缓存，`KeyedMutex` 防连接惊群，健康检查有界（MySQL ping 3s、刷新扫描 5s 并发）。
+- 行数限制 + `CancellationToken` + `tokio::select!` 取消；DuckDB 注册了真实中断句柄；查询超时可配置。
+- 阻塞调用正确放 `spawn_blocking`；锁 clone-then-drop，不在 `.await` 上持锁；connections RwLock 等待超 500ms 有告警日志。
+- 表导出逐批流式写 + `BufWriter` + 主键可用时 keyset 分页；PG 有 `COPY ... TO STDOUT` 辅助。
+- 元数据单查询无后端 N+1、`tokio::join!` 并行 DDL、PG `prepare_cached`、连接断开重试一次。
+- 迁移/导入/导出的重活 `tokio::spawn` + 事件进度 + 批间取消检查；存储层 SQLite + `spawn_blocking` 单写者。
+- Redis 浏览全用 SCAN（KEYS 仅命令行控制台带确认门）；i64/u64 越界安全转字符串。
+
+---
+
+## 落地流程约定
+
+1. 每项优化独立提交（Conventional Commits，`perf(...)` 前缀），包含问题、修复、行为契约说明。
+2. 提交前跑对应全量回归：Rust `cargo fmt --check && cargo test -p dbx-core`；前端 `pnpm test && pnpm typecheck && pnpm lint`；涉及行为契约的新增/更新测试随提交走。
+3. 完成后推送 `app-only` 分支，并更新本清单状态。
