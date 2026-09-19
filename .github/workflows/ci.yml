@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, app-only]
   pull_request:
-    branches: [main]
+    branches: [main, app-only]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -32,6 +32,12 @@ jobs:
 
       - name: Frontend check
         run: pnpm check
+
+      # Production build smoke test: `pnpm check` covers lint/typecheck/unit
+      # tests but never runs rolldown, so bundler-level failures (e.g. the
+      # @babel/runtime regression fixed in b63f49f1) slip through to release.
+      - name: Frontend production build
+        run: pnpm build
 
       - name: Node package tests
         run: pnpm test:packages
