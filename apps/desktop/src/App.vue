@@ -1067,7 +1067,9 @@ onUnmounted(() => {
                   @set-default-database="setActiveDatabaseAsDefault"
                   @clear-default-database="clearActiveDefaultDatabase"
                 />
-                <KeepAlive :max="4">
+                <!-- max must exceed realistic concurrent tab counts: a keep-alive
+                     miss destroys and rebuilds the tab's CodeMirror editor -->
+                <KeepAlive :max="12">
                   <ContentArea
                     ref="contentAreaRef"
                     :key="activeTab.id"
