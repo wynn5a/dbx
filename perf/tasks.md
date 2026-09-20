@@ -20,7 +20,7 @@
 | # | 任务 | 来源章节 | 规模 | 状态 |
 |---|---|---|---|---|
 | T01 | 锁死 MCP 桥（鉴权 + 写门控） | improvement-plan §5 D1 | S | ✅ a0849b48 |
-| T02 | 查询真实服务端取消 | improvement-plan §2 A1 | M | ⬜ |
+| T02 | 查询真实服务端取消 | improvement-plan §2 A1 | M | ✅ d4485b14 |
 | T03 | SQL Server 连接池 | improvement-plan §2 A2 | M | ⬜ |
 | T04 | 网格保存先展示 SQL | improvement-plan §6 E1 | M | ⬜ |
 | T05 | 补全上下文剥离注释 | improvement-plan §4 C1 | M | ⬜ |
@@ -80,15 +80,16 @@
   - [x] npm MCP server 侧拿到 token 后端到端调用成功一次（node-core 集成测试覆盖 npm→桥 HTTP 全链路：token 头 + flags 转发 + 200 返回；桥→DB 段由 Rust socket→SQLite 测试覆盖）
   - [x] `cargo fmt --check && cargo test -p dbx-core`（另：`cargo test -p dbx --lib` 42 过、node-core 45 过、mcp-server 17 过）
 
-### T02 查询真实服务端取消 ⬜
+### T02 查询真实服务端取消 ✅ d4485b14
 
 - **来源** improvement-plan-2026-09.md §2 A1（Track A）· **规模** M
 - **内容** Cancel/超时目前只丢 Rust future（`query.rs:519-576`），语句仍在服务端跑。checkout 时捕获后端 pid/连接 id（PG 用 `cancel_token()` 免额外连接、MySQL `CONNECTION_ID()`、SQL Server `@@SPID`），存入 `RunningQueries`；cancel 与超时路径调用 `process.rs:121-125` 既有的 `pg_cancel_backend` / `KILL QUERY`。
 - **验收**
-  - [ ] env 门控 live-DB 集成测试：`pg_sleep(30)` 查询被取消后 `pg_stat_activity` 不再显示该查询
-  - [ ] MySQL（`KILL QUERY`）与 SQL Server（`@@SPID`）各一条同型验证
-  - [ ] 拿不到后端 id 时降级为现状（仅丢弃 future），不阻塞不报错
-  - [ ] DuckDB 既有中断路径（`query.rs:626-631`）不回退；全量回归通过
+  - [x] env 门控 live-DB 集成测试：`pg_sleep(30)` 查询被取消后 `pg_stat_activity` 不再显示该查询（`tests/live_postgres_query_cancel.rs`，含超时触发路径；Docker 临时 PG16 实测通过）
+  - [x] MySQL（`KILL QUERY`）与 SQL Server（`@@SPID`）各一条同型验证（`live_mysql_query_cancel.rs` / `live_sqlserver_query_cancel.rs`，Docker mysql:8 / azure-sql-edge 实测通过；实现细节：MySQL 用 `conn.id()` 免查询获取连接 id，SQL Server 由既有健康检查 `SELECT 1` 改为 `SELECT @@SPID` 零额外往返）
+  - [x] 拿不到后端 id 时降级为现状（仅丢弃 future），不阻塞不报错（空 registrar 为 no-op；fire 全程 best-effort + 5s 上界）
+  - [x] DuckDB 既有中断路径（`query.rs:626-631`）不回退；全量回归通过（`cargo fmt --check` + dbx-core 797 过 + dbx --lib 42 过 + `pnpm check` 全绿）
+- **附带修复**：PG SELECT 走 `BEGIN…DECLARE…FETCH` 游标事务，服务端停止后连接带已中止事务回池，fast recycle 会把脏连接给下一条查询 —— 取消/超时触发服务端停止后丢弃重建 PG 池。
 
 ### T03 SQL Server 连接池 ⬜
 
