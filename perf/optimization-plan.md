@@ -1,7 +1,7 @@
 # DBX 性能优化计划
 
 > 状态：持续更新。已完成项随提交落地并推送至 `app-only` 分支，每项均附带测试与回归验证。
-> 相关文档：[DOM 密度审计](dom-density-audit.md)。
+> 相关文档：[DOM 密度审计](dom-density-audit.md)、[2026-09 改进计划](improvement-plan-2026-09.md)（连接稳定性 / 延迟 / 补全 / AI / UX）。
 
 ## 背景
 
