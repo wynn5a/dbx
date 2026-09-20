@@ -19,7 +19,7 @@
 
 | # | 任务 | 来源章节 | 规模 | 状态 |
 |---|---|---|---|---|
-| T01 | 锁死 MCP 桥（鉴权 + 写门控） | improvement-plan §5 D1 | S | ⬜ |
+| T01 | 锁死 MCP 桥（鉴权 + 写门控） | improvement-plan §5 D1 | S | ✅ a0849b48 |
 | T02 | 查询真实服务端取消 | improvement-plan §2 A1 | M | ⬜ |
 | T03 | SQL Server 连接池 | improvement-plan §2 A2 | M | ⬜ |
 | T04 | 网格保存先展示 SQL | improvement-plan §6 E1 | M | ⬜ |
@@ -69,16 +69,16 @@
 
 ## P0 —— 安全与正确性（最高提升）
 
-### T01 锁死 MCP 桥（鉴权 + 写门控） ⬜
+### T01 锁死 MCP 桥（鉴权 + 写门控） ✅ a0849b48
 
 - **来源** improvement-plan-2026-09.md §5 D1（Track D）· **规模** S
 - **内容** `/data/execute-query`（`mcp_bridge.rs:482-494`）当前无鉴权且忽略 `allow_writes`/`allow_dangerous`。加共享 token 校验（复用 `load_or_create_local_device_secret`，`storage.rs:476`），spawn npm MCP server 时传入；写操作用 `is_read_only_sql` 门控。
 - **验收**
-  - [ ] 新增测试：无 token / 错 token 的请求被拒绝
-  - [ ] 带 token 只读 SQL 正常返回
-  - [ ] 写 SQL 且 `allow_writes=false` 被拒、`=true` 放行；dangerous 同理受 `allow_dangerous` 门控
-  - [ ] npm MCP server 侧拿到 token 后端到端调用成功一次
-  - [ ] `cargo fmt --check && cargo test -p dbx-core`
+  - [x] 新增测试：无 token / 错 token 的请求被拒绝
+  - [x] 带 token 只读 SQL 正常返回
+  - [x] 写 SQL 且 `allow_writes=false` 被拒、`=true` 放行；dangerous 同理受 `allow_dangerous` 门控
+  - [x] npm MCP server 侧拿到 token 后端到端调用成功一次（node-core 集成测试覆盖 npm→桥 HTTP 全链路：token 头 + flags 转发 + 200 返回；桥→DB 段由 Rust socket→SQLite 测试覆盖）
+  - [x] `cargo fmt --check && cargo test -p dbx-core`（另：`cargo test -p dbx --lib` 42 过、node-core 45 过、mcp-server 17 过）
 
 ### T02 查询真实服务端取消 ⬜
 
