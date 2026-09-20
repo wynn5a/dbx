@@ -1,0 +1,482 @@
+# DBX 提升任务清单（tasks）
+
+> 依据：[optimization-plan.md](optimization-plan.md) + [improvement-plan-2026-09.md](improvement-plan-2026-09.md)
+> 来源说明：optimization-plan.md 的 18 项已全部完成、原待办条目已关闭，**无剩余任务**；本清单全部条目拆自 improvement-plan-2026-09.md §2–§6（Track A–E）。optimization-plan.md §落地流程约定 + improvement-plan-2026-09.md §7 作为每个 task 的提交与回归约定。
+> 排序规则（按提升程度）：
+> 1. **P0** —— 安全漏洞与数据/正确性风险（improvement-plan §1 "Top five" 的顺序）；
+> 2. **P1** —— 稳定性与延迟（用户可感知的"闪断/卡顿"）；
+> 3. **P2** —— 能力增强与打磨。
+> 同级内按用户可感知影响粗排，可按实际情况调换。
+> 规模沿用计划文档标注：S ≤ 1 天，M ≈ 1–3 天，L > 3 天。
+> 状态：⬜ 待办 / 🔄 进行中 / ✅ 完成（附提交 hash，样式对齐 optimization-plan.md）。
+
+## 拆分说明
+
+- 原文档一个编号 = 一个 Conventional Commit 的粒度基本合适，仅以下几处做了拆分以保证独立验收：C7 → 2 个（T33/T36）、E6 → 2 个（T34/T35）、E7 → 3 个（T23/T40/T41）、E9 → 3 个（T37/T38/T39）。
+- B6（结果集 IPC 重写）按原文档 §8 明确暂缓，见文末"暂缓/条件触发"。
+
+## 总览
+
+| # | 任务 | 来源章节 | 规模 | 状态 |
+|---|---|---|---|---|
+| T01 | 锁死 MCP 桥（鉴权 + 写门控） | improvement-plan §5 D1 | S | ⬜ |
+| T02 | 查询真实服务端取消 | improvement-plan §2 A1 | M | ⬜ |
+| T03 | SQL Server 连接池 | improvement-plan §2 A2 | M | ⬜ |
+| T04 | 网格保存先展示 SQL | improvement-plan §6 E1 | M | ⬜ |
+| T05 | 补全上下文剥离注释 | improvement-plan §4 C1 | M | ⬜ |
+| T06 | MySQL/SQL Server 标识符引号 | improvement-plan §4 C2 | S | ⬜ |
+| T07 | 前后端方言映射统一 | improvement-plan §4 C3 | M | ⬜ |
+| T08 | 一次 IPC 取全部 schema 表 | improvement-plan §3 B1 | M | ⬜ |
+| T09 | 补全缓存按超集缓存 | improvement-plan §3 B2 | M | ⬜ |
+| T10 | Redis 自动重连 | improvement-plan §2 A3 | S | ⬜ |
+| T11 | 健康扫描覆盖全部驱动 | improvement-plan §2 A4 | S | ⬜ |
+| T12 | Agent 工具查询可取消可见 | improvement-plan §5 D2 | M | ⬜ |
+| T13 | 启动并行加载 + 加载态 | improvement-plan §3 B3 | S | ⬜ |
+| T14 | DDL 后失效补全缓存 | improvement-plan §4 C4 | S | ⬜ |
+| T15 | 启动无暗色闪烁 | improvement-plan §6 E2 | S | ⬜ |
+| T16 | 全局错误处理器 | improvement-plan §6 E3 | S | ⬜ |
+| T17 | 可行动的连接错误提示 | improvement-plan §6 E4 | M | ⬜ |
+| T18 | 连接与 schema 加载可取消 | improvement-plan §6 E5 | M | ⬜ |
+| T19 | 高危 SQL 增加确认摩擦 | improvement-plan §5 D3 | S | ⬜ |
+| T20 | search_tables 工具 | improvement-plan §5 D4 | S | ⬜ |
+| T21 | Gemini/Ollama 工具调用 | improvement-plan §5 D5 | M | ⬜ |
+| T22 | 置信门控未知列诊断 | improvement-plan §4 C5 | L | ⬜ |
+| T23 | 网格 FK 点击跳转 | improvement-plan §6 E7-1 | M | ⬜ |
+| T24 | 方言函数目录（CH/DuckDB/Oracle） | improvement-plan §4 C6 | M | ⬜ |
+| T25 | Leaflet 按需加载 | improvement-plan §3 B5 | S | ⬜ |
+| T26 | PG JSON 列免 parse-再序列化 | improvement-plan §3 B4 | S | ⬜ |
+| T27 | SSH 隧道放弃时驱逐连接池 | improvement-plan §2 A5 | S | ⬜ |
+| T28 | 原生 DB socket TCP keepalive | improvement-plan §2 A6 | S | ⬜ |
+| T29 | idle_timeout 设置诚实化 | improvement-plan §2 A7 | S | ⬜ |
+| T30 | 展示 token 用量与成本 | improvement-plan §5 D7 | S | ⬜ |
+| T31 | AI 连接失败重试一次 | improvement-plan §5 D6 | S | ⬜ |
+| T32 | 聊天结果一键图表 | improvement-plan §5 D8 | S | ⬜ |
+| T33 | 关键字大小写跟随输入 | improvement-plan §4 C7-1 | S | ⬜ |
+| T34 | 标签页切换快捷键 | improvement-plan §6 E6-1 | S | ⬜ |
+| T35 | Format SQL 快捷键 | improvement-plan §6 E6-2 | S | ⬜ |
+| T36 | getSqlCompletionResultValidFor 落地 | improvement-plan §4 C7-2 | S | ⬜ |
+| T37 | prefers-reduced-motion 支持 | improvement-plan §6 E9-1 | S | ⬜ |
+| T38 | 启动阶段 performance.mark | improvement-plan §6 E9-2 | S | ⬜ |
+| T39 | QueryEditor 异步组件化 | improvement-plan §6 E9-3 | S | ⬜ |
+| T40 | 列固定 + 拖拽排序 | improvement-plan §6 E7-2 | M | ⬜ |
+| T41 | 侧栏拖表/列入编辑器 | improvement-plan §6 E7-3 | M | ⬜ |
+| T42 | 最终 SQL 结构化输出 | improvement-plan §5 D9 | M | ⬜ |
+| T43 | Agent loop 端到端测试 | improvement-plan §5 D10 | M | ⬜ |
+| T44 | 命令面板 | improvement-plan §6 E8 | L | ⬜ |
+| T45 | AST 驱动的引用提取 | improvement-plan §4 C8 | L | ⬜ |
+
+---
+
+## P0 —— 安全与正确性（最高提升）
+
+### T01 锁死 MCP 桥（鉴权 + 写门控） ⬜
+
+- **来源** improvement-plan-2026-09.md §5 D1（Track D）· **规模** S
+- **内容** `/data/execute-query`（`mcp_bridge.rs:482-494`）当前无鉴权且忽略 `allow_writes`/`allow_dangerous`。加共享 token 校验（复用 `load_or_create_local_device_secret`，`storage.rs:476`），spawn npm MCP server 时传入；写操作用 `is_read_only_sql` 门控。
+- **验收**
+  - [ ] 新增测试：无 token / 错 token 的请求被拒绝
+  - [ ] 带 token 只读 SQL 正常返回
+  - [ ] 写 SQL 且 `allow_writes=false` 被拒、`=true` 放行；dangerous 同理受 `allow_dangerous` 门控
+  - [ ] npm MCP server 侧拿到 token 后端到端调用成功一次
+  - [ ] `cargo fmt --check && cargo test -p dbx-core`
+
+### T02 查询真实服务端取消 ⬜
+
+- **来源** improvement-plan-2026-09.md §2 A1（Track A）· **规模** M
+- **内容** Cancel/超时目前只丢 Rust future（`query.rs:519-576`），语句仍在服务端跑。checkout 时捕获后端 pid/连接 id（PG 用 `cancel_token()` 免额外连接、MySQL `CONNECTION_ID()`、SQL Server `@@SPID`），存入 `RunningQueries`；cancel 与超时路径调用 `process.rs:121-125` 既有的 `pg_cancel_backend` / `KILL QUERY`。
+- **验收**
+  - [ ] env 门控 live-DB 集成测试：`pg_sleep(30)` 查询被取消后 `pg_stat_activity` 不再显示该查询
+  - [ ] MySQL（`KILL QUERY`）与 SQL Server（`@@SPID`）各一条同型验证
+  - [ ] 拿不到后端 id 时降级为现状（仅丢弃 future），不阻塞不报错
+  - [ ] DuckDB 既有中断路径（`query.rs:626-631`）不回退；全量回归通过
+
+### T03 SQL Server 连接池 ⬜
+
+- **来源** improvement-plan-2026-09.md §2 A2（Track A）· **规模** M
+- **内容** `connection.rs:51` 的 `PoolKind::SqlServer(Arc<Mutex<SqlServerClient>>)` 单 socket 单互斥锁，树/补全/所有标签页排在一条慢查询后面。改为 2–3 连接小池（semaphore，`QUERY_POOL_MAX_SIZE = 3` 对齐 PG/MySQL）；`check_conn_health`（`sqlserver.rs:21-39`）失败按 `mysql.rs:1448-1497` 模式透明重拨。
+- **验收**
+  - [ ] 并发测试：两条慢查询并行执行（原先串行）
+  - [ ] 断连后下一次查询透明恢复；健康检查失败触发重拨而非报错
+  - [ ] 一条慢查询不再阻塞树加载与补全（并发测试或手工佐证）
+  - [ ] 全量回归通过
+
+### T04 网格保存先展示 SQL ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E1（Track E）· **规模** M
+- **内容** `useDataGridEditor.ts:766-834` 直接执行准备好的 UPDATE/DELETE，唯一"预览"是 line 825 的 `console.info`。复用编辑器 danger-SQL 对话框展示 `stmts` / `rollbackStmts`，受既有确认设置门控。
+- **验收**
+  - [ ] 保存时弹窗列出将执行的每条语句与对应回滚语句；取消则不执行任何语句
+  - [ ] 多选/多行删除场景全部语句可见
+  - [ ] 关闭"保存前确认"设置后行为回到直接保存（无弹窗）
+  - [ ] `pnpm test && pnpm typecheck && pnpm lint` 通过
+
+### T05 补全上下文剥离注释 ⬜
+
+- **来源** improvement-plan-2026-09.md §4 C1（Track C）· **规模** M
+- **内容** `getSqlCompletionContext`（`sqlCompletion.ts:1350`）及所有 helper 只剥字符串字面量，不剥 `--` 与 `/* */`，被注释的 SQL 污染 `referencedTables` 与语句类型。入口加一次 `stripSqlComments()`，注释体替换为等长空格保持所有 offset 有效。
+- **验收**
+  - [ ] 新测试：光标在注释内返回中性上下文；注释之后的代码上下文正确；`$$...$$` 体不被误剥
+  - [ ] 被注释掉的表不再进入表引用/语句类型判断
+  - [ ] `packages/app-tests/sqlCompletion*.test.ts` 全过，补全性能回归测试不劣化
+
+### T06 MySQL/SQL Server 标识符引号 ⬜
+
+- **来源** improvement-plan-2026-09.md §4 C2（Track C）· **规模** S
+- **内容** `quoteSqlIdentifier`（`sqlCompletion.ts:2080`）对非 Postgres 一律不加引号。增加 MySQL 反引号与 SQL Server `[...]` 分支，配各对方言保留字集合。
+- **验收**
+  - [ ] 测试：MySQL 保留字/特殊字符标识符插入反引号；SQL Server 插入 `[...]`；PG 行为不变；普通标识符不加引号
+  - [ ] 补全插入的标识符在对应方言语法合法
+  - [ ] sqlCompletion 测试全过
+
+### T07 前后端方言映射统一 ⬜
+
+- **来源** improvement-plan-2026-09.md §4 C3（Track C）· **规模** M
+- **内容** `ContentArea.vue:181-186` 把 25+ DatabaseType 映成 `mysql | postgres | sqlserver`（默认 mysql），后端 `normalize_dialect`（`sql_analysis.rs:91-100`）分组不同。暴露或复制后端分组为单一共享映射，前端 union 扩为含 `oracle` / `generic`；DuckDB 专属关键字（`QueryEditor.vue:1947-1964`）改为仅 `databaseType === "duckdb"` 启用。
+- **验收**
+  - [ ] Redshift/GaussDB/openGauss 映射为 PG 族（与后端一致）；Oracle 走 oracle 方言
+  - [ ] MySQL 连接不出现 DuckDB 关键字，DuckDB 连接仍出现
+  - [ ] 前端映射 vs 后端分组的一致性单元测试
+  - [ ] `pnpm check` 通过
+
+---
+
+## P1 —— 稳定性与延迟
+
+### T08 一次 IPC 取全部 schema 表 ⬜
+
+- **来源** improvement-plan-2026-09.md §3 B1（Track B）· **规模** M
+- **内容** `connectionStore.ts:2277-2358` 的 `listCompletionTables` / `listCompletionObjects` 逐 schema 发 `listTables`（5 并发扇出）。新增接受 schema 列表的后端命令一次返回分组表（PG `table_schema = ANY($1)`），一次 checkout。
+- **验收**
+  - [ ] 多 schema 库加载补全元数据只产生 1 次 invoke（IPC 日志佐证）
+  - [ ] 返回结果与逐 schema 查询一致（对照测试）
+  - [ ] PG/MySQL/SQLite 至少各一条测试；全量回归通过
+
+### T09 补全缓存按超集缓存 ⬜
+
+- **来源** improvement-plan-2026-09.md §3 B2（Track B）· **规模** M
+- **内容** 缓存键含击键过滤（`connectionStore.ts:2269`），`u`/`us`/`use` 三条目三次往返，50 上限被击键冲刷。改为缓存无过滤 (schema, limit) 结果：未截断时客户端过滤排序，截断才回退服务端过滤。
+- **验收**
+  - [ ] 连续键入 `u`/`us`/`use`（未截断）只触发 1 次后端请求
+  - [ ] 客户端过滤的排序/前缀优先与原服务端过滤一致（对照测试）
+  - [ ] 缓存条目不再随击键增长；sqlCompletion/store 测试全过
+
+### T10 Redis 自动重连 ⬜
+
+- **来源** improvement-plan-2026-09.md §2 A3（Track A）· **规模** S
+- **内容** `redis_driver.rs:98` 包装的 `MultiplexedConnection` 永不重连。内层换 `redis::aio::ConnectionManager`（内置退避），Sentinel 同样处理；cluster 已自带重连保持现状。
+- **验收**
+  - [ ] 测试/手工：Redis 重启后下一命令自动成功，无需用户手动重连
+  - [ ] Sentinel 路径同样自动重连；cluster 行为不变
+  - [ ] 全量回归通过
+
+### T11 健康扫描覆盖全部驱动 ⬜
+
+- **来源** improvement-plan-2026-09.md §2 A4（Track A）· **规模** S
+- **内容** `refresh_connections`（`connection.rs:854-873`）只 ping MySQL/PG，其余走 `_ => Ok(())`。补 SQL Server（`check_conn_health`）与 Redis（`PING`）分支。
+- **验收**
+  - [ ] 单测覆盖新增分支；MySQL/PG 行为不变
+  - [ ] 断开的 SQL Server/Redis 连接在窗口聚焦触发刷新后显示离线
+  - [ ] 全量回归通过
+
+### T12 Agent 工具查询可取消可见 ⬜
+
+- **来源** improvement-plan-2026-09.md §5 D2（Track D）· **规模** M · **依赖** T02（复用其真实取消基础设施）
+- **内容** `agent_tools.rs:271,297,328` 传 `cancel_token = None` 且无 `execution_id`：Chat Cancel 只停流，SQL 跑满 30s。把循环的 cancelled `Notify` 接入 `QueryExecutionOptions` 并注册进 `RunningQueries`（对齐 `commands/query.rs:38-40`）。
+- **验收**
+  - [ ] Chat 取消后 agent 发起的 SQL 端到端停止（配合 T02 服务端取消），不再空跑到超时
+  - [ ] agent 查询出现在 RunningQueries 且可被取消
+  - [ ] 测试 + 全量回归通过
+
+### T13 启动并行加载 + 加载态 ⬜
+
+- **来源** improvement-plan-2026-09.md §3 B3（Track B）· **规模** S
+- **内容** `initFromDisk`（`connectionStore.ts:2872-2889`）串行 await 三个独立 IPC；`WelcomeScreen.vue:171` 在完成前显示"无连接"。改 `Promise.all`，加 `connectionsLoading` 标志让空态等待首载。
+- **验收**
+  - [ ] 启动 3 个调用并行发出，总耗时 ≈ 最慢项（IPC 时间线佐证）
+  - [ ] 加载期间显示加载态而非"无连接"；加载完成且确为空才显示空态
+  - [ ] 测试通过
+
+### T14 DDL 后失效补全缓存 ⬜
+
+- **来源** improvement-plan-2026-09.md §4 C4（Track C）· **规模** S
+- **内容** `invalidateCompletionCache`（`connectionStore.ts:796`）目前只在断连/更新时调用。编辑器成功执行 `CREATE|ALTER|DROP|TRUNCATE` 后，对该 connection + database 调用它。
+- **验收**
+  - [ ] 执行 CREATE TABLE 后新表立即出现在补全（无需重连/手动刷新）
+  - [ ] 纯 SELECT/DML 不触发缓存失效
+  - [ ] 测试通过
+
+### T15 启动无暗色闪烁 ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E2（Track E）· **规模** S
+- **内容** `index.html` 无主题引导，`applyTheme()` 在 `App.vue:940` onMounted 才跑。加 5 行内联脚本（读同一 localStorage key，首帧前设 root class），并给 `#root:empty` 加 `prefers-color-scheme: dark` 背景。
+- **验收**
+  - [ ] 暗色系统冷启动无白闪（首帧前 class 就位）；亮色/暗色/跟随系统三模式均正确
+  - [ ] localStorage 键与语义和 `applyTheme()` 一致（抽共享常量或注释锁定）
+  - [ ] 手工截图/录屏佐证 + `pnpm check`
+
+### T16 全局错误处理器 ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E3（Track E）· **规模** S
+- **内容** 全项目无 `app.config.errorHandler` / `onErrorCaptured`。在 `main.ts` 注册一个：写入 debug-log 缓冲 + toast 指向"导出调试日志"。
+- **验收**
+  - [ ] 组件抛错被捕获：出现 toast，堆栈可从导出的调试日志看到
+  - [ ] 不吞掉 Vue 默认告警链路（console 仍可见或按设计降级）
+  - [ ] 新增用例；既有 debugLog 测试不回退
+
+### T17 可行动的连接错误提示 ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E4（Track E）· **规模** M
+- **内容** `i18n/backend-errors.ts` 只映射 4 种安装器错误。增加跨驱动分类器：refused/timeout → host/port/VPN、auth 关键字 → 凭据、TLS → SSL 设置；原文兜底。
+- **验收**
+  - [ ] 每类至少一条 × 多驱动（PG/MySQL/SQL Server/Redis）样例文本的单测
+  - [ ] 无法分类的错误原样展示；新文案 i18n 就位
+  - [ ] `pnpm check` 通过
+
+### T18 连接与 schema 加载可取消 ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E5（Track E）· **规模** M
+- **内容** `connect()` 与树加载器只有 `withConnectionAttemptTimeout`。按 attempt 引入 abort/取消令牌，spinner 上加 Cancel 交互（对齐查询取消）。
+- **验收**
+  - [ ] 连接中点 Cancel：attempt 中止、UI 恢复、可立即重试
+  - [ ] 不产生半开连接或重复池条目（后端日志/状态佐证）
+  - [ ] 测试通过
+
+### T19 高危 SQL 增加确认摩擦 ⬜
+
+- **来源** improvement-plan-2026-09.md §5 D3（Track D）· **规模** S
+- **内容** Agent 确认卡（`AiAssistant.vue:1170-1178`）对 `dangerous` 与 `low_risk_write` 都是同样一键 Run。对 `dangerous` / `schema_change` 级要求勾选确认或输入目标表名。
+- **验收**
+  - [ ] dangerous/schema_change 未完成额外确认时 Run 不可用；完成后可用
+  - [ ] low_risk_write 与只读工具交互不变；`aiSqlExecutionPolicy` 分类测试不回退
+  - [ ] 测试通过
+
+### T20 search_tables 工具 ⬜
+
+- **来源** improvement-plan-2026-09.md §5 D4（Track D）· **规模** S
+- **内容** schema 上下文只是 listing 顺序前 50 张表（`ai.ts:375, 413-455`）+ truncated 标志。新增按表名/注释子串搜索的工具，agent 在数千表 schema 里可自助定位。
+- **验收**
+  - [ ] 测试：数千表 schema 下 agent 通过搜索定位目标表并继续查询
+  - [ ] 命中上限时返回 truncated 标记
+  - [ ] 工具注册与描述进入 agent 工具清单测试
+
+### T21 Gemini/Ollama 工具调用 ⬜
+
+- **来源** improvement-plan-2026-09.md §5 D5（Track D）· **规模** M
+- **内容** `provider_supports_function_calling`（`ai.rs:1146-1156`）对两者硬编码 `false`；`ToolDefinition::to_gemini_tool()`（`agent_events.rs:125`）是死代码。实现 Gemini `functionCall`/`functionResponse` 轮次；Ollama 按模型 opt-in。
+- **验收**
+  - [ ] mock SSE 多轮工具交换测试通过（Gemini provider）
+  - [ ] 不支持工具的 Ollama 模型行为不变；opt-in 模型走工具循环
+  - [ ] 全量回归通过
+
+### T22 置信门控未知列诊断 ⬜
+
+- **来源** improvement-plan-2026-09.md §4 C5（Track C）· **规模** L
+- **内容** unknown-column 诊断被有意禁用（`QueryEditor.vue:818-822`，schema 缓存不全防误报）。仅当表可无歧义解析且全列已加载时启用，复用 `sql_analysis.rs` 的 spans。
+- **验收**
+  - [ ] 明确拼错的列名被标出
+  - [ ] 歧义表名/部分缓存场景零误报（测试锁定）
+  - [ ] 遵循既有 500ms 防抖 + run-id 守卫模式；`pnpm check` 通过
+
+---
+
+## P2 —— 能力增强与打磨
+
+### T23 网格 FK 点击跳转 ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E7 第 1 项（Track E）· **规模** M
+- **内容** FK 元数据已取（`DataGrid.vue:5571`），`useNavigationTargets.ts:18` 已接受 `whereInput`，只差一个 click handler。
+- **验收**
+  - [ ] 点击 FK 单元格跳到目标表并定位到对应行
+  - [ ] 无 FK 元数据的列不可点、无误导
+  - [ ] 测试 + 手工验证
+
+### T24 方言函数目录（ClickHouse/DuckDB/Oracle） ⬜
+
+- **来源** improvement-plan-2026-09.md §4 C6（Track C，计划指定的优先三方言）· **规模** M
+- **内容** `DATABASE_FUNCTION_SIGNATURES`（`sqlCompletion.ts:848`）只覆盖 5/25+ 引擎。先补 ClickHouse、DuckDB、Oracle；存储过程参数提示（`information_schema.parameters`/`pg_proc`）留待后续。
+- **验收**
+  - [ ] 三方言函数名+签名补全生效；其他方言清单不变
+  - [ ] 测试通过
+
+### T25 Leaflet 按需加载 ⬜
+
+- **来源** improvement-plan-2026-09.md §3 B5（Track B）· **规模** S
+- **内容** `DataGrid.vue:133` 静态 import `geometryMapPreview` → 静态引入 Leaflet 对话框。改为 `execute()` 内动态 import。
+- **验收**
+  - [ ] 初始 chunk 不含 Leaflet（构建产物体积对比，数字记录）
+  - [ ] 有几何列时地图预览功能正常
+  - [ ] 构建 + 手工验证
+
+### T26 PG JSON 列免 parse-再序列化 ⬜
+
+- **来源** improvement-plan-2026-09.md §3 B4（Track B）· **规模** S
+- **内容** `postgres.rs:709-716` 读成 `serde_json::Value` 再 `.to_string()`。先按 `String` 读，`Value` 仅作回退。
+- **验收**
+  - [ ] json/jsonb 读取路径无 parse→serialize 往返（代码断言或微基准对照）
+  - [ ] 输出与原先逐字节一致（对照测试）
+
+### T27 SSH 隧道放弃时驱逐连接池 ⬜
+
+- **来源** improvement-plan-2026-09.md §2 A5（Track A）· **规模** S
+- **内容** `ssh_tunnel.rs:223-228` 10 次尝试后只记日志返回，上层 DB 池仍缓存并持续报 "connection refused"。放弃时调 `discard_pool` 并发一次事件，前端提示隧道断开。
+- **验收**
+  - [ ] 放弃后旧池不再缓存；后续操作得到明确错误而非 refused
+  - [ ] 前端收到事件并展示提示；测试通过
+
+### T28 原生 DB socket TCP keepalive ⬜
+
+- **来源** improvement-plan-2026-09.md §2 A6（Track A）· **规模** S
+- **内容** 目前只有 SSH 会话有 keepalive（`ssh_tunnel.rs:51`）。PG/MySQL/SQL Server 原生连接在 connect 时设 `SO_KEEPALIVE`。
+- **验收**
+  - [ ] 三驱动连接均带 keepalive 选项（代码/单测断言）
+  - [ ] 半开连接（手工断网）不挂死，能被探测或报错恢复
+
+### T29 idle_timeout 设置诚实化 ⬜
+
+- **来源** improvement-plan-2026-09.md §2 A7（Track A）· **规模** S
+- **内容** `idle_timeout_secs` 只到 Mongo（`connection.rs:451`）；PG（`postgres.rs:1119`）与 MySQL（`mysql.rs:371` 硬编码 300s）忽略。按原文档"懒方案"：对不生效的引擎隐藏该控件。
+- **验收**
+  - [ ] PG/MySQL 连接表单不再出现可调但无效的 idle_timeout 控件
+  - [ ] Mongo 行为不变；i18n 文案与测试就位
+
+### T30 展示 token 用量与成本 ⬜
+
+- **来源** improvement-plan-2026-09.md §5 D7（Track D）· **规模** S
+- **内容** `AgentEvent::AgentEnd` 带真实 usage（`agent_loop.rs:244`），前端丢弃（`AiAssistant.vue:795` `case "agent_end": break`）。持久化到消息并渲染尾部，可选静态价格表算成本。
+- **验收**
+  - [ ] 回答尾部显示 token 用量；历史消息中保留
+  - [ ] 无 usage 的 provider 显示为空不报错；测试通过
+
+### T31 AI 连接失败重试一次 ⬜
+
+- **来源** improvement-plan-2026-09.md §5 D6（Track D）· **规模** S
+- **内容** `ai.rs` / `agent_loop.rs` 零重试。初始请求对 429 / 5xx / 连接错误退避重试一次，流式中途绝不重试。
+- **验收**
+  - [ ] 单测：mock 首响应 429/5xx → 重试成功；流中断不重试
+  - [ ] 全量回归通过
+
+### T32 聊天结果一键图表 ⬜
+
+- **来源** improvement-plan-2026-09.md §5 D8（Track D）· **规模** S
+- **内容** `QueryChart.vue` 已存在，无入口把工具结果接进去。在结果卡加一个"生成图表"动作，不写新图表代码。
+- **验收**
+  - [ ] 查询结果卡可打开图表并正确渲染
+  - [ ] 无新增图表组件/依赖；手工验证
+
+### T33 关键字大小写跟随输入 ⬜
+
+- **来源** improvement-plan-2026-09.md §4 C7 第 1 项（Track C）· **规模** S
+- **内容** 补全关键字硬编码大写。改为跟随输入前缀大小写（或加设置项）。
+- **验收**
+  - [ ] 小写前缀得到小写补全（或设置生效并有默认值）
+  - [ ] 测试通过
+
+### T34 标签页切换快捷键 ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E6 第 1 项（Track E）· **规模** S
+- **内容** `shortcutRegistry.ts` 缺 next/prev tab 与 `Cmd+1-9`。注册进 registry。
+- **验收**
+  - [ ] 快捷键生效且在快捷键面板可见
+  - [ ] 与既有绑定无冲突（清单断言/测试）
+
+### T35 Format SQL 快捷键 ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E6 第 2 项（Track E）· **规模** S
+- **内容** `formatActiveSql` 仅工具栏可达。注册快捷键。
+- **验收**
+  - [ ] 编辑器内快捷键触发格式化；registry 可见；测试通过
+
+### T36 getSqlCompletionResultValidFor 落地 ⬜
+
+- **来源** improvement-plan-2026-09.md §4 C7 第 2 项（Track C）· **规模** S
+- **内容** `getSqlCompletionResultValidFor`（`sqlCompletion.ts:1249`）是返回 `undefined` 的 stub。实现前缀 regex，或以结论性注释说明为何不需要。
+- **验收**
+  - [ ] 二选一落地：有实现 + 测试，或有写明理由的注释
+  - [ ] 相应行为有测试锁定
+
+### T37 prefers-reduced-motion 支持 ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E9 第 1 项（Track E）· **规模** S
+- **内容** `styles/` 下该 media query 零命中。全局支持减弱动态效果。
+- **验收**
+  - [ ] 系统开启后关键过渡/动画禁用（CSS 清单覆盖主要动效）
+  - [ ] 手工验证 + `pnpm check`
+
+### T38 启动阶段 performance.mark ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E9 第 2 项（Track E）· **规模** S
+- **内容** 现状是散落的 `console.log(performance.now())`。启动各阶段打 `performance.mark` 并写入 debug log。
+- **验收**
+  - [ ] 导出的调试日志含各启动阶段耗时标记
+  - [ ] 无残留 ad-hoc console 计时
+
+### T39 QueryEditor 异步组件化 ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E9 第 3 项（Track E）· **规模** S
+- **内容** CodeMirror 经 `App.vue → ContentArea.vue → QueryEditor.vue:17` 启动即加载。`QueryEditor` 包 `defineAsyncComponent`（对齐 DataGrid 模式）。
+- **验收**
+  - [ ] 纯浏览会话首屏 chunk 不含 CodeMirror（构建产物对比记录）
+  - [ ] 编辑器打开与功能不回退
+
+### T40 列固定 + 拖拽排序 ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E7 第 2 项（Track E）· **规模** M
+- **内容** `useDataGridColumnResize` 只管 resize。增加列 pin/freeze 与拖拽重排。
+- **验收**
+  - [ ] 列可固定与拖拽排序；横向大范围滚动下固定列不漂移
+  - [ ] 布局随标签页持久化；测试通过
+
+### T41 侧栏拖表/列入编辑器 ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E7 第 3 项（Track E）· **规模** M
+- **内容** `sidebar/` 无任何 `dragstart`。实现拖表名/列名入编辑器插入（按方言引号规则，与 T06 一致）。
+- **验收**
+  - [ ] 拖表/列到编辑器光标处插入，引号规则与补全一致
+  - [ ] 不破坏现有拖放与编辑行为；测试通过
+
+### T42 最终 SQL 结构化输出 ⬜
+
+- **来源** improvement-plan-2026-09.md §5 D9（Track D）· **规模** M
+- **内容** 最终 SQL 靠提示词约定"首个 ```sql 块"（`ai.ts:278`）+ fence 扫描解析。在支持的 provider 上改 JSON schema / 工具形态结构化输出；保留 fence 回退。
+- **验收**
+  - [ ] 支持 provider 走结构化输出（mock 测试）
+  - [ ] 不支持 provider 回退路径不回退；测试通过
+
+### T43 Agent loop 端到端测试 ⬜
+
+- **来源** improvement-plan-2026-09.md §5 D10（Track D）· **规模** M
+- **内容** 单测只覆盖 helper，没有跨多轮工具交换驱动 `run_agent_loop` 的测试。加一个用微型 hyper 测试服务器（hyper 已传递依赖则零新增 crate，否则 wiremock）。
+- **验收**
+  - [ ] 测试覆盖至少两轮工具调用 + 最终回答
+  - [ ] 无新增重量级依赖（如新增需记录理由）；CI 内通过
+
+### T44 命令面板 ⬜
+
+- **来源** improvement-plan-2026-09.md §6 E8（Track E）· **规模** L · **依赖** T34/T35（动作注册表就位后建设）
+- **内容** 全局命令面板：快捷键唤起，注册 transfer / diff / compare / driver store / SQL library 等动作，可搜索执行。
+- **验收**
+  - [ ] 快捷键唤起、键入过滤、回车执行
+  - [ ] 动作注册表可扩展（新动作一行注册）；测试通过
+
+### T45 AST 驱动的引用提取 ⬜
+
+- **来源** improvement-plan-2026-09.md §4 C8（Track C）· **规模** L
+- **内容** 用既有 Rust `analyze_sql_references`（异步 + 按语句文本缓存）替换 `extractReferencedTables` / `extractCteDefinitions` / `extractSubqueryReferences`；正则仅保留"当前关键字上下文"判断。
+- **验收**
+  - [ ] 既有补全回归全过；新增正则易错边界用例（嵌套子查询、注释内、`$$` 体）对比通过
+  - [ ] 性能不劣化（既有 2500 表性能测试）
+  - [ ] 双解析器重复逻辑删除
+
+---
+
+## 暂缓 / 条件触发
+
+- **结果集 IPC 路径重写**（improvement-plan-2026-09.md §3 B6，L）：分页链路已通。仅当 T08–T13（B1–B5）落地后 profiling 仍显示首页卡顿，才用 `tauri::ipc::Channel` 立项。
+- Track A 各任务的 live-DB 集成测试统一走 env 门控特性开关（improvement-plan §7 约定）。
+
+## 执行约定（每个 task 通用）
+
+1. 每 task 独立提交，Conventional Commits（`fix(...)`/`feat(...)`/`perf(...)`），提交信息含问题、修复、行为契约说明——对齐 optimization-plan.md §落地流程约定。
+2. 回归门禁：Rust `cargo fmt --check && cargo test -p dbx-core`；前端 `pnpm test && pnpm typecheck && pnpm lint`（`pnpm check`）。
+3. Track C 任务随提交更新 `packages/app-tests/sqlCompletion*.test.ts`；Track A 任务加 env 门控 live-DB 测试（improvement-plan-2026-09.md §7）。
+4. 完成后推送 `app-only` 分支，并更新本清单状态（⬜→✅ + 提交 hash）。

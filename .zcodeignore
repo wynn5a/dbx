@@ -1,0 +1,89 @@
+# Dependencies
+node_modules/
+.claude/
+.codex/
+.superpowers/
+.trellis/
+.worktrees/
+openspec/
+.mcp.json
+AGENTS.md
+
+# Build output
+dist/
+coverage/
+/target/
+plugins/jdbc/target/
+plugins/jdbc/dependency-reduced-pom.xml
+plugins/jdbc/lib/*.jar
+plugins/jdbc/dist/
+src-tauri/*.dylib
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# GitHub (keep workflows)
+.github/*
+!.github/workflows/
+!.github/scripts/
+!.github/ISSUE_TEMPLATE/
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Temp
+tmp/
+wynn5a-*.md
+
+# Logs
+*.log
+
+# Agent JDBC driver JARs
+agents/*/libs/*.jar
+
+# Generated changelog data
+releases-*.json
+
+test.pdb
+portable/
+DBX_*_x64-portable.zip
+
+# ===== ↑ 以上同步自 .gitignore（「从 .gitignore 同步」只重写以上部分）=====
+.git/
+.hg/
+.svn/
+bower_components/
+jspm_packages/
+__pycache__/
+site-packages/
+venv/
+htmlcov/
+lcov-report/
+cmakefiles/
+cmake-build-*/
+bazel-*/
+pods/
+deriveddata/
+storybook-static/
+playwright-report/
+test-results/
+allure-results/
+allure-report/
+cdk.out/
+*.egg-info/
+*.dist-info/
+eggs/
+pip-wheel-metadata/
+wheels/
+# ----- ↑ 以上为 ZCode 默认排除规则（自定义规则请写在本行下方，不会被同步/恢复改动）-----
+# 自定义规则写在下方（本行提示可删除）
