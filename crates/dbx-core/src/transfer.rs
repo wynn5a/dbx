@@ -1804,14 +1804,14 @@ pub async fn execute_on_pool_with_max_rows(
             // abandoned-wire flag is not expected here; the pool stays in
             // place (dropping it mid-transfer would break the caller's cached
             // pool handle).
-            db::mysql::execute_query_with_max_rows(&p, sql, bare, max_rows, Default::default())
+            db::mysql::execute_query_with_max_rows(&p, sql, bare, max_rows, Default::default(), &Default::default())
                 .await
                 .map(|(result, _)| result)
         }
         PoolKind::Postgres(p) => {
             let p = p.clone();
             drop(connections);
-            db::postgres::execute_query_with_max_rows(&p, sql, max_rows).await
+            db::postgres::execute_query_with_max_rows(&p, sql, max_rows, &Default::default()).await
         }
         PoolKind::Sqlite(p) => {
             let p = p.clone();
@@ -1831,7 +1831,9 @@ pub async fn execute_on_pool_with_max_rows(
             // Transfer batches read well under the row limit, so the abandoned-
             // wire flag is not expected here; the pool stays in place (dropping
             // it mid-transfer would break the caller's cached pool handle).
-            db::sqlserver::execute_query_with_max_rows(&mut client, sql, max_rows).await.map(|(result, _)| result)
+            db::sqlserver::execute_query_with_max_rows(&mut client, sql, max_rows, &Default::default())
+                .await
+                .map(|(result, _)| result)
         }
         PoolKind::Agent(client) => {
             let client = client.clone();

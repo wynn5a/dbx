@@ -54,6 +54,7 @@ pub async fn execute_query(
             client_session_id,
             timeout_secs,
             execution_id: execution_id.filter(|id| !id.trim().is_empty()),
+            cancel_route: None,
         },
     )
     .await;
@@ -120,6 +121,7 @@ pub async fn execute_multi(
             client_session_id,
             timeout_secs,
             execution_id: execution_id.filter(|id| !id.trim().is_empty()),
+            cancel_route: None,
         },
     )
     .await;
@@ -144,7 +146,10 @@ pub async fn execute_multi(
 
 #[tauri::command]
 pub async fn cancel_query(state: State<'_, Arc<AppState>>, execution_id: String) -> Result<bool, String> {
-    Ok(state.running_queries.cancel(&execution_id))
+    // Flips the token (the Rust future returns promptly) and fires the
+    // server-side cancel captured at checkout, so the statement actually stops
+    // on the database instead of running to completion in the background.
+    Ok(dbx_core::process::cancel_running_query(&state, &execution_id).await)
 }
 
 #[tauri::command]

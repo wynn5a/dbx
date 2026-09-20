@@ -62,6 +62,10 @@ pub struct QueryExecutionOptions {
     /// `Some(0)` disables the timeout entirely.
     pub timeout_secs: Option<u64>,
     pub execution_id: Option<String>,
+    /// Routing info that lets a cancelled or timed-out query be stopped on the
+    /// server (`KILL` from a second session). Set by the query entry points;
+    /// `None` degrades cancellation to dropping the local future only.
+    pub cancel_route: Option<crate::query_cancel::ServerCancelRoute>,
 }
 
 pub(crate) fn query_result_row_limit(max_rows: Option<usize>) -> usize {
@@ -595,6 +599,12 @@ pub async fn do_execute(
     options: QueryExecutionOptions,
 ) -> Result<db::QueryResult, String> {
     let query_timeout = resolve_query_timeout(options.timeout_secs);
+    let execution_id_for_cancel = options.execution_id.clone();
+    let server_cancel_registrar = crate::query_cancel::ServerCancelRegistrar::new(
+        options.execution_id.as_deref(),
+        &state.running_queries,
+        options.cancel_route.clone(),
+    );
     let duckdb_attached_names = state
         .configs
         .read()
@@ -619,6 +629,12 @@ pub async fn do_execute(
     // (ClickHouse/Elasticsearch) and self-recycling native pools (MySQL/Postgres)
     // recover on their own and are left in place.
     let discard_pool_on_timeout = pool_discards_on_query_timeout(pool);
+    // Postgres SELECTs run inside BEGIN…DECLARE…FETCH on a pooled connection.
+    // Once the statement is stopped server-side (cancel or timeout firing the
+    // cancel token), that connection is left inside an aborted transaction,
+    // and fast recycling would hand it straight to the next query. Discard the
+    // pool so the next run starts on a clean connection.
+    let pool_discards_after_server_side_stop = matches!(pool, PoolKind::Postgres(_));
 
     let result = match pool {
         PoolKind::DuckDb(con) => {
@@ -650,8 +666,15 @@ pub async fn do_execute(
             drop(connections);
             let mut abandoned_wire = false;
             let outcome = wait_for_query_opt(cancel_token, query_timeout, async {
-                let (result, abandoned) =
-                    db::mysql::execute_query_with_max_rows(&p, sql, bare, max_rows, mysql_dialect).await?;
+                let (result, abandoned) = db::mysql::execute_query_with_max_rows(
+                    &p,
+                    sql,
+                    bare,
+                    max_rows,
+                    mysql_dialect,
+                    &server_cancel_registrar,
+                )
+                .await?;
                 abandoned_wire = abandoned;
                 Ok(result)
             })
@@ -683,14 +706,20 @@ pub async fn do_execute(
                 wait_for_query_opt(
                     cancel_token,
                     query_timeout,
-                    db::postgres::execute_query_with_schema_and_max_rows(&p, &schema, sql, max_rows),
+                    db::postgres::execute_query_with_schema_and_max_rows(
+                        &p,
+                        &schema,
+                        sql,
+                        max_rows,
+                        &server_cancel_registrar,
+                    ),
                 )
                 .await
             } else {
                 wait_for_query_opt(
                     cancel_token,
                     query_timeout,
-                    db::postgres::execute_query_with_max_rows(&p, sql, max_rows),
+                    db::postgres::execute_query_with_max_rows(&p, sql, max_rows, &server_cancel_registrar),
                 )
                 .await
             }
@@ -741,7 +770,8 @@ pub async fn do_execute(
             let mut abandoned_wire = false;
             let outcome = wait_for_query_opt(cancel_token, query_timeout, async {
                 let (result, abandoned) =
-                    db::sqlserver::execute_query_with_max_rows(&mut client, sql, max_rows).await?;
+                    db::sqlserver::execute_query_with_max_rows(&mut client, sql, max_rows, &server_cancel_registrar)
+                        .await?;
                 abandoned_wire = abandoned;
                 Ok(result)
             })
@@ -816,14 +846,35 @@ pub async fn do_execute(
         }
     };
 
-    if discard_pool_on_timeout {
-        if let Err(e) = &result {
-            if is_query_execution_timeout(e) {
+    if let Err(e) = &result {
+        let timed_out = is_query_execution_timeout(e);
+        let canceled = e == &canceled_error();
+
+        if timed_out {
+            // The local future is gone, but the statement may still be running
+            // server-side. Stop it with the backend id captured at checkout
+            // (best-effort; no-ops when nothing was registered).
+            if let Some(context) =
+                execution_id_for_cancel.as_deref().and_then(|id| state.running_queries.peek_server_cancel(id))
+            {
+                log::warn!("[query][do_execute] firing server-side cancel after execution timeout for '{pool_key}'");
+                crate::process::fire_server_cancel(state, &context).await;
+            }
+            if discard_pool_on_timeout {
                 log::warn!(
                     "[query][do_execute] discarding protocol-stateful pool '{pool_key}' after query-execution timeout"
                 );
                 state.discard_pool(pool_key).await;
             }
+        }
+        if (timed_out || canceled) && pool_discards_after_server_side_stop {
+            // The server-side stop aborted the cursor's transaction; the pool
+            // connection must not be reused in that state.
+            log::warn!(
+                "[query][do_execute] discarding Postgres pool '{pool_key}' after statement was {}",
+                if canceled { "cancelled" } else { "stopped on timeout" }
+            );
+            state.discard_pool(pool_key).await;
         }
     }
 
@@ -901,6 +952,15 @@ pub async fn execute_sql_statement_with_options(
     if connection_is_mongodb(state, connection_id).await {
         return Err("Use MongoDB-specific commands".to_string());
     }
+
+    // Give the cancellation/timeout paths a route for firing a server-side
+    // KILL from a second session (PostgreSQL needs no route; MySQL/SQL Server
+    // kill statements run on the process helper pool for this connection).
+    let mut options = options;
+    options.cancel_route = Some(crate::query_cancel::ServerCancelRoute {
+        connection_id: connection_id.to_string(),
+        database: database.to_string(),
+    });
 
     let trace_id = options.execution_id.clone().unwrap_or_else(|| "no-execution-id".to_string());
 
@@ -1069,7 +1129,15 @@ pub async fn execute_multi_core_with_options(
     };
 
     if is_sqlserver {
-        return execute_multi_sqlserver(state, &pool_key, sql, cancel_token, options).await;
+        let server_cancel_registrar = crate::query_cancel::ServerCancelRegistrar::new(
+            options.execution_id.as_deref(),
+            &state.running_queries,
+            Some(crate::query_cancel::ServerCancelRoute {
+                connection_id: connection_id.to_string(),
+                database: database.to_string(),
+            }),
+        );
+        return execute_multi_sqlserver(state, &pool_key, sql, cancel_token, options, &server_cancel_registrar).await;
     }
 
     let db_type = connection_database_type(state, connection_id).await;
@@ -1103,7 +1171,24 @@ pub async fn execute_multi_core_with_options(
 
     if let Some((pool, mode)) = mysql_pool {
         let mysql_dialect = connection_mysql_query_dialect(state, connection_id).await;
-        return execute_multi_mysql(&pool, mode, mysql_dialect, &statements, cancel_token, options).await;
+        let server_cancel_registrar = crate::query_cancel::ServerCancelRegistrar::new(
+            options.execution_id.as_deref(),
+            &state.running_queries,
+            Some(crate::query_cancel::ServerCancelRoute {
+                connection_id: connection_id.to_string(),
+                database: database.to_string(),
+            }),
+        );
+        return execute_multi_mysql(
+            &pool,
+            mode,
+            mysql_dialect,
+            &statements,
+            cancel_token,
+            options,
+            &server_cancel_registrar,
+        )
+        .await;
     }
 
     let mut results = Vec::with_capacity(statements.len());
@@ -1140,6 +1225,7 @@ async fn execute_multi_mysql(
     statements: &[String],
     cancel_token: Option<CancellationToken>,
     options: QueryExecutionOptions,
+    server_cancel_registrar: &crate::query_cancel::ServerCancelRegistrar,
 ) -> Result<Vec<db::QueryResult>, String> {
     let query_timeout = resolve_query_timeout(options.timeout_secs);
     let bare = mode == crate::connection::MysqlMode::Bare;
@@ -1148,6 +1234,9 @@ async fn execute_multi_mysql(
         Ok(conn) => conn,
         Err(err) => return Ok(vec![error_query_result(err)]),
     };
+    // All statements run on this one session, so one registration covers the
+    // whole batch; KILL QUERY stops whichever statement is active at cancel time.
+    server_cancel_registrar.register_mysql_kill(conn.id());
     let mut results = Vec::with_capacity(statements.len());
 
     for stmt in statements {
@@ -1190,11 +1279,24 @@ async fn execute_multi_sqlserver(
     sql: &str,
     cancel_token: Option<CancellationToken>,
     options: QueryExecutionOptions,
+    server_cancel_registrar: &crate::query_cancel::ServerCancelRegistrar,
 ) -> Result<Vec<db::QueryResult>, String> {
     let batches = split_sql_batches(sql);
     let mut all_results = Vec::new();
     let mut batches_abandoned_wire = false;
     let max_rows = options.max_rows;
+
+    // The script's batches all share one session; capture its SPID once up
+    // front (one cheap round trip) so a cancel/timeout can KILL it server-side.
+    {
+        let connections = state.connections.read().await;
+        if let Some(PoolKind::SqlServer(client)) = connections.get(pool_key) {
+            let mut client = client.lock().await;
+            if let Some(spid) = db::sqlserver::current_spid(&mut client).await {
+                server_cancel_registrar.register_sqlserver_kill(&spid);
+            }
+        }
+    }
 
     for batch in &batches {
         if is_canceled(&cancel_token) {

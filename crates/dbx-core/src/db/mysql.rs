@@ -1603,7 +1603,9 @@ async fn execute_result_set_with_prepared_protocol_on_conn(
 }
 
 pub async fn execute_query(pool: &MySqlPool, sql: &str, bare: bool) -> Result<QueryResult, String> {
-    execute_query_with_max_rows(pool, sql, bare, None, MySqlQueryDialect::default()).await.map(|(result, _)| result)
+    execute_query_with_max_rows(pool, sql, bare, None, MySqlQueryDialect::default(), &Default::default())
+        .await
+        .map(|(result, _)| result)
 }
 
 /// Executes a query and reports, alongside the result, whether the row limit
@@ -1616,10 +1618,15 @@ pub async fn execute_query_with_max_rows(
     bare: bool,
     max_rows: Option<usize>,
     dialect: MySqlQueryDialect,
+    server_cancel_registrar: &crate::query_cancel::ServerCancelRegistrar,
 ) -> Result<(QueryResult, bool), String> {
     log::debug!("[mysql][exec] phase=acquire start sql={}", sql_log_preview(sql));
     let acquire_start = Instant::now();
     let mut conn = get_conn_with_health_check(pool).await?;
+    // Publish the server-side connection id so a cancel/timeout can KILL QUERY
+    // the statement from a second session (see crate::process). `id()` reads
+    // the handshake-assigned thread id — no extra round trip.
+    server_cancel_registrar.register_mysql_kill(conn.id());
     let acquire_ms = acquire_start.elapsed().as_millis();
 
     log::debug!("[mysql][exec] phase=execute start (acquire took {acquire_ms}ms)");

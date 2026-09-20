@@ -12,15 +12,23 @@
 //! `CONNECTION_ID()` / `@@SPID`).
 
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 use crate::connection::AppState;
 use crate::models::connection::DatabaseType;
+use crate::query_cancel::{KillEngine, ServerCancelBackend, ServerCancelContext};
 use crate::types::QueryResult;
 
 /// Reserved `client_session_id` for the shared helper pool used to run the
 /// listing/kill statements. Distinct from any editor tab's session id so it is
 /// reused across calls and never collides with a user query pool.
 const PROC_ADMIN_SESSION: &str = "__dbx_proc_admin";
+
+/// Upper bound for one server-side cancel attempt (the PostgreSQL cancel
+/// control connection, or a kill statement on the helper pool). A cancel or
+/// timeout must return promptly even when the server is unresponsive — the
+/// query is being abandoned either way.
+const SERVER_CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
 
 const UNSUPPORTED_ERR: &str = "Process management is only supported for PostgreSQL, MySQL and SQL Server connections.";
 
@@ -141,6 +149,58 @@ pub async fn kill_process(
         }
     }
     Ok(true)
+}
+
+/// Cancel a registered query end to end: flip the cancellation token so the
+/// Rust future returns promptly, and stop the statement on the server so it
+/// stops burning server resources. The server-side stop is best-effort; the
+/// return value only reflects the token cancellation.
+pub async fn cancel_running_query(state: &AppState, execution_id: &str) -> bool {
+    let canceled = state.running_queries.cancel(execution_id);
+    if let Some(context) = state.running_queries.take_server_cancel(execution_id) {
+        fire_server_cancel(state, &context).await;
+    }
+    canceled
+}
+
+/// Fire the server-side cancel captured at pool checkout. Best-effort by
+/// design: every failure mode is logged and swallowed, because the query is
+/// already being abandoned client-side and the caller's latency matters more
+/// than the kill's fate.
+pub async fn fire_server_cancel(state: &AppState, context: &ServerCancelContext) {
+    match &context.backend {
+        ServerCancelBackend::Postgres(token) => {
+            match tokio::time::timeout(SERVER_CANCEL_TIMEOUT, token.cancel_query(tokio_postgres::NoTls)).await {
+                Ok(Ok(())) => log::info!("[query][server-cancel] PostgreSQL cancel request delivered"),
+                Ok(Err(e)) => log::warn!("[query][server-cancel] PostgreSQL cancel request failed: {e}"),
+                Err(_) => log::warn!("[query][server-cancel] PostgreSQL cancel request timed out"),
+            }
+        }
+        ServerCancelBackend::Kill { engine, pid } => {
+            let Some(route) = context.route.as_ref() else {
+                log::warn!("[query][server-cancel] no route captured for {engine:?} kill of pid {pid}; skipping");
+                return;
+            };
+            // SQL Server has no query-only cancel: KILL terminates the session,
+            // and the pool is rebuilt on the next command after the drop.
+            let mode = match engine {
+                KillEngine::Mysql => KillMode::Cancel,
+                KillEngine::SqlServer => KillMode::Terminate,
+            };
+            // Box::pin breaks the async-fn recursion cycle: kill_process routes
+            // through the query executor, whose timeout path can call back into
+            // fire_server_cancel (the helper query carries no execution id, so
+            // the inner call never actually fires — but the future must be
+            // finite regardless).
+            let kill = Box::pin(kill_process(state, &route.connection_id, &route.database, pid, mode));
+            match tokio::time::timeout(SERVER_CANCEL_TIMEOUT, kill).await {
+                Ok(Ok(true)) => log::info!("[query][server-cancel] {engine:?} kill of pid {pid} sent"),
+                Ok(Ok(false)) => log::warn!("[query][server-cancel] {engine:?} kill of pid {pid} did not take effect"),
+                Ok(Err(e)) => log::warn!("[query][server-cancel] {engine:?} kill of pid {pid} failed: {e}"),
+                Err(_) => log::warn!("[query][server-cancel] {engine:?} kill of pid {pid} timed out"),
+            }
+        }
+    }
 }
 
 async fn resolve_db_type(state: &AppState, connection_id: &str) -> Result<DatabaseType, String> {

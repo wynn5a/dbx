@@ -1050,8 +1050,10 @@ async fn execute_select_query(
     sql: &str,
     start: Instant,
     row_limit: usize,
+    server_cancel_registrar: &crate::query_cancel::ServerCancelRegistrar,
 ) -> Result<QueryResult, String> {
     let client = pool.get().await.map_err(|e| e.to_string())?;
+    register_server_cancel(server_cancel_registrar, &client);
     match run_select(&client, schema, sql, start, row_limit).await {
         Ok(result) => Ok(result),
         Err(err) if select_error_reconnect_safe(&err) => {
@@ -1062,10 +1064,21 @@ async fn execute_select_query(
             // transaction never committed, so re-running is safe.
             log::warn!("[postgres][select] pooled connection lost ({err}); retrying once on a fresh connection");
             let client = pool.get().await.map_err(|e| e.to_string())?;
+            register_server_cancel(server_cancel_registrar, &client);
             run_select(&client, schema, sql, start, row_limit).await.map_err(pg_error_to_string)
         }
         Err(err) => Err(pg_error_to_string(err)),
     }
+}
+
+/// Publish the checked-out connection's cancel token so the cancel/timeout
+/// paths can stop the statement server-side (see crate::process). The token
+/// captures backend pid + secret at connect time — no extra round trip.
+fn register_server_cancel(
+    server_cancel_registrar: &crate::query_cancel::ServerCancelRegistrar,
+    client: &deadpool_postgres::Client,
+) {
+    server_cancel_registrar.register_postgres(client.cancel_token());
 }
 
 /// Query pools for one database keep a few connections so metadata loads,
@@ -1779,21 +1792,23 @@ use crate::query::query_result_row_limit;
 const SELECT_CLASS_KEYWORDS: &[&str] = &["SELECT", "SHOW", "EXPLAIN", "WITH", "TABLE"];
 
 pub async fn execute_query(pool: &Pool, sql: &str) -> Result<QueryResult, String> {
-    execute_query_with_max_rows(pool, sql, None).await
+    execute_query_with_max_rows(pool, sql, None, &crate::query_cancel::ServerCancelRegistrar::default()).await
 }
 
 pub async fn execute_query_with_max_rows(
     pool: &Pool,
     sql: &str,
     max_rows: Option<usize>,
+    server_cancel_registrar: &crate::query_cancel::ServerCancelRegistrar,
 ) -> Result<QueryResult, String> {
     let start = Instant::now();
     let row_limit = query_result_row_limit(max_rows);
 
     if starts_with_executable_sql_keyword(sql, SELECT_CLASS_KEYWORDS) {
-        execute_select_query(pool, None, sql, start, row_limit).await
+        execute_select_query(pool, None, sql, start, row_limit, server_cancel_registrar).await
     } else {
         let client = pool.get().await.map_err(|e| e.to_string())?;
+        register_server_cancel(server_cancel_registrar, &client);
         match client.execute(sql, &[]).await {
             Ok(affected) => Ok(non_select_result(affected, start)),
             Err(err) if err.is_closed() => {
@@ -1801,6 +1816,7 @@ pub async fn execute_query_with_max_rows(
                 // connection): retrying cannot double-apply anything.
                 log::warn!("[postgres][execute] pooled connection lost; retrying once on a fresh connection");
                 let client = pool.get().await.map_err(|e| e.to_string())?;
+                register_server_cancel(server_cancel_registrar, &client);
                 let affected = client.execute(sql, &[]).await.map_err(pg_error_to_string)?;
                 Ok(non_select_result(affected, start))
             }
@@ -1823,7 +1839,14 @@ fn non_select_result(affected: u64, start: Instant) -> QueryResult {
 }
 
 pub async fn execute_query_with_schema(pool: &Pool, schema: &str, sql: &str) -> Result<QueryResult, String> {
-    execute_query_with_schema_and_max_rows(pool, schema, sql, None).await
+    execute_query_with_schema_and_max_rows(
+        pool,
+        schema,
+        sql,
+        None,
+        &crate::query_cancel::ServerCancelRegistrar::default(),
+    )
+    .await
 }
 
 pub async fn execute_query_with_schema_and_max_rows(
@@ -1831,11 +1854,13 @@ pub async fn execute_query_with_schema_and_max_rows(
     schema: &str,
     sql: &str,
     max_rows: Option<usize>,
+    server_cancel_registrar: &crate::query_cancel::ServerCancelRegistrar,
 ) -> Result<QueryResult, String> {
     let start = Instant::now();
     let row_limit = query_result_row_limit(max_rows);
     let checkout_start = Instant::now();
     let client = pool.get().await.map_err(|e| e.to_string())?;
+    register_server_cancel(server_cancel_registrar, &client);
     log::info!(
         "[postgres][execute_with_schema:pool:done] elapsed_ms={} total_ms={} schema={}",
         checkout_start.elapsed().as_millis(),
@@ -1848,7 +1873,7 @@ pub async fn execute_query_with_schema_and_max_rows(
             start.elapsed().as_millis()
         );
         drop(client);
-        return execute_query_with_max_rows(pool, sql, max_rows).await;
+        return execute_query_with_max_rows(pool, sql, max_rows, server_cancel_registrar).await;
     }
 
     if starts_with_executable_sql_keyword(sql, SELECT_CLASS_KEYWORDS) {
@@ -1857,7 +1882,7 @@ pub async fn execute_query_with_schema_and_max_rows(
         // `SET LOCAL search_path` — one round trip instead of the old
         // session-level SET + RESET bracket, and no state can leak across
         // pool connections.
-        return execute_select_query(pool, Some(schema), sql, start, row_limit).await;
+        return execute_select_query(pool, Some(schema), sql, start, row_limit, server_cancel_registrar).await;
     }
 
     let set_schema_start = Instant::now();
@@ -1866,6 +1891,7 @@ pub async fn execute_query_with_schema_and_max_rows(
         Err(err) if err.is_closed() => {
             log::warn!("[postgres][execute] pooled connection lost; retrying once on a fresh connection");
             let client = pool.get().await.map_err(|e| e.to_string())?;
+            register_server_cancel(server_cancel_registrar, &client);
             execute_non_select_with_search_path(&client, schema, sql)
                 .await
                 .map(|affected| non_select_result(affected, start))

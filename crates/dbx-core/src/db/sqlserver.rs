@@ -18,9 +18,14 @@ const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(3);
 const SHOWPLAN_ON: &str = "SET SHOWPLAN_ALL ON";
 const SHOWPLAN_OFF: &str = "SET SHOWPLAN_ALL OFF";
 
-async fn check_conn_health(client: &mut SqlServerClient) -> Result<(), String> {
-    match tokio::time::timeout(HEALTH_CHECK_TIMEOUT, client.query("SELECT 1", &[])).await {
-        Ok(Ok(_)) => Ok(()),
+/// Bounded health check that piggybacks on `SELECT @@SPID`: same single
+/// round trip as the old `SELECT 1`, but returns the server session id so a
+/// cancel/timeout can KILL a running statement from a second session (see
+/// crate::process). `None` spid still means healthy — only the cancel
+/// registration is lost.
+async fn check_conn_health(client: &mut SqlServerClient) -> Result<Option<String>, String> {
+    match tokio::time::timeout(HEALTH_CHECK_TIMEOUT, client.query("SELECT @@SPID", &[])).await {
+        Ok(Ok(stream)) => Ok(collect_spid(stream).await),
         Ok(Err(err)) => {
             log::warn!("[sqlserver][conn] health-check failed: {err}; connection may be stale");
             Err(format!("SQL Server connection is unhealthy: {err}. Please reconnect."))
@@ -36,6 +41,27 @@ async fn check_conn_health(client: &mut SqlServerClient) -> Result<(), String> {
             ))
         }
     }
+}
+
+/// Drain a single-row single-column result and return its integer value as a
+/// string. Used for the `SELECT @@SPID` health check above — @@SPID is typed
+/// smallint, and external gateways may vary, so accept several shapes.
+async fn collect_spid(stream: QueryStream<'_>) -> Option<String> {
+    let rows = sqlserver_driver_result(stream.into_first_result()).await.ok()?;
+    let row = rows.first()?;
+    row.try_get::<i32, _>(0)
+        .ok()
+        .flatten()
+        .map(|spid| spid.to_string())
+        .or_else(|| row.try_get::<i16, _>(0).ok().flatten().map(|spid| spid.to_string()))
+        .or_else(|| row.try_get::<&str, _>(0).ok().flatten().map(str::to_string))
+}
+
+/// Fetch the server session id (SPID) of the current connection. Used by the
+/// multi-statement path, whose batches skip the per-query health check.
+pub async fn current_spid(client: &mut SqlServerClient) -> Option<String> {
+    let stream = client.query("SELECT @@SPID", &[]).await.ok()?;
+    collect_spid(stream).await
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -968,7 +994,7 @@ pub async fn list_triggers(
 }
 
 pub async fn execute_query(client: &mut SqlServerClient, sql: &str) -> Result<QueryResult, String> {
-    execute_query_with_max_rows(client, sql, None).await.map(|(result, _)| result)
+    execute_query_with_max_rows(client, sql, None, &Default::default()).await.map(|(result, _)| result)
 }
 
 /// Executes a query, returning the result plus a flag telling whether the row
@@ -979,8 +1005,12 @@ pub async fn execute_query_with_max_rows(
     client: &mut SqlServerClient,
     sql: &str,
     max_rows: Option<usize>,
+    server_cancel_registrar: &crate::query_cancel::ServerCancelRegistrar,
 ) -> Result<(QueryResult, bool), String> {
-    check_conn_health(client).await?;
+    let spid = check_conn_health(client).await?;
+    if let Some(spid) = &spid {
+        server_cancel_registrar.register_sqlserver_kill(spid);
+    }
     let start = Instant::now();
 
     // SQL Server explain: `SET SHOWPLAN_ALL ON; <query>; SET SHOWPLAN_ALL OFF;`
