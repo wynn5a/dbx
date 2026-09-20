@@ -116,6 +116,50 @@ pub fn is_read_only_sql(sql: &str, _database_type: DatabaseType) -> bool {
     !contains_word(&literal_free, "into")
 }
 
+/// Schema-destructive keywords the MCP bridge treats as "dangerous". Mirrors
+/// the node-side MCP evaluator (`DANGEROUS_KEYWORDS` in node-core sql-safety)
+/// so both ends of the bridge agree on what needs `allow_dangerous`.
+const DANGEROUS_SCHEMA_KEYWORDS: [&str; 3] = ["drop", "truncate", "alter"];
+
+/// Whether `sql` destroys or redefines schema objects (DROP/TRUNCATE/ALTER),
+/// ignoring comments and string literals.
+pub fn is_dangerous_schema_sql(sql: &str) -> bool {
+    let source = strip_trailing_semicolons(sql.trim());
+    if source.is_empty() {
+        return false;
+    }
+    let literal_free = strip_sql_comments_and_literals(&source).to_lowercase();
+    DANGEROUS_SCHEMA_KEYWORDS.iter().any(|keyword| contains_word(&literal_free, keyword))
+}
+
+/// Execution gate for callers that run SQL on a user's behalf without a
+/// confirmation dialog (the MCP bridge). Read-only statements always pass;
+/// writes need `allow_writes`; schema-destructive statements additionally need
+/// `allow_dangerous`. The `Err` payload is a user-facing reason string.
+pub fn ensure_sql_execution_allowed(
+    sql: &str,
+    database_type: DatabaseType,
+    allow_writes: bool,
+    allow_dangerous: bool,
+) -> Result<(), String> {
+    if is_read_only_sql(sql, database_type) {
+        return Ok(());
+    }
+    if is_dangerous_schema_sql(sql) && !allow_dangerous {
+        return Err(
+            "Dangerous SQL (DROP/TRUNCATE/ALTER) is blocked. Re-send the request with allow_dangerous=true to run it."
+                .to_string(),
+        );
+    }
+    if !allow_writes {
+        return Err(
+            "Write SQL is blocked. Re-send the request with allow_writes=true to run it; the bridge is read-only by default."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 fn starts_with_read_only_keyword(sql: &str) -> bool {
     let source = strip_sql_comments(sql).trim_start().to_lowercase();
     ["select", "with", "show", "describe", "desc", "explain", "pragma", "values", "table"].iter().any(|keyword| {
@@ -381,6 +425,40 @@ mod tests {
         assert!(!is_read_only_sql("SELECT * INTO backup FROM users", db)); // materializes data
         assert!(!is_read_only_sql("SELECT 1; DROP TABLE t", db)); // chained statement
         assert!(!is_read_only_sql("", db));
+    }
+
+    #[test]
+    fn dangerous_schema_sql_detects_destructive_statements_only() {
+        assert!(is_dangerous_schema_sql("DROP TABLE t"));
+        assert!(is_dangerous_schema_sql("  truncate TABLE t; "));
+        assert!(is_dangerous_schema_sql("alter table t add column c int"));
+        assert!(is_dangerous_schema_sql("SELECT 1; DROP TABLE t")); // chained statement
+        assert!(!is_dangerous_schema_sql("SELECT * FROM t"));
+        assert!(!is_dangerous_schema_sql("UPDATE t SET x = 1 WHERE id = 2")); // write, not schema-destructive
+        assert!(!is_dangerous_schema_sql("DELETE FROM t WHERE id = 1"));
+        assert!(!is_dangerous_schema_sql("INSERT INTO t VALUES (1)"));
+        assert!(!is_dangerous_schema_sql("SELECT 'drop table t'")); // literal
+        assert!(!is_dangerous_schema_sql("-- drop table t\nSELECT 1")); // comment
+        assert!(!is_dangerous_schema_sql("SELECT * FROM dropdown")); // word boundary
+        assert!(!is_dangerous_schema_sql(""));
+    }
+
+    #[test]
+    fn execution_gate_requires_writes_and_dangerous_flags() {
+        let db = DatabaseType::Postgres;
+        // Read-only always passes, regardless of flags.
+        assert!(ensure_sql_execution_allowed("SELECT 1", db, false, false).is_ok());
+        // Plain writes need allow_writes.
+        assert!(ensure_sql_execution_allowed("UPDATE t SET x = 1 WHERE id = 2", db, false, false).is_err());
+        assert!(ensure_sql_execution_allowed("UPDATE t SET x = 1 WHERE id = 2", db, true, false).is_ok());
+        assert!(ensure_sql_execution_allowed("INSERT INTO t VALUES (1)", db, true, false).is_ok());
+        // Chained statements count as writes.
+        assert!(ensure_sql_execution_allowed("SELECT 1; UPDATE t SET x = 1", db, false, false).is_err());
+        // Schema-destructive statements need allow_writes AND allow_dangerous.
+        assert!(ensure_sql_execution_allowed("DROP TABLE t", db, false, false).is_err());
+        assert!(ensure_sql_execution_allowed("DROP TABLE t", db, true, false).is_err());
+        assert!(ensure_sql_execution_allowed("DROP TABLE t", db, false, true).is_err());
+        assert!(ensure_sql_execution_allowed("DROP TABLE t", db, true, true).is_ok());
     }
 
     #[test]

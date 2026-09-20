@@ -2,6 +2,10 @@ import { homedir, platform } from "node:os";
 import { join } from "node:path";
 
 export function appDataDir(): string {
+  // Relocation hook (tests, portable installs): moves the port, token and
+  // connection files together instead of only the ones paths.ts owns.
+  const override = process.env.DBX_APP_DATA_DIR?.trim();
+  if (override) return override;
   const home = homedir();
   switch (platform()) {
     case "darwin":
@@ -19,4 +23,8 @@ export function dbPath(): string {
 
 export function bridgePortFilePath(): string {
   return join(appDataDir(), "mcp-bridge-port");
+}
+
+export function bridgeTokenFilePath(): string {
+  return join(appDataDir(), "mcp-bridge-token");
 }

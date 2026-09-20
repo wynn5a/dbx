@@ -7,6 +7,9 @@ use tokio::net::TcpListener;
 use super::connection::AppState;
 
 const BIND_ADDR: &str = "127.0.0.1:0";
+/// Shared secret written next to `mcp-bridge-port`; the npm MCP server reads it
+/// (see node-core `readBridgeToken`) and sends it as `Authorization: Bearer`.
+const TOKEN_FILE_NAME: &str = "mcp-bridge-token";
 
 #[derive(Deserialize)]
 struct OpenTableRequest {
@@ -105,8 +108,25 @@ pub struct McpExecuteQueryEvent {
     pub allow_dangerous: bool,
 }
 
+/// Everything a single bridge connection needs: the shared token for auth, the
+/// app state for data routes, and the app handle for event routes. `app` is
+/// `None` in tests, where only the token- and state-only routes are exercised.
+struct BridgeContext<'a> {
+    app: Option<&'a AppHandle>,
+    state: &'a Arc<AppState>,
+    token: &'a str,
+}
+
 pub fn start(app_handle: AppHandle, state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
+        // Fail closed: without the shared secret the bridge serves nothing.
+        let token = match state.storage.load_or_create_local_device_secret().await {
+            Ok(token) if !token.is_empty() => token,
+            _ => {
+                log::error!("MCP bridge disabled: failed to load the local device secret");
+                return;
+            }
+        };
         let listener = match TcpListener::bind(BIND_ADDR).await {
             Ok(l) => l,
             Err(e) => {
@@ -119,55 +139,128 @@ pub fn start(app_handle: AppHandle, state: Arc<AppState>) {
         log::info!("MCP bridge assigned port {actual_port}");
         if let Ok(dir) = app_handle.path().app_data_dir() {
             let _ = std::fs::write(dir.join("mcp-bridge-port"), actual_port.to_string());
+            write_token_file(&dir, &token);
         }
         loop {
-            let (mut stream, _) = match listener.accept().await {
+            let (stream, _) = match listener.accept().await {
                 Ok(s) => s,
                 Err(_) => continue,
             };
             let app = app_handle.clone();
             let st = state.clone();
+            let token = token.clone();
             tokio::spawn(async move {
-                let mut buf = vec![0u8; 65536];
-                let n = match stream.read(&mut buf).await {
-                    Ok(n) if n > 0 => n,
-                    _ => return,
-                };
-                let request = String::from_utf8_lossy(&buf[..n]);
-                let body = request.split("\r\n\r\n").nth(1).unwrap_or("");
-                let first_line = request.lines().next().unwrap_or("");
-
-                if first_line.starts_with("POST /open-table") {
-                    handle_open_table(&app, &st, body, &mut stream).await;
-                } else if first_line.starts_with("POST /data/list-tables") {
-                    handle_list_tables_data(&st, body, &mut stream).await;
-                } else if first_line.starts_with("POST /data/describe-table") {
-                    handle_describe_table_data(&st, body, &mut stream).await;
-                } else if first_line.starts_with("POST /data/mongo/list-collections") {
-                    handle_mongo_list_collections_data(&st, body, &mut stream).await;
-                } else if first_line.starts_with("POST /data/mongo/find-documents") {
-                    handle_mongo_find_documents_data(&st, body, &mut stream).await;
-                } else if first_line.starts_with("POST /data/mongo/aggregate-documents") {
-                    handle_mongo_aggregate_documents_data(&st, body, &mut stream).await;
-                } else if first_line.starts_with("POST /data/mongo/insert-documents") {
-                    handle_mongo_insert_documents_data(&st, body, &mut stream).await;
-                } else if first_line.starts_with("POST /data/mongo/update-documents") {
-                    handle_mongo_update_documents_data(&st, body, &mut stream).await;
-                } else if first_line.starts_with("POST /data/mongo/delete-documents") {
-                    handle_mongo_delete_documents_data(&st, body, &mut stream).await;
-                } else if first_line.starts_with("POST /data/execute-query") {
-                    handle_execute_query_data(&st, body, &mut stream).await;
-                } else if first_line.starts_with("POST /execute-query") {
-                    handle_execute_query(&app, &st, body, &mut stream).await;
-                } else if first_line.starts_with("POST /reload-connections") {
-                    let _ = app.emit("mcp-reload-connections", ());
-                    respond(&mut stream, "200 OK", "ok").await;
-                } else {
-                    let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n").await;
-                }
+                let ctx = BridgeContext { app: Some(&app), state: &st, token: &token };
+                serve_connection(stream, ctx).await;
             });
         }
     });
+}
+
+/// Writes the bridge token with owner-only permissions so the npm MCP server on
+/// the same machine can authenticate, while other local users cannot read it.
+fn write_token_file(dir: &std::path::Path, token: &str) {
+    let path = dir.join(TOKEN_FILE_NAME);
+    let result = (|| -> std::io::Result<()> {
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).write(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&path)?;
+        std::io::Write::write_all(&mut file, token.as_bytes())
+    })();
+    if let Err(e) = result {
+        log::warn!("MCP bridge failed to write {}: {e}", path.display());
+    }
+}
+
+/// Extracts the token from an `Authorization: Bearer <token>` header.
+fn bearer_token(head: &str) -> Option<&str> {
+    for line in head.lines().skip(1) {
+        let Some((name, value)) = line.split_once(':') else { continue };
+        if !name.trim().eq_ignore_ascii_case("authorization") {
+            continue;
+        }
+        let mut parts = value.trim().splitn(2, char::is_whitespace);
+        let scheme = parts.next().unwrap_or("");
+        let token = parts.next().unwrap_or("").trim();
+        return if scheme.eq_ignore_ascii_case("bearer") && !token.is_empty() { Some(token) } else { None };
+    }
+    None
+}
+
+/// Length-checked, constant-time comparison so request timing does not leak
+/// how much of the token matched.
+fn tokens_match(provided: &str, expected: &str) -> bool {
+    let (a, b) = (provided.as_bytes(), expected.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+fn request_is_authorized(head: &str, expected_token: &str) -> bool {
+    bearer_token(head).is_some_and(|provided| tokens_match(provided, expected_token))
+}
+
+/// Reads one request and serves it: bearer-token auth first (every route),
+/// then dispatch. One request per connection, as before.
+async fn serve_connection(mut stream: tokio::net::TcpStream, ctx: BridgeContext<'_>) {
+    let mut buf = vec![0u8; 65536];
+    let n = match stream.read(&mut buf).await {
+        Ok(n) if n > 0 => n,
+        _ => return,
+    };
+    let request = String::from_utf8_lossy(&buf[..n]).into_owned();
+    let (head, body) = match request.split_once("\r\n\r\n") {
+        Some((head, body)) => (head, body),
+        None => (request.as_str(), ""),
+    };
+    if !request_is_authorized(head, ctx.token) {
+        respond_error(&mut stream, "401 Unauthorized", "Missing or invalid bridge token").await;
+        return;
+    }
+    let first_line = head.lines().next().unwrap_or("");
+
+    if first_line.starts_with("POST /open-table") {
+        match ctx.app {
+            Some(app) => handle_open_table(app, ctx.state, body, &mut stream).await,
+            None => respond_error(&mut stream, "503 Service Unavailable", "Desktop event routes are unavailable").await,
+        }
+    } else if first_line.starts_with("POST /data/list-tables") {
+        handle_list_tables_data(ctx.state, body, &mut stream).await;
+    } else if first_line.starts_with("POST /data/describe-table") {
+        handle_describe_table_data(ctx.state, body, &mut stream).await;
+    } else if first_line.starts_with("POST /data/mongo/list-collections") {
+        handle_mongo_list_collections_data(ctx.state, body, &mut stream).await;
+    } else if first_line.starts_with("POST /data/mongo/find-documents") {
+        handle_mongo_find_documents_data(ctx.state, body, &mut stream).await;
+    } else if first_line.starts_with("POST /data/mongo/aggregate-documents") {
+        handle_mongo_aggregate_documents_data(ctx.state, body, &mut stream).await;
+    } else if first_line.starts_with("POST /data/mongo/insert-documents") {
+        handle_mongo_insert_documents_data(ctx.state, body, &mut stream).await;
+    } else if first_line.starts_with("POST /data/mongo/update-documents") {
+        handle_mongo_update_documents_data(ctx.state, body, &mut stream).await;
+    } else if first_line.starts_with("POST /data/mongo/delete-documents") {
+        handle_mongo_delete_documents_data(ctx.state, body, &mut stream).await;
+    } else if first_line.starts_with("POST /data/execute-query") {
+        handle_execute_query_data(ctx.state, body, &mut stream).await;
+    } else if first_line.starts_with("POST /execute-query") {
+        match ctx.app {
+            Some(app) => handle_execute_query(app, ctx.state, body, &mut stream).await,
+            None => respond_error(&mut stream, "503 Service Unavailable", "Desktop event routes are unavailable").await,
+        }
+    } else if first_line.starts_with("POST /reload-connections") {
+        if let Some(app) = ctx.app {
+            let _ = app.emit("mcp-reload-connections", ());
+        }
+        respond(&mut stream, "200 OK", "ok").await;
+    } else {
+        let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n").await;
+    }
 }
 
 fn find_config_by_name<'a>(
@@ -485,10 +578,201 @@ async fn handle_execute_query_data(state: &Arc<AppState>, body: &str, stream: &m
     else {
         return;
     };
+    // Honor the caller-declared policy the same way the sibling `/execute-query`
+    // does: read-only by default, writes and schema-destructive statements only
+    // when the request explicitly opts in.
+    let allow_writes = req.allow_writes.unwrap_or(false);
+    let allow_dangerous = req.allow_dangerous.unwrap_or(false);
+    if let Err(reason) = dbx_core::query_execution_sql::ensure_sql_execution_allowed(
+        &req.sql,
+        config.db_type,
+        allow_writes,
+        allow_dangerous,
+    ) {
+        respond_error(stream, "403 Forbidden", &reason).await;
+        return;
+    }
     match dbx_core::query::execute_sql_statement(state, &config.id, &database, &req.sql, req.schema.as_deref(), None)
         .await
     {
         Ok(result) => respond_json(stream, &result).await,
         Err(e) => respond_error(stream, "500 Internal Server Error", &e).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dbx_core::models::connection::ConnectionConfig;
+    use dbx_core::storage::Storage;
+
+    const TOKEN: &str = "bridge-test-token";
+
+    async fn test_bridge() -> (std::net::SocketAddr, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("dbx-bridge-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = Storage::open(&dir.join("storage.db")).await.unwrap();
+        let state = Arc::new(AppState::new(storage));
+
+        let db_path = dir.join("bridge-test.db");
+        std::fs::File::create(&db_path).unwrap();
+        let config: ConnectionConfig = serde_json::from_value(serde_json::json!({
+            "id": "bridge-test-conn",
+            "name": "bridge-test",
+            "db_type": "sqlite",
+            "host": db_path.to_str().unwrap(),
+            "port": 0,
+            "username": "",
+            "password": ""
+        }))
+        .unwrap();
+        state.storage.save_connections(&[config]).await.unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let token = Arc::new(TOKEN.to_string());
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                let ctx = BridgeContext { app: None, state: &state, token: &token };
+                serve_connection(stream, ctx).await;
+            }
+        });
+        (addr, dir)
+    }
+
+    async fn post(addr: std::net::SocketAddr, path: &str, token: Option<&str>, body: &str) -> String {
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let auth = token.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
+        let request =
+            format!("POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n{auth}\r\n{body}");
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).await.unwrap();
+        String::from_utf8_lossy(&buf).into_owned()
+    }
+
+    #[test]
+    fn bearer_token_parses_authorization_header() {
+        assert_eq!(
+            bearer_token("POST /data/execute-query HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer abc"),
+            Some("abc")
+        );
+        assert_eq!(bearer_token("POST /p HTTP/1.1\r\nauthorization: bearer abc"), Some("abc"));
+        assert_eq!(bearer_token("POST /p HTTP/1.1\r\nAuthorization: Bearer   spaced-token  "), Some("spaced-token"));
+        assert_eq!(bearer_token("POST /p HTTP/1.1"), None);
+        assert_eq!(bearer_token("POST /p HTTP/1.1\r\nAuthorization: Basic abc"), None);
+        assert_eq!(bearer_token("POST /p HTTP/1.1\r\nAuthorization: Bearer "), None);
+    }
+
+    #[test]
+    fn tokens_match_is_exact_and_length_safe() {
+        assert!(tokens_match("abc", "abc"));
+        assert!(!tokens_match("abc", "abd"));
+        assert!(!tokens_match("abc", "abcd"));
+        assert!(!tokens_match("", "abc"));
+    }
+
+    #[test]
+    fn write_token_file_persists_owner_only_secret() {
+        let dir = std::env::temp_dir().join(format!("dbx-bridge-token-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        write_token_file(&dir, "secret-token");
+        assert_eq!(std::fs::read_to_string(dir.join(TOKEN_FILE_NAME)).unwrap(), "secret-token");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(dir.join(TOKEN_FILE_NAME)).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn rejects_requests_without_or_with_wrong_token() {
+        let (addr, dir) = test_bridge().await;
+        let body = r#"{"connection_name":"bridge-test","sql":"SELECT 1"}"#;
+        let missing = post(addr, "/data/execute-query", None, body).await;
+        assert!(missing.starts_with("HTTP/1.1 401"), "missing token: {missing}");
+        let wrong = post(addr, "/data/execute-query", Some("not-the-token"), body).await;
+        assert!(wrong.starts_with("HTTP/1.1 401"), "wrong token: {wrong}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn executes_read_only_sql_with_valid_token() {
+        let (addr, dir) = test_bridge().await;
+        let body = r#"{"connection_name":"bridge-test","sql":"SELECT 1 AS one"}"#;
+        let response = post(addr, "/data/execute-query", Some(TOKEN), body).await;
+        assert!(response.starts_with("HTTP/1.1 200"), "read-only with token: {response}");
+        assert!(response.contains("\"columns\""), "should return a query result: {response}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn gates_writes_and_dangerous_sql_behind_flags() {
+        let (addr, dir) = test_bridge().await;
+
+        // CREATE is a write: blocked without allow_writes, allowed with it.
+        let create = post(
+            addr,
+            "/data/execute-query",
+            Some(TOKEN),
+            r#"{"connection_name":"bridge-test","sql":"CREATE TABLE bridge_t (id INTEGER)"}"#,
+        )
+        .await;
+        assert!(create.starts_with("HTTP/1.1 403"), "create without allow_writes: {create}");
+        let create_ok = post(
+            addr,
+            "/data/execute-query",
+            Some(TOKEN),
+            r#"{"connection_name":"bridge-test","sql":"CREATE TABLE bridge_t (id INTEGER)","allow_writes":true}"#,
+        )
+        .await;
+        assert!(create_ok.starts_with("HTTP/1.1 200"), "create with allow_writes: {create_ok}");
+
+        // INSERT follows the same gate; read-back of written data stays open.
+        let insert = post(
+            addr,
+            "/data/execute-query",
+            Some(TOKEN),
+            r#"{"connection_name":"bridge-test","sql":"INSERT INTO bridge_t VALUES (1)"}"#,
+        )
+        .await;
+        assert!(insert.starts_with("HTTP/1.1 403"), "insert without allow_writes: {insert}");
+        let insert_ok = post(
+            addr,
+            "/data/execute-query",
+            Some(TOKEN),
+            r#"{"connection_name":"bridge-test","sql":"INSERT INTO bridge_t VALUES (1)","allow_writes":true}"#,
+        )
+        .await;
+        assert!(insert_ok.starts_with("HTTP/1.1 200"), "insert with allow_writes: {insert_ok}");
+        let select = post(
+            addr,
+            "/data/execute-query",
+            Some(TOKEN),
+            r#"{"connection_name":"bridge-test","sql":"SELECT id FROM bridge_t"}"#,
+        )
+        .await;
+        assert!(select.starts_with("HTTP/1.1 200"), "select after writes: {select}");
+
+        // DROP is dangerous: needs allow_writes AND allow_dangerous.
+        let drop = post(
+            addr,
+            "/data/execute-query",
+            Some(TOKEN),
+            r#"{"connection_name":"bridge-test","sql":"DROP TABLE bridge_t","allow_writes":true}"#,
+        )
+        .await;
+        assert!(drop.starts_with("HTTP/1.1 403"), "drop without allow_dangerous: {drop}");
+        let drop_ok = post(
+            addr,
+            "/data/execute-query",
+            Some(TOKEN),
+            r#"{"connection_name":"bridge-test","sql":"DROP TABLE bridge_t","allow_writes":true,"allow_dangerous":true}"#,
+        )
+        .await;
+        assert!(drop_ok.starts_with("HTTP/1.1 200"), "drop with both flags: {drop_ok}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

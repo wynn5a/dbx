@@ -95,6 +95,14 @@ Dangerous statements such as `DROP`, `TRUNCATE`, and `ALTER` remain blocked unle
 DBX_MCP_ALLOW_DANGEROUS_SQL=1
 ```
 
+## Desktop Bridge Authentication
+
+Tools that talk to the running DBX desktop app (`dbx_open_table`, `dbx_execute_and_show`, and queries on bridge-only database types such as SQL Server or Oracle) authenticate with a shared token. DBX writes it to `mcp-bridge-token` next to `mcp-bridge-port` in the DBX data directory, and the MCP server picks it up automatically. To pin the token explicitly (for example in a hand-written MCP client config), set:
+
+```bash
+DBX_BRIDGE_TOKEN=<token>
+```
+
 ## How It Works
 
 ```
@@ -205,6 +213,14 @@ DBX_MCP_ALLOW_WRITES=0
 
 ```bash
 DBX_MCP_ALLOW_DANGEROUS_SQL=1
+```
+
+### 桌面端桥接鉴权
+
+与正在运行的 DBX 桌面端通信的工具（`dbx_open_table`、`dbx_execute_and_show`，以及 SQL Server、Oracle 等仅桥接型数据库的查询）使用共享 token 鉴权。DBX 会把 token 写到数据目录下 `mcp-bridge-port` 旁边的 `mcp-bridge-token` 文件里，MCP Server 会自动读取。如需在手工编写的 MCP 客户端配置中显式指定，可设置：
+
+```bash
+DBX_BRIDGE_TOKEN=<token>
 ```
 
 ### 工作原理

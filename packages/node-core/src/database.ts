@@ -1,9 +1,9 @@
 import type { ConnectionConfig, ProxyTunnelConfig } from "./connections.js";
 import { createServer, connect as netConnect, type Server, type Socket } from "node:net";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir, platform } from "node:os";
+import { homedir } from "node:os";
 import Database from "better-sqlite3";
+import { bridgeHeaders, getBridgeUrl, readBridgeToken } from "./bridge.js";
 import { sqlSafetyFromEnv } from "./sql-safety.js";
 import { isDirectQueryType } from "./diagnostics.js";
 
@@ -315,30 +315,17 @@ interface MongoDocumentResult {
   total: number;
 }
 
-function bridgeAppDataDir(): string {
-  const home = homedir();
-  switch (platform()) {
-    case "darwin":
-      return join(home, "Library", "Application Support", "com.dbx.app");
-    case "win32":
-      return join(process.env.APPDATA || join(home, "AppData", "Roaming"), "com.dbx.app");
-    default:
-      return join(home, ".config", "com.dbx.app");
-  }
-}
-
 async function bridgeDataRequest<T>(path: string, body: Record<string, unknown>): Promise<T> {
   let bridgeUrl: string;
   try {
-    const portFile = join(bridgeAppDataDir(), "mcp-bridge-port");
-    const port = (await readFile(portFile, "utf-8")).trim();
-    bridgeUrl = `http://127.0.0.1:${port}`;
+    bridgeUrl = await getBridgeUrl();
   } catch {
     throw new Error("DBX desktop app is not running. This database type requires DBX to be running for query execution.");
   }
+  const token = await readBridgeToken();
   const res = await fetch(`${bridgeUrl}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: bridgeHeaders(token),
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -535,10 +522,15 @@ export async function executeQuery(config: ConnectionConfig, sql: string, option
   if (isDirectQueryType(config.db_type)) {
     return query(config, sql, undefined, options);
   }
+  // Forward the session's own policy so the desktop bridge can enforce the
+  // same write/dangerous gates the MCP server evaluated client-side.
+  const safety = sqlSafetyFromEnv();
   const result = await withTimeout(bridgeDataRequest<BridgeQueryResult>("/data/execute-query", {
     connection_name: config.name,
     database: config.database || "",
     sql,
+    allow_writes: safety.allowWrites,
+    allow_dangerous: safety.allowDangerous,
   }), resolveTimeoutMs(options));
   return convertBridgeQueryResult(result, options);
 }
