@@ -46,7 +46,7 @@
 | T25 | Leaflet 按需加载 | improvement-plan §3 B5 | S | ✅ b963ea14 |
 | T26 | PG JSON 列免 parse-再序列化 | improvement-plan §3 B4 | S | ✅ 057fa533 |
 | T27 | SSH 隧道放弃时驱逐连接池 | improvement-plan §2 A5 | S | ✅ 43e5c824 |
-| T28 | 原生 DB socket TCP keepalive | improvement-plan §2 A6 | S | ⬜ |
+| T28 | 原生 DB socket TCP keepalive | improvement-plan §2 A6 | S | ✅ 7ffeb3ad |
 | T29 | idle_timeout 设置诚实化 | improvement-plan §2 A7 | S | ⬜ |
 | T30 | 展示 token 用量与成本 | improvement-plan §5 D7 | S | ⬜ |
 | T31 | AI 连接失败重试一次 | improvement-plan §5 D6 | S | ⬜ |
@@ -349,13 +349,14 @@
   - [x] 前端收到事件并展示提示；测试通过（`useTauriEvents` 订阅 `ssh-tunnel-lost`，App.vue 在 10s 防重窗口内每连接至多一条 error toast（多跳连接同连多隧道只提示一次），文案 `connection.tunnelLost`/`tunnelLostHint` 进六 locale；`sshTunnelLost.test.ts` 7 例锁展示/防重/六语言/源码接线契约（含前后端事件名字面量一致））
 - **实现说明**：dbx-core 不依赖 Tauri，事件走 `tokio::mpsc::UnboundedSender<TunnelGiveUp>`——`TunnelManager::take_give_up_receiver()` 单次交付，`src-tauri/src/lib.rs` 的 `start_tunnel_give_up_relay` 在 setup 时 drain（evict + emit，模式对齐 `mcp_bridge::start`）；防重在源头（每隧道生命周期恰好一次通知）+ 前端（每连接 10s 窗口）两层保证。重试内循环抽为 `reconnect_with_backoff(policy, attempt)`（mock connect 可测放弃预算与指数退避封顶）。验证：`cargo fmt --check` + `cargo test -p dbx-core` 全绿（lib 846 过，新增 5：退避递进/放弃预算/单消费者/隧道 id 映射/驱逐范围）+ `cargo check --workspace --locked` + `pnpm check` 全绿（173 文件 1248 用例，含新增 7 例）；env 门控 live 测试 `tests/live_ssh_tunnel_giveup.rs`（Docker 临时 alpine sshd，密码认证，测试自行 stop/start 容器）实测通过：隧道建立 → kill sshd → 恰好一条 notice（字段正确）→ 池全部驱逐 → 宕机期间 `get_or_create_pool` 报明确 SSH 层错误 → sshd 恢复后传输层无重启自愈。
 
-### T28 原生 DB socket TCP keepalive ⬜
+### T28 原生 DB socket TCP keepalive ✅ 7ffeb3ad
 
 - **来源** improvement-plan-2026-09.md §2 A6（Track A）· **规模** S
 - **内容** 目前只有 SSH 会话有 keepalive（`ssh_tunnel.rs:51`）。PG/MySQL/SQL Server 原生连接在 connect 时设 `SO_KEEPALIVE`。
 - **验收**
-  - [ ] 三驱动连接均带 keepalive 选项（代码/单测断言）
-  - [ ] 半开连接（手工断网）不挂死，能被探测或报错恢复
+  - [x] 三驱动连接均带 keepalive 选项（代码/单测断言：`db::mod` 统一常量 `TCP_KEEPALIVE_IDLE=60s` / `INTERVAL=30s` / `RETRIES=5`（最坏 ~3.5 分钟检出半开）。PG：gaussdb fork 默认开 keepalive 但沿用 libpq 2 小时窗口——`connect()` 用 fork 的 `keepalives_idle/interval/retries` Config setter 填入统一值，fork 对每条拨号连接（明文与 TLS）生效；URL 里的 `keepalives*` 参数优先。MySQL：`create_pool` 经 `OptsBuilder::tcp_keepalive(60_000ms)` 下发（crate 只支持 idle 时长；URL `tcp_keepalive=` 参数优先），纯函数单测断言取值 + `include_str!` 契约锁接线。SQL Server：tiberius 无 keepalive 配置面，但 `try_connect` 自行拨号——socket2 直接对 TDS 裸 socket 设统一 schedule（失败仅告警）；回环 socket 真实 setsockopt 往返单测 + 源码契约锁接线。PG 两分支单测经 Config getter 断言 fork 默认值→统一值、URL 参数不被覆盖。live：`tests/live_postgres_keepalive.rs` phase 1（全平台）以真实驱动路径连 Docker PG 实测两套 schedule（fork 在 setsockopt 失败时连接即失败，SELECT 1 成功即证 socket 已带选项））
+  - [x] 半开连接（手工断网）不挂死，能被探测或报错恢复（如实标注验证方式：live 测试 phase 2（Linux 宿主机）在容器内 `iptables DROP` 制造真半开——对端无 ACK 无 RST，断言挂起查询在 keepalive 窗口内报错、同池在规则移除后新连接自愈；本机为 macOS + Docker Desktop，发布端口由宿主 `com.docker.backend` 代理终结，客户端 TCP 对端永不变哑（`docker pause` 亦不可用：暂停容器的内核仍会 ACK），故该环境只跑 phase 1。机制等价验证已在 Linux 容器间完成：直连容器 IP + 相同 schedule（idle=10s/interval=5s/retries=3）对 `pg_sleep` 挂起连接，`pg_stat_activity` 确认服务端执行后落 DROP 规则，25.5s ETIMEDOUT（恰为 10+3×5），DROP 计数器逐包计入探测；phase 2 代码即按此编排）
+- **实现说明**：统一常量与 socket2 schedule 构造放 `db::mod`（SSH 隧道自身 30s keepalive 不动；Redis 走 ConnectionManager 自带探测不在范围）。`socket2` 作为直接依赖加入 dbx-core，版本 0.6 + feature "all"——与 gaussdb fork 已编译的构建完全一致，不引入新代码；仅 SQL Server 路径使用（PG/MySQL 经各自 crate 内部 socket2）。三驱动 URL 参数优先策略：PG 按 getter 探测 fork 默认值（2h/None/None）缺省才填，MySQL 取 `opts.tcp_keepalive()` 缺省才填，避免覆盖用户显式配置。验证：`cargo fmt --check` + `cargo test -p dbx-core` 全绿（lib 853 通过，新增 7）+ `cargo check --workspace --locked`；live 测试 env 门控 `DBX_TEST_POSTGRES_KEEPALIVE_URL`/`DBX_TEST_POSTGRES_KEEPALIVE_CONTAINER`，Docker 临时 postgres:16-alpine（`--cap-add=NET_ADMIN`，用后弃容器）实测通过。
 
 ### T29 idle_timeout 设置诚实化 ⬜
 
