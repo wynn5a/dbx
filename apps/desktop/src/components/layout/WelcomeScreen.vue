@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { FilePlus2, Plus, History, Download, Database, Search, ShieldCheck, Sparkles } from "@lucide/vue";
+import { FilePlus2, Plus, History, Download, Database, Search, ShieldCheck, Sparkles, Loader2 } from "@lucide/vue";
 import DatabaseIcon from "@/components/icons/DatabaseIcon.vue";
 import {
   connectionDriverLabel,
@@ -19,6 +19,7 @@ const props = defineProps<{
   lastUsedAt: Record<string, number>;
   appVersion: string;
   hasConnections: boolean;
+  connectionsLoading: boolean;
 }>();
 
 // Cap the visible icon band so the stat card stays one tidy row; overflow folds
@@ -166,9 +167,20 @@ function formatLastUsed(connectionId: string): string {
                 class="h-4 w-4 shrink-0 text-[var(--ds-text-4)] opacity-0 transition-opacity duration-[var(--ds-speed)] ease-[var(--ds-ease)] group-hover:opacity-100"
               />
             </button>
-            <!-- DS empty state: centered icon + text + chip CTA -->
+            <!-- Startup disk load in flight: loading state instead of a false
+                 "no connections" empty state (only shown while the list is empty;
+                 a non-empty list keeps rendering during reloads) -->
             <div
-              v-if="recentConnections.length === 0"
+              v-if="recentConnections.length === 0 && connectionsLoading"
+              class="flex flex-col items-center gap-2.5 px-4 py-10 text-center"
+            >
+              <Loader2 class="h-7 w-7 animate-spin text-[var(--ds-text-4)]" />
+              <span class="text-[13px] text-[var(--ds-text-2)]">{{ t("sidebar.loadingConnections") }}</span>
+            </div>
+            <!-- DS empty state: centered icon + text + chip CTA. Only once the
+                 load settled and the list is confirmed empty. -->
+            <div
+              v-else-if="recentConnections.length === 0"
               class="flex flex-col items-center gap-2.5 px-4 py-10 text-center"
             >
               <Database class="h-7 w-7 text-[var(--ds-text-4)]" />

@@ -47,6 +47,7 @@ export default {
     connections: "CONEXIONES",
     sqlLibrary: "BIBLIOTECA SQL",
     noConnections: "Sin conexiones",
+    loadingConnections: "Cargando conexiones...",
     import: "Importar conexiones",
     importDbx: "Importar configuración DBX",
     importNavicat: "Importar Navicat NCX",

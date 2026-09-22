@@ -118,6 +118,11 @@ function redisDbLabel(db: number, loadedKeyCount?: number, totalKeyCount?: numbe
 export const useConnectionStore = defineStore("connection", () => {
   const settingsStore = useSettingsStore();
   const connections = ref<ConnectionConfig[]>([]);
+  // True from store creation until the startup disk load (initFromDisk) settles,
+  // and again while any later initFromDisk reload is in flight. The Welcome
+  // screen and the sidebar gate their "no connections" empty state on this, so
+  // a slow disk read never renders a false "you have no connections" state.
+  const connectionsLoading = ref(true);
   const isDesktop = isTauriRuntime();
   const activeConnectionId = ref<string | null>(localStorage.getItem(ACTIVE_CONNECTION_STORAGE_KEY));
   const selectedTreeNodeId = ref<string | null>(null);
@@ -2979,17 +2984,30 @@ export const useConnectionStore = defineStore("connection", () => {
 
   async function initFromDisk() {
     if (!initFromDiskPromise) {
+      connectionsLoading.value = true;
       initFromDiskPromise = (async () => {
-        pinnedTreeNodeIds.value = await loadPinnedTreeNodeIds();
-        const saved = await api.loadConnections();
+        // The three disk reads are independent — fetch them concurrently so
+        // startup waits on the slowest, not on their sum. Failure semantics
+        // match the previous serial version: loadPinnedTreeNodeIds self-catches
+        // its IPC, while loadConnections/loadSidebarLayout propagate to the
+        // caller (App.vue toasts connection.loadFailed); with Promise.all no
+        // state is committed unless all three succeed (no half-loaded tree).
+        // Assignments keep the original order: reconcileLayout needs the
+        // loaded connections, and rebuildTreeNodes needs both.
+        const [pinnedIds, saved, savedLayout] = await Promise.all([
+          loadPinnedTreeNodeIds(),
+          api.loadConnections(),
+          api.loadSidebarLayout(),
+        ]);
+        pinnedTreeNodeIds.value = pinnedIds;
         connections.value = saved.map(normalizeConnection);
-        const savedLayout = await api.loadSidebarLayout();
         sidebarLayout.value = reconcileLayout(
           connections.value.map((c) => c.id),
           savedLayout,
         );
         rebuildTreeNodes();
       })().finally(() => {
+        connectionsLoading.value = false;
         initFromDiskPromise = null;
       });
     }
@@ -3007,6 +3025,7 @@ export const useConnectionStore = defineStore("connection", () => {
 
   return {
     connections,
+    connectionsLoading,
     activeConnectionId,
     selectedTreeNodeId,
     selectedTreeNodeIds,

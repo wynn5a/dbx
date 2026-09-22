@@ -1143,6 +1143,7 @@ onUnmounted(() => {
                 :last-used-at="connectionStore.connectionLastUsedAt"
                 :app-version="appVersion"
                 :has-connections="connectionStore.connections.length > 0"
+                :connections-loading="connectionStore.connectionsLoading"
                 @open-connection-query="openConnectionQuery"
                 @new-connection="showConnectionDialog = true"
                 @new-query="newQuery"

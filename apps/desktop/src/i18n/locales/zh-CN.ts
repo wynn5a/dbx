@@ -46,6 +46,7 @@ export default {
     connections: "连接",
     sqlLibrary: "SQL 库",
     noConnections: "暂无连接",
+    loadingConnections: "正在加载连接...",
     import: "导入连接",
     importDbx: "导入 DBX 配置",
     importNavicat: "导入 Navicat NCX",

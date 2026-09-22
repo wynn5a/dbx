@@ -1,7 +1,19 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch, provide, type Component } from "vue";
 import { useI18n } from "vue-i18n";
-import { Search, X, ListFilter, Crosshair, Server, Database, FolderTree, Table2, Eye, RotateCcw } from "@lucide/vue";
+import {
+  Search,
+  X,
+  ListFilter,
+  Crosshair,
+  Server,
+  Database,
+  FolderTree,
+  Table2,
+  Eye,
+  RotateCcw,
+  Loader2,
+} from "@lucide/vue";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -558,7 +570,16 @@ defineExpose({ focusSearch, createNewGroup });
         @rename-started="pendingRenameGroupId = null"
       />
     </div>
-    <div v-if="store.treeNodes.length === 0" class="sidebar-empty px-3 py-8 text-center">
+    <!-- Startup disk load in flight: loading state instead of a false
+         "no connections" empty state -->
+    <div
+      v-if="store.treeNodes.length === 0 && store.connectionsLoading"
+      class="sidebar-empty flex flex-col items-center gap-2 px-3 py-8 text-center"
+    >
+      <Loader2 class="h-4 w-4 animate-spin" />
+      <span>{{ t("sidebar.loadingConnections") }}</span>
+    </div>
+    <div v-else-if="store.treeNodes.length === 0" class="sidebar-empty px-3 py-8 text-center">
       {{ t("sidebar.noConnections") }}
     </div>
   </div>
