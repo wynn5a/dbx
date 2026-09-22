@@ -22,7 +22,7 @@
 | T01 | 锁死 MCP 桥（鉴权 + 写门控） | improvement-plan §5 D1 | S | ✅ a0849b48 |
 | T02 | 查询真实服务端取消 | improvement-plan §2 A1 | M | ✅ d4485b14 |
 | T03 | SQL Server 连接池 | improvement-plan §2 A2 | M | ✅ b523ab5a |
-| T04 | 网格保存先展示 SQL | improvement-plan §6 E1 | M | ⬜ |
+| T04 | 网格保存先展示 SQL | improvement-plan §6 E1 | M | ✅ 0dacdb2a |
 | T05 | 补全上下文剥离注释 | improvement-plan §4 C1 | M | ⬜ |
 | T06 | MySQL/SQL Server 标识符引号 | improvement-plan §4 C2 | S | ⬜ |
 | T07 | 前后端方言映射统一 | improvement-plan §4 C3 | M | ⬜ |
@@ -102,15 +102,16 @@
   - [x] 全量回归通过（`cargo fmt --check` + dbx-core 798 过 + dbx --lib 42 过）
 - **实现说明**：新增 `db::sqlserver::SqlServerPool`（`Semaphore(3)` 限并发 + 空闲列表）与 `SqlServerLease` 租约——借出前 `SELECT @@SPID` 健康检查（3s 上界）失败即丢弃重拨（≤3 次，对齐 MySQL）；租约默认 Drop 即丢 socket（超时/取消中断的连接绝不回池），`keep()`/`poison()` 控制健康回收；行限制 abandoned-wire 与连接错误从"废弃整池"改为"只丢当前连接"。`execute_query_with_max_rows` 去掉内部健康检查与 registrar 参数（SPID 注册移到租约借出处），查询语句往返开销与改造前持平。
 
-### T04 网格保存先展示 SQL ⬜
+### T04 网格保存先展示 SQL ✅ 0dacdb2a
 
 - **来源** improvement-plan-2026-09.md §6 E1（Track E）· **规模** M
 - **内容** `useDataGridEditor.ts:766-834` 直接执行准备好的 UPDATE/DELETE，唯一"预览"是 line 825 的 `console.info`。复用编辑器 danger-SQL 对话框展示 `stmts` / `rollbackStmts`，受既有确认设置门控。
 - **验收**
-  - [ ] 保存时弹窗列出将执行的每条语句与对应回滚语句；取消则不执行任何语句
-  - [ ] 多选/多行删除场景全部语句可见
-  - [ ] 关闭"保存前确认"设置后行为回到直接保存（无弹窗）
-  - [ ] `pnpm test && pnpm typecheck && pnpm lint` 通过
+  - [x] 保存时弹窗列出将执行的每条语句与对应回滚语句；取消则不执行任何语句
+  - [x] 多选/多行删除场景全部语句可见
+  - [x] 关闭"保存前确认"设置后行为回到直接保存（无弹窗）
+  - [x] `pnpm test && pnpm typecheck && pnpm lint` 通过（另 `pnpm check` 全绿；vitest 160 文件 1109 用例）
+- **实现说明**：`useDataGridEditor` 新增 `confirmBeforeSave` 选项（DataGrid 接到既有 `confirmDangerousSqlExecution` 设置），开启时 `saveChanges` 在 prepare 后暂停，经 `showSaveConfirm` / `pendingSaveStatements` / `pendingSaveRollbackStatements` 弹出复用的 `DangerConfirmDialog`，确认（`confirmDataGridSave`）才继续执行；取消/关闭弹窗不执行任何语句、待保存更改保留。弹窗内为"将执行的语句"与"回滚语句"两个编号分区——后端回滚语句顺序与保存语句不一一对应（回滚按 new→deleted→dirty 生成），不做 1:1 配对展示。预览文本由 `dataGridSql.ts` 新增纯函数 `formatDataGridSavePreview` 生成；弹窗带"不再提示"开关，写回同一设置。测试覆盖弹窗展示不执行（含多行删除全部语句）、取消保留待保存、设置关闭直接保存及格式化函数。
 
 ### T05 补全上下文剥离注释 ⬜
 
