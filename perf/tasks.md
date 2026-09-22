@@ -55,7 +55,7 @@
 | T34 | 标签页切换快捷键 | improvement-plan §6 E6-1 | S | ✅ e66e03dc |
 | T35 | Format SQL 快捷键 | improvement-plan §6 E6-2 | S | ✅ fa0e42a8 |
 | T36 | getSqlCompletionResultValidFor 落地 | improvement-plan §4 C7-2 | S | ✅ ad03e069 |
-| T37 | prefers-reduced-motion 支持 | improvement-plan §6 E9-1 | S | ⬜ |
+| T37 | prefers-reduced-motion 支持 | improvement-plan §6 E9-1 | S | ✅ a92296bb |
 | T38 | 启动阶段 performance.mark | improvement-plan §6 E9-2 | S | ⬜ |
 | T39 | QueryEditor 异步组件化 | improvement-plan §6 E9-3 | S | ⬜ |
 | T40 | 列固定 + 拖拽排序 | improvement-plan §6 E7-2 | M | ⬜ |
@@ -431,13 +431,14 @@
   - [x] 相应行为有测试锁定
 - **实现说明**：选"实现"路线（保守正则）。前缀 ≥2 字符时返回 `/^[A-Za-z0-9_$]*$/i`。CodeMirror 的 validFor 契约：结果 `from` 到光标之间的文本持续匹配该正则时，弹层复用已构建的 options、不再调用补全 source——键入延续同一标识符即跳过语句重解析、引用表提取、目录查找与逐键列表重建（`from = position - prefix.length`，被测文本恰为光标处的裸标识符 token）。安全性论证（全文写在函数注释）：① 前缀 <2 字符的结果一律不复用——`suggestRoutines` 恰在 2 字符处开启，token 增长会合法地新增函数项，复用会隐藏它们；从 2 字符起 item 集对标识符增长单调——所有候选过滤都经 `matchesPrefix()`（大小写不敏感的子序列/子串匹配，长前缀匹配蕴含一切更短前缀匹配），复用列表恒为正确结果的超集、已列项不会消失；② `.` 不在字符集——键入限定符点（`users.`）恰是结果必须从表/关键字切换为限定列的位置，失配即强制重算；③ 大小写不敏感安全——过滤两侧小写化，且 T33 的 `applyKeywordCasing` 按前缀首字母决定插入大小写，token 延展不改变首字母；④ `$` 是本管线合法标识符字符（`[\w$@]`）故保留；`@` 排除（仅作 SQL Server 变量 token 起始，`from` 落在 `@` 上永不匹配→逐键重算）；带引号标识符终会含引号字符→重算。已知取舍（与既有 Elasticsearch validFor 相同）：结果以 `filter: false` 构建，复用列表不再随前缀收窄——保持弹层打开时算出的超集，直至非标识符字符（或退格越过 token 起点）触发重算；后台 schema 元数据加载不受复用拖延——其刷新显式重发 `startCompletion` 构建全新结果。QueryEditor 三个结果构建方（context-only/local/async）本就透传该函数返回值，零接线改动；函数内部为前缀门槛多跑一次 `getSqlCompletionContext`，代价按每次弹层一次计，被复用省下的逐键开销远盖过。测试：`packages/app-tests/sqlCompletion.test.ts` 将两条 stub 锁定用例改写为新契约——空前缀/1 字符前缀无 validFor、2 字符起返回正则且接受标识符延展（含大小写翻转、`_`、`$`）、拒绝上下文切换字符（`.`、空格、括号、引号、运算符、`;`、`@`）、光标在注释内不复用。`pnpm check` 全绿（format + lint + typecheck + vitest 178 文件 1331 用例）。
 
-### T37 prefers-reduced-motion 支持 ⬜
+### T37 prefers-reduced-motion 支持 ✅ a92296bb
 
 - **来源** improvement-plan-2026-09.md §6 E9 第 1 项（Track E）· **规模** S
 - **内容** `styles/` 下该 media query 零命中。全局支持减弱动态效果。
 - **验收**
-  - [ ] 系统开启后关键过渡/动画禁用（CSS 清单覆盖主要动效）
-  - [ ] 手工验证 + `pnpm check`
+  - [x] 系统开启后关键过渡/动画禁用（CSS 清单覆盖主要动效）（`styles/globals.css` 新增全局 `@media (prefers-reduced-motion: reduce)`：`*, *::before, *::after` 的 `animation-duration: 0.01ms !important` + `animation-iteration-count: 1 !important` + `transition-duration: 0.01ms !important` + `scroll-behavior: auto !important`；源码契约测试锁定媒体查询、通用选择器覆盖与四条声明）
+  - [x] 手工验证 + `pnpm check`（手工/DevTools emulate 以真实无头 Chrome 实测替代并如实标注：对 `pnpm build` 产物用 Chromium `--force-prefers-reduced-motion` / `--force-prefers-no-reduced-motion`（与 DevTools 模拟同一 media feature）各跑一次探针页——reduce 开启时 `animate-spin`/`animate-pulse`/`transition-all`/`animate-in` 四类探针元素计算样式全部坍缩为 `animation-duration 1e-05s`（=0.01ms）、`animation-iteration-count 1`、`transition-duration 1e-05s`、`scroll-behavior auto`；关闭时基线不变（spin 1s/infinite、pulse 2s/infinite、transition 0.15s）。`pnpm check` 全绿（format + lint + typecheck + vitest 179 文件 1336 用例，含新增 5 例））
+- **实现说明**：① 全局兜底选"坍缩为一帧"而非移除声明（业界标准写法）：状态变化保持即时，加载态不消失——`animate-spin`（96 处 Loader2）停在首帧成静止图标、`animate-pulse` 骨架（5 处）定格为静态色块，旁边加载文字/样式仍表达状态；`0.01ms` 而非 `0s` 保持 `transitionend`/`animationend` 触发，Vue `<Transition>`（toast 进出场、编辑器搜索面板、网格搜索浮层）与 reka-ui overlay presence 生命周期正常完成（tw-animate-css 退场动画 `animation-fill-mode: none`，但 Presence 在首个 animationend 即卸载，不会闪回可见）；`animation-iteration-count: 1` 停掉全部无限循环（spinner/骨架/树状态点脉冲——TreeItem.vue 既有单点 reduce 覆盖保留且与新全局规则一致）。组件内 `<style>` 与 Tailwind 工具类动画经通用选择器 + `!important` 一并覆盖，无需逐文件清单。② JS 驱动的动效不在 CSS 可达范围：新增框架无关 `lib/reducedMotion.ts`（`prefersReducedMotion` / `scrollBehaviorForMotion`，默认读 `window.matchMedia`、可注入 matcher 供测试），接线 tab 栏两处平滑滚动——`useTabScroll.ts` 箭头翻页 `scrollBy` 与 `AppTabBar.vue` 活动 tab/driver store 的 `scrollIntoView`（后者在 `scrollActiveTabIntoView` 单点收敛，auto/smooth 全部调用方一并覆盖）。③ 豁免决定：无豁免项——仓库没有承担信息传达的关键动画（导出进度条宽度是数据驱动非 keyframe 动画，其 `animate-pulse` 仅标记不确定态，静止后进度条+文字状态仍可读）；ECharts 渲染动画属 JS 数据可视化动画，不在本次 CSS 级改动范围。测试：`packages/app-tests/reducedMotion.test.ts`——helper 单测（media query 常量、reduce 开/关的行为映射含 auto 透传、缺 matchMedia 视为关闭）、globals.css 源码契约、useTabScroll/AppTabBar 全部 smooth scroll 经 helper 且无未守卫的 `behavior: "smooth"` 残留。
 
 ### T38 启动阶段 performance.mark ⬜
 
