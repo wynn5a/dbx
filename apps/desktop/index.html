@@ -2,27 +2,59 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Theme boot — keep in sync with apps/desktop/src/lib/appTheme.ts (APP_THEME_STORAGE_KEY below must equal
+      // that key; invalid/missing values fall back to "system"; "system" follows matchMedia) and useTheme.applyTheme
+      // (same "dark" class on <html> plus inline color-scheme). Locked by packages/app-tests/appTheme.test.ts.
+      try {
+        var stored = localStorage.getItem("dbx-theme");
+        var mode = stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+        var dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+      } catch (error) {}
+    </script>
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DBX</title>
+    <style>
+      /* Pre-mount loading frame. Lives in <head>, NOT inside #root: :empty matches only elements
+         without any child node, so a <style> child would make the selector never match and the
+         loading frame would paint the white browser canvas (the dark-mode boot flash). */
+      #root:empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        font-family: system-ui, sans-serif;
+        color: #888;
+        font-size: 13px;
+      }
+      #root:empty::after {
+        content: "Loading…";
+      }
+      /* Pre-mount loading frame must not flash white in dark themes. Matches the .dark tokens in
+         styles/globals.css (--background rgb(19 20 22), --muted-foreground rgb(151 152 157)). */
+      html.dark #root:empty {
+        background: rgb(19 20 22);
+        color: rgb(151 152 157);
+      }
+      @media (prefers-color-scheme: dark) {
+        /* No-JS fallback: the boot script never ran, follow the system preference. */
+        #root:empty {
+          background: rgb(19 20 22);
+          color: rgb(151 152 157);
+        }
+        /* Explicit light mode on a dark system stays white (higher specificity than above). */
+        html:not(.dark) #root:empty {
+          background: #fff;
+          color: #888;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root">
-      <style>
-        #root:empty {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          height: 100vh;
-          font-family: system-ui, sans-serif;
-          color: #888;
-          font-size: 13px;
-        }
-        #root:empty::after {
-          content: "Loading…";
-        }
-      </style>
-    </div>
+    <div id="root"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
