@@ -25,7 +25,7 @@
 | T04 | 网格保存先展示 SQL | improvement-plan §6 E1 | M | ✅ 0dacdb2a |
 | T05 | 补全上下文剥离注释 | improvement-plan §4 C1 | M | ✅ fc95f900 |
 | T06 | MySQL/SQL Server 标识符引号 | improvement-plan §4 C2 | S | ✅ db20604b |
-| T07 | 前后端方言映射统一 | improvement-plan §4 C3 | M | ⬜ |
+| T07 | 前后端方言映射统一 | improvement-plan §4 C3 | M | ✅ fccd9dcd |
 | T08 | 一次 IPC 取全部 schema 表 | improvement-plan §3 B1 | M | ⬜ |
 | T09 | 补全缓存按超集缓存 | improvement-plan §3 B2 | M | ⬜ |
 | T10 | Redis 自动重连 | improvement-plan §2 A3 | S | ⬜ |
@@ -133,15 +133,16 @@
   - [x] sqlCompletion 测试全过
 - **实现说明**：`quoteSqlIdentifier` 改为按方言分支——postgres 保持原样（`"…"` + `""` 转义 + 小写正则 + 原关键字集）；新增 mysql 分支（反引号 + 反引号双写转义）与 sqlserver 分支（`[…]` + `]` 双写转义）。各方言配独立的"需要引号"判定：不匹配方言的普通标识符正则（MySQL `^[a-zA-Z_][a-zA-Z0-9_$]*$`、T-SQL `^[a-zA-Z_][a-zA-Z0-9_@$#]*$`）或命中对方言保留字集合（MySQL 8.0 保留字表 / T-SQL 保留关键字表，大小写不敏感比较）时才加引号，非保留字普通标识符在所有方言下仍裸插入。测试加在 `sqlCompletion.test.ts`（7 例：MySQL 保留字/特殊字符/反引号转义的表与列、SQL Server 保留字/特殊字符/`]` 转义的表、两侧普通标识符不引、`user` 一词跨 PG/MySQL/SQL Server 的方言差分契约）；`pnpm check` 全绿（vitest 160 文件 1124 用例）。
 
-### T07 前后端方言映射统一 ⬜
+### T07 前后端方言映射统一 ✅ fccd9dcd
 
 - **来源** improvement-plan-2026-09.md §4 C3（Track C）· **规模** M
 - **内容** `ContentArea.vue:181-186` 把 25+ DatabaseType 映成 `mysql | postgres | sqlserver`（默认 mysql），后端 `normalize_dialect`（`sql_analysis.rs:91-100`）分组不同。暴露或复制后端分组为单一共享映射，前端 union 扩为含 `oracle` / `generic`；DuckDB 专属关键字（`QueryEditor.vue:1947-1964`）改为仅 `databaseType === "duckdb"` 启用。
 - **验收**
-  - [ ] Redshift/GaussDB/openGauss 映射为 PG 族（与后端一致）；Oracle 走 oracle 方言
-  - [ ] MySQL 连接不出现 DuckDB 关键字，DuckDB 连接仍出现
-  - [ ] 前端映射 vs 后端分组的一致性单元测试
-  - [ ] `pnpm check` 通过
+  - [x] Redshift/GaussDB/openGauss 映射为 PG 族（与后端一致）；Oracle 走 oracle 方言
+  - [x] MySQL 连接不出现 DuckDB 关键字，DuckDB 连接仍出现
+  - [x] 前端映射 vs 后端分组的一致性单元测试
+  - [x] `pnpm check` 通过
+- **实现说明**：新增 `lib/sqlDialect.ts`：`SqlDialect` union（mysql/postgres/sqlserver/sqlite/clickhouse/duckdb/oracle/generic）+ `sqlDialectForDatabaseType()` 单一映射表，替换 ContentArea 与 ObjectBrowser 各自的手写映射；后端 `normalize_dialect` 同步扩为同一张表（kingbase/vastbase/kwdb→postgres、goldendb/databend→mysql、rqlite→sqlite、oracle/dameng/oceanbase-oracle/yashandb→oracle；oracle 族仍走 generic 解析——sqlparser 无 Oracle 方言），两侧表格逐别名一致。`QueryEditor` 的 CodeMirror base dialect 按完整 union 选择（新增 SQLite/PLSQL/StandardSQL 分支），DuckDB 关键字包经 `duckdbEditorKeywords(databaseType)` 仅对 duckdb 连接启用；语义诊断分析改传编辑器方言（词表与后端一致，duckdb/clickhouse 连接受益）；`sqlCompletion` 方言 union 扩为 `SqlDialect`（oracle 等新值标识符裸插入，不再误用 MySQL 反引号）。一致性测试双端锁定：`packages/app-tests/sqlDialect.test.ts` 硬编码后端分组表逐项对比前端映射（另覆盖全部 49 个 DatabaseType、generic 回退、DuckDB 关键字门控），Rust 侧 `sql_analysis.rs` 内嵌单测锁同一张表。`pnpm check` 全绿（vitest 161 文件 1129 用例）；`cargo fmt --check` + `cargo test -p dbx-core`（799 过）全绿。
 
 ---
 
