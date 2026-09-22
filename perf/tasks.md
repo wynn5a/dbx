@@ -54,7 +54,7 @@
 | T33 | 关键字大小写跟随输入 | improvement-plan §4 C7-1 | S | ✅ b4588cba |
 | T34 | 标签页切换快捷键 | improvement-plan §6 E6-1 | S | ✅ e66e03dc |
 | T35 | Format SQL 快捷键 | improvement-plan §6 E6-2 | S | ✅ fa0e42a8 |
-| T36 | getSqlCompletionResultValidFor 落地 | improvement-plan §4 C7-2 | S | ⬜ |
+| T36 | getSqlCompletionResultValidFor 落地 | improvement-plan §4 C7-2 | S | ✅ ad03e069 |
 | T37 | prefers-reduced-motion 支持 | improvement-plan §6 E9-1 | S | ⬜ |
 | T38 | 启动阶段 performance.mark | improvement-plan §6 E9-2 | S | ⬜ |
 | T39 | QueryEditor 异步组件化 | improvement-plan §6 E9-3 | S | ⬜ |
@@ -422,13 +422,14 @@
   - [x] 编辑器内快捷键触发格式化；registry 可见；测试通过（编辑器内触发与 registry 可见性以清单断言 + 源码契约 + matcher 测试佐证，`pnpm check` 全绿）
 - **实现说明**：绑定注册进 `shortcutRegistry.ts`（scope 为 editor，与 execute/save 同组），经既有 App.vue 全局 keydown 路径生效。键位选择 `Mod+Shift+F`（macOS Cmd+Shift+F，其余 Ctrl+Shift+F）——跟随 DBeaver 的 Format SQL 惯例，SQL 客户端用户的肌肉记忆所在；与既有绑定零冲突（所有 scope 均无 Mod+Shift+F，逐 scope 唯一性断言覆盖），CodeMirror 在用的键位表（default/search/history/fold/completion）均未绑定 Mod-Shift-f，按键从编辑器冒泡到 window handler；弃选 VS Code 的 Shift+Alt+F——macOS 上 Option 合成按键字符（event.key 不再是 "F"），matcher 无法匹配。分发逻辑镜像 executeSql 块：活动 tab 须为 query tab、事件 target 在 `[data-query-editor-root]` 内，随后调用工具栏按钮同一入口 `formatActiveSql()`——作用域语义不变：请求携带活动 tab id，只格式化当前活动 tab 的编辑器，空 SQL 为 no-op（`formatActiveSql` 自带守卫）。面板可见性零改动即得（面板逐行渲染 registry），label `settings.shortcutFormatSql` 六 locale 均补。老用户快捷键设置无需迁移：`normalizeShortcutSettings` 以默认值回填新 id，默认值在 editor scope 内唯一。测试：`shortcutRegistry.test.ts` 增 formatSql 清单断言（id/scope/默认键/label）与 App.vue 接线源码契约（限定 query editor 作用域并调用 `formatActiveSql`，connectionStoreCancel 同款源码契约方式）；既有逐 scope 默认键唯一性、`findShortcutConflict` 全默认零冲突、六 locale label 检查自动覆盖新绑定；`keyboardShortcuts.test.ts` 增 matcher 用例（Cmd/Ctrl+Shift+F 匹配，仅 Shift/仅 Mod/缺 Shift/多 Alt 拒绝、composing 拒绝、自定义重绑）。`pnpm check` 全绿（format + lint + typecheck + vitest 178 文件 1328 用例）。
 
-### T36 getSqlCompletionResultValidFor 落地 ⬜
+### T36 getSqlCompletionResultValidFor 落地 ✅ ad03e069
 
 - **来源** improvement-plan-2026-09.md §4 C7 第 2 项（Track C）· **规模** S
 - **内容** `getSqlCompletionResultValidFor`（`sqlCompletion.ts:1249`）是返回 `undefined` 的 stub。实现前缀 regex，或以结论性注释说明为何不需要。
 - **验收**
-  - [ ] 二选一落地：有实现 + 测试，或有写明理由的注释
-  - [ ] 相应行为有测试锁定
+  - [x] 二选一落地：有实现 + 测试，或有写明理由的注释
+  - [x] 相应行为有测试锁定
+- **实现说明**：选"实现"路线（保守正则）。前缀 ≥2 字符时返回 `/^[A-Za-z0-9_$]*$/i`。CodeMirror 的 validFor 契约：结果 `from` 到光标之间的文本持续匹配该正则时，弹层复用已构建的 options、不再调用补全 source——键入延续同一标识符即跳过语句重解析、引用表提取、目录查找与逐键列表重建（`from = position - prefix.length`，被测文本恰为光标处的裸标识符 token）。安全性论证（全文写在函数注释）：① 前缀 <2 字符的结果一律不复用——`suggestRoutines` 恰在 2 字符处开启，token 增长会合法地新增函数项，复用会隐藏它们；从 2 字符起 item 集对标识符增长单调——所有候选过滤都经 `matchesPrefix()`（大小写不敏感的子序列/子串匹配，长前缀匹配蕴含一切更短前缀匹配），复用列表恒为正确结果的超集、已列项不会消失；② `.` 不在字符集——键入限定符点（`users.`）恰是结果必须从表/关键字切换为限定列的位置，失配即强制重算；③ 大小写不敏感安全——过滤两侧小写化，且 T33 的 `applyKeywordCasing` 按前缀首字母决定插入大小写，token 延展不改变首字母；④ `$` 是本管线合法标识符字符（`[\w$@]`）故保留；`@` 排除（仅作 SQL Server 变量 token 起始，`from` 落在 `@` 上永不匹配→逐键重算）；带引号标识符终会含引号字符→重算。已知取舍（与既有 Elasticsearch validFor 相同）：结果以 `filter: false` 构建，复用列表不再随前缀收窄——保持弹层打开时算出的超集，直至非标识符字符（或退格越过 token 起点）触发重算；后台 schema 元数据加载不受复用拖延——其刷新显式重发 `startCompletion` 构建全新结果。QueryEditor 三个结果构建方（context-only/local/async）本就透传该函数返回值，零接线改动；函数内部为前缀门槛多跑一次 `getSqlCompletionContext`，代价按每次弹层一次计，被复用省下的逐键开销远盖过。测试：`packages/app-tests/sqlCompletion.test.ts` 将两条 stub 锁定用例改写为新契约——空前缀/1 字符前缀无 validFor、2 字符起返回正则且接受标识符延展（含大小写翻转、`_`、`$`）、拒绝上下文切换字符（`.`、空格、括号、引号、运算符、`;`、`@`）、光标在注释内不复用。`pnpm check` 全绿（format + lint + typecheck + vitest 178 文件 1331 用例）。
 
 ### T37 prefers-reduced-motion 支持 ⬜
 
