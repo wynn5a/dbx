@@ -39,7 +39,7 @@
 | T18 | 连接与 schema 加载可取消 | improvement-plan §6 E5 | M | ✅ 58f1c843 |
 | T19 | 高危 SQL 增加确认摩擦 | improvement-plan §5 D3 | S | ✅ 75cfc769 |
 | T20 | search_tables 工具 | improvement-plan §5 D4 | S | ✅ adf7a942 |
-| T21 | Gemini/Ollama 工具调用 | improvement-plan §5 D5 | M | ⬜ |
+| T21 | Gemini/Ollama 工具调用 | improvement-plan §5 D5 | M | ✅ ed844722 |
 | T22 | 置信门控未知列诊断 | improvement-plan §4 C5 | L | ⬜ |
 | T23 | 网格 FK 点击跳转 | improvement-plan §6 E7-1 | M | ⬜ |
 | T24 | 方言函数目录（CH/DuckDB/Oracle） | improvement-plan §4 C6 | M | ⬜ |
@@ -278,14 +278,15 @@
   - [x] 工具注册与描述进入 agent 工具清单测试（`search_tables` 进 Ask 模式与 Agent 模式（SQL/非 SQL 引擎）清单断言，描述含 case-insensitive/comment、`read_only=true`、`parallel_ok=true`、`required=["search"]` 逐一锁定）
 - **实现说明**：`agent_tools.rs` 新增 `search_tables`（`search` 必填、`schema` 可选默认当前 database、`limit` 可选默认 50 上限 100 复用 `requested_limit`）。行为：对目标 schema 取**无 filter/limit 的完整表清单**（复用 `list_tables_core`，不新写 SQL——截断的 listing 会漏掉命中，违背工具初衷），对表名+注释做大小写不敏感子串匹配（匹配与渲染拆成纯函数便于 mock 测试），按 listing 顺序输出 `- 表名 (类型) -- 注释` 行；schema-aware 引擎输出 `schema.table` 限定名（`is_schema_aware` 判定，与 `build_table_select_sql` 一致），扁平命名空间引擎（MySQL/SQLite）输出裸表名；零命中显式输出 `(no tables matching …)`。注册进 `read_only_tools`/`all_tools`（紧随 `list_tables`），只读、parallel_ok——自动执行、不经写确认卡（确认卡仅对 `execute_query` 非 read-only SQL 触发，前端零接线改动）；Agent 模式提示词的工具清单行补入 search_tables 并附一句"列表找不到就搜索"的指引。schema 限定用 DuckDB 内存库三 schema 实测（analytics/sales 显式限定互斥、默认 scope 只见 main）。
 
-### T21 Gemini/Ollama 工具调用 ⬜
+### T21 Gemini/Ollama 工具调用 ✅ ed844722
 
 - **来源** improvement-plan-2026-09.md §5 D5（Track D）· **规模** M
 - **内容** `provider_supports_function_calling`（`ai.rs:1146-1156`）对两者硬编码 `false`；`ToolDefinition::to_gemini_tool()`（`agent_events.rs:125`）是死代码。实现 Gemini `functionCall`/`functionResponse` 轮次；Ollama 按模型 opt-in。
 - **验收**
-  - [ ] mock SSE 多轮工具交换测试通过（Gemini provider）
-  - [ ] 不支持工具的 Ollama 模型行为不变；opt-in 模型走工具循环
-  - [ ] 全量回归通过
+  - [x] mock SSE 多轮工具交换测试通过（Gemini provider）（新 `tests/ai_tool_stream.rs` 用 loopback mock HTTP server 真实驱动 `stream_with_tools` 两轮：turn 1 SSE 流出文本 + 完整 `functionCall` part → 断言解析出的 ToolCall（name/args/合成的 call_0 id）与 usageMetadata 计数；按 agent loop 的消息管线回放 assistant tool_calls + tool 结果；turn 2 断言请求体 contents 含 model 的 `functionCall` part 与 user 的 `functionResponse` part（name + response.result），最终文本流出）
+  - [x] 不支持工具的 Ollama 模型行为不变；opt-in 模型走工具循环（opt-in 判定：每次 agent run 对模型 native `/api/show` 探测一次，capabilities 含 `tools` 才进工具循环；探测失败/无该端点/无 tools 一律回退文本模式。测试锁定：opt-in 模型先打 `/api/show`（body `{model}`）→ chat 请求体含 `tools`+`tool_choice`、tool_calls 流解析、assistant/tool 消息按 OpenAI 形状回放；非 opt-in 模型 `provider_supports_function_calling=false` 且文本模式 chat 请求体无 `tools`/`tool_choice`、逐字段等于既有形状；404 探测保持回退。纯函数层另有 `/api/show` URL 从各 endpoint 拼写推导的单测）
+  - [x] 全量回归通过（`cargo fmt --check` + `cargo test -p dbx-core`：839 lib + 4 新集成 + 既有套件 0 失败；`cargo check --workspace --locked` 干净）
+- **实现说明**：两 provider 都并入既有 `stream_with_tools` 链路（`ai.rs`），复用 `StreamingToolCallAccumulator` 与 agent loop 的多轮管线，与 OpenAI/Claude 同一转换点。**Gemini**：请求体 `tools: [{ functionDeclarations: [...] }]`（`to_gemini_tool()` 即 declaration 条目，参数 schema 本就是 Gemini 接受的 OpenAPI 子集），function-calling mode 用 API 默认 AUTO，POST `:streamGenerateContent?alt=sse`；流解析把 `candidates[0].content.parts[]` 的 text part 流为文本 delta、`functionCall` part（完整到达、无参数分片）走 start+delta+complete 进 accumulator，`usageMetadata` 给 best-effort token 数；回传用 `gemini_contents_with_tools` 把 assistant tool_calls 转成 model 的 `functionCall` parts、tool 结果转成 `functionResponse` part（`{name, response:{result}}`）并归并到单个 user turn——Gemini 无 call id，function 名从最近一条声明该 id 的 assistant 轮解析。**Ollama**：走本仓库已有的 OpenAI 兼容 `/v1/chat/completions` 路径（其 `tools`/`tool_calls` JSON 与 `/api/chat` 同形，不新增 native 端点/解析器）；opt-in 选 `/api/show` 能力探测而非模型名清单/环境变量——`AiConfig` 无 per-model 能力字段，名字清单随 Ollama 发版过时，探测每次 run 一次、失败即安全回退，非 opt-in 流量与改动前逐字节一致。`provider_supports_function_calling` 变 async（唯一调用方 `agent_loop.rs`）；工具执行、写确认门控、事件发射零改动。
 
 ### T22 置信门控未知列诊断 ⬜
 
