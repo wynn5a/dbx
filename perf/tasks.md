@@ -37,7 +37,7 @@
 | T16 | 全局错误处理器 | improvement-plan §6 E3 | S | ✅ 6609cd39 |
 | T17 | 可行动的连接错误提示 | improvement-plan §6 E4 | M | ✅ 0bbf6f2d |
 | T18 | 连接与 schema 加载可取消 | improvement-plan §6 E5 | M | ✅ 58f1c843 |
-| T19 | 高危 SQL 增加确认摩擦 | improvement-plan §5 D3 | S | ⬜ |
+| T19 | 高危 SQL 增加确认摩擦 | improvement-plan §5 D3 | S | ✅ 75cfc769 |
 | T20 | search_tables 工具 | improvement-plan §5 D4 | S | ⬜ |
 | T21 | Gemini/Ollama 工具调用 | improvement-plan §5 D5 | M | ⬜ |
 | T22 | 置信门控未知列诊断 | improvement-plan §4 C5 | L | ⬜ |
@@ -258,14 +258,15 @@
   - [x] 测试通过（`cargo fmt --check` + `cargo test -p dbx-core` 851 过（含 3 条新注册表单测）+ `cargo check --workspace --locked` + `cargo test -p dbx --lib` 42 过；`pnpm check` 全绿：vitest 168 文件 1177 用例，含新增 9 例）
 - **实现说明**：后端 `connect_db` 新增 `attempt_id` 参数并注册进 `AppState.connection_attempts`（dbx-core 新 `ConnectionAttempts` 注册表，模式对齐 T02 `RunningQueries` / T12 `AI_AGENT_CANCELS`），新命令 `cancel_connection_attempt` 翻 token 中止 connect future。前端 `connect()` 每 attempt 生成 uuid 传入；前端超时路径同样 fire-and-forget 取消（对齐 queryStore 查询超时取消先例），后端不再无人监听地跑完。树加载取消按任务约定只需丢弃 future（元数据读无服务端语句可杀）：loadDatabases/loadSchemas/loadTables/loadRedisDatabases/loadMongoDatabases/loadMongoCollections/loadSqlServerDatabaseObjects/loadObjectGroupChildren/loadColumns/loadIndexes/loadForeignKeys/loadTriggers 全部接 per-node attempt guard——取消/被新 attempt 取代后 `attemptIsActive` 为 false，迟到结果不写 children、不展开、不记错误（静默）。取消以 `ConnectionAttemptCancelledError` reject `connect()`，ConnectionDialog/App.vue/useFileDrop 对其静默（不弹"连接失败"也不弹"成功"，one_time 连接仍清理）；透明后台重连（ensureConnected/reconnectForMetadata）不传 attempt id，保持现状（不产生半开状态，最多留下完整池）。UI 组件无挂载测试设施，TreeItem 取消按钮与 App/useFileDrop/对话框的静默接线以源码契约测试锁定（同 T15/T16 先例）。
 
-### T19 高危 SQL 增加确认摩擦 ⬜
+### T19 高危 SQL 增加确认摩擦 ✅ 75cfc769
 
 - **来源** improvement-plan-2026-09.md §5 D3（Track D）· **规模** S
 - **内容** Agent 确认卡（`AiAssistant.vue:1170-1178`）对 `dangerous` 与 `low_risk_write` 都是同样一键 Run。对 `dangerous` / `schema_change` 级要求勾选确认或输入目标表名。
 - **验收**
-  - [ ] dangerous/schema_change 未完成额外确认时 Run 不可用；完成后可用
-  - [ ] low_risk_write 与只读工具交互不变；`aiSqlExecutionPolicy` 分类测试不回退
-  - [ ] 测试通过
+  - [x] dangerous/schema_change 未完成额外确认时 Run 不可用；完成后可用（新增纯函数 `requiresAiConfirmFriction` / `isAiConfirmRunEnabled`（`aiSqlExecutionPolicy.ts`，前者恰为 dangerous+schema_change，后者即 Run 可用性门控）；确认卡渲染显式勾选框（`ai.toolConfirm.highRiskAck`，六 locale），未勾选时 Run 按钮 disabled，`confirmTool` 批准路径复查同一函数防程序化绕过；`aiSqlExecutionPolicy.test.ts` 断言两函数在各 category 下的取值 + 源码契约锁定 AiAssistant 接线）
+  - [x] low_risk_write 与只读工具交互不变；`aiSqlExecutionPolicy` 分类测试不回退（状态挂在 `PendingToolConfirm.frictionAcknowledged` 上、每张新卡初始化 false，执行/拒绝/取消随 pendingConfirm 整体丢弃，低风险与只读卡片不渲染勾选框、Run 保持一键；既有分类与自动执行测试原样全过）
+  - [x] 测试通过（`pnpm check` 全绿：format + lint + typecheck + vitest 168 文件 1182 用例，含新增 4 例——friction 仅限 dangerous/schema_change、Run 可用性映射、friction 取自确认卡同一 decision、AiAssistant 接线与六 locale 文案源码契约）
+- **实现说明**：摩擦形式选勾选确认框（简单可靠，纯前端）。判定与门控抽为 `aiSqlExecutionPolicy.ts` 纯函数供测试；`AiAssistant.vue` 的 `PendingToolConfirm` 增加 `frictionAcknowledged` 字段，`tool_confirm_request` 每次置 false（状态独立、随卡复位），勾选框仅在 `requiresAiConfirmFriction(category)` 为真时渲染，Run 按钮绑定 `isAiConfirmRunEnabled`。后端确认 API 与风险分类逻辑零改动。UI 组件无挂载测试设施，接线以源码契约测试锁定（同 T15/T16 先例）。
 
 ### T20 search_tables 工具 ⬜
 
