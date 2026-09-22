@@ -325,10 +325,25 @@ async fn try_connect(
             .map_err(|_| format!("SQL Server connection timed out ({}s)", timeout.as_secs()))?
             .map_err(|e| format!("SQL Server connection failed: {e}"))?
     };
+    if let Err(err) = apply_tcp_keepalive(&tcp) {
+        // Best effort: the connection works without it, it just loses the
+        // half-open detection.
+        log::warn!("[sqlserver][connect] could not enable TCP keepalive: {err}");
+    }
     tokio::time::timeout(timeout, Client::connect(config, tcp.compat_write()))
         .await
         .map_err(|_| format!("SQL Server handshake timed out ({}s)", timeout.as_secs()))?
         .map_err(|e| format!("SQL Server connection failed: {e}"))
+}
+
+/// tiberius exposes no keepalive configuration of its own and the OS default
+/// sends the first probe only after ~2 idle hours — so apply DBX's shared
+/// schedule directly to the hand-dialled TDS socket, before the handshake
+/// wraps it in TLS. A half-open socket (peer vanished, NAT entry expired) is
+/// then probed dead in minutes instead of hanging a lease or health check on
+/// a silently dead wire.
+fn apply_tcp_keepalive(tcp: &TcpStream) -> std::io::Result<()> {
+    socket2::SockRef::from(tcp).set_tcp_keepalive(&super::socket2_tcp_keepalive())
 }
 
 fn row_to_json(row: &tiberius::Row) -> Vec<serde_json::Value> {
@@ -1454,13 +1469,40 @@ fn first_sql_tokens(sql: &str, limit: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_spatial_safe_sqlserver_query, extract_showplan_inner, is_showplan_explain_batch,
+        apply_tcp_keepalive, build_spatial_safe_sqlserver_query, extract_showplan_inner, is_showplan_explain_batch,
         is_sqlserver_spatial_column, requires_simple_query_batch, sqlserver_cell_to_json, sqlserver_columns_sql,
         sqlserver_indexes_sql, sqlserver_list_objects_sql, SqlServerDescribedColumn, SqlServerResultSet,
     };
     use chrono::NaiveDate;
     use std::time::Instant;
     use tiberius::{ColumnData, IntoSql};
+
+    /// The dialled TDS socket must accept the shared keepalive schedule
+    /// (SO_KEEPALIVE + interval, plus retries where the OS has a knob) — this
+    /// is the setsockopt round trip try_connect performs on every connection.
+    #[tokio::test]
+    async fn sqlserver_dialled_socket_accepts_the_keepalive_schedule() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (client, _server) = tokio::join!(tokio::net::TcpStream::connect(addr), listener.accept());
+        let tcp = client.expect("dial loopback");
+
+        apply_tcp_keepalive(&tcp).expect("SO_KEEPALIVE schedule must apply to the raw TDS socket");
+    }
+
+    /// try_connect dials the TCP socket itself, so keepalive can only be set
+    /// there — lock the call into the connect path (tiberius has no knob).
+    #[test]
+    fn sqlserver_connect_applies_keepalive_to_the_dialled_socket() {
+        let source = include_str!("sqlserver.rs");
+        let body = source.split("async fn try_connect").nth(1).unwrap();
+        let body = body.split("\nasync fn ").next().unwrap();
+        assert!(
+            body.contains("apply_tcp_keepalive(&tcp)"),
+            "try_connect must apply the DBX keepalive schedule to the raw TDS socket before \
+             handing it to tiberius; without it a half-open socket hangs on the OS 2-hour default"
+        );
+    }
 
     #[test]
     fn sqlserver_pool_open_fails_fast_on_unreachable_server() {

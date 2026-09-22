@@ -33,6 +33,10 @@ rustls = { version = "0.23", features = ["aws-lc-rs"] }
 rustls-pemfile = "2.2"
 duckdb = "1.3.2"
 tiberius = { version = "0.12.3", default-features = false, features = ["tds73", "chrono", "rust_decimal", "rustls", "sql-browser-tokio"] }
+# TCP keepalive schedule on SQL Server's hand-dialled TDS socket (tiberius has
+# no keepalive option of its own). Same 0.6 "all" build the tokio-postgres
+# fork already compiles, so this adds no new code to the tree.
+socket2 = { version = "0.6", default-features = false, features = ["all"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "socks"] }
 futures = "0.3"
 iana-time-zone = "0.1"

@@ -373,6 +373,7 @@ fn create_pool(url: &str, ca_cert_path: Option<&str>, max_connections: usize) ->
     let opts =
         mysql_async::Opts::from_url(&mysql_async_url(&tls_url.url)).map_err(|e| format!("Invalid MySQL URL: {e}"))?;
     let base_ssl_opts = opts.ssl_opts().cloned();
+    let tcp_keepalive_ms = mysql_tcp_keepalive_ms(&opts);
     let max_connections = max_connections.max(1);
     // Single-connection pools (max_connections == 1) are client session pools that
     // must preserve session state (e.g. TEMPORARY TABLEs) across queries.
@@ -384,12 +385,23 @@ fn create_pool(url: &str, ca_cert_path: Option<&str>, max_connections: usize) ->
     let mut builder = mysql_async::OptsBuilder::from_opts(opts)
         .stmt_cache_size(0)
         .prefer_socket(false)
+        .tcp_keepalive(Some(tcp_keepalive_ms))
         .pool_opts(Some(pool_opts))
         .setup(mysql_setup_queries(url));
     if let Some(ssl_opts) = mysql_ssl_opts(base_ssl_opts, url, ca_cert_path, &tls_url.files)? {
         builder = builder.ssl_opts(ssl_opts);
     }
     Ok(MySqlPool::new(builder))
+}
+
+/// mysql_async applies `tcp_keepalive` (milliseconds) as the keepalive idle
+/// time on every native TCP connect it dials, so a half-open socket (peer
+/// vanished, NAT entry expired) errors out in minutes instead of hanging on
+/// the OS's ~2-hour default. A `tcp_keepalive=` URL parameter wins over the
+/// DBX default (the shared `TCP_KEEPALIVE_IDLE`); the crate exposes no knob
+/// for probe interval/retries, so the OS defaults apply after the idle window.
+fn mysql_tcp_keepalive_ms(opts: &mysql_async::Opts) -> u32 {
+    opts.tcp_keepalive().unwrap_or(super::TCP_KEEPALIVE_IDLE.as_millis() as u32)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2030,6 +2042,42 @@ pub async fn list_triggers(pool: &MySqlPool, database: &str, table: &str) -> Res
 mod tests {
     use super::*;
     use mysql_async::consts::ColumnFlags;
+
+    // --- native socket TCP keepalive (T28) ---
+
+    #[test]
+    fn mysql_pool_defaults_tcp_keepalive_to_the_dbx_window() {
+        let opts = mysql_async::Opts::from_url("mysql://root:secret@localhost:3306/app").unwrap();
+        assert_eq!(opts.tcp_keepalive(), None, "plain URL carries no keepalive of its own");
+
+        assert_eq!(mysql_tcp_keepalive_ms(&opts), 60_000);
+        assert_eq!(
+            mysql_tcp_keepalive_ms(&opts),
+            crate::db::TCP_KEEPALIVE_IDLE.as_millis() as u32,
+            "the default idle window is the shared TCP_KEEPALIVE_IDLE"
+        );
+    }
+
+    #[test]
+    fn mysql_tcp_keepalive_url_param_wins_over_the_default() {
+        let opts = mysql_async::Opts::from_url("mysql://root@localhost/db?tcp_keepalive=7000").unwrap();
+
+        assert_eq!(mysql_tcp_keepalive_ms(&opts), 7_000);
+    }
+
+    /// The built pool does not read its options back, so lock the wiring into
+    /// create_pool itself: without it the value above never reaches a socket.
+    #[test]
+    fn mysql_create_pool_wires_tcp_keepalive_into_the_builder() {
+        let source = include_str!("mysql.rs");
+        let body = source.split("fn create_pool").nth(1).unwrap();
+        let body = body.split("\nfn ").next().unwrap().split("\npub async fn ").next().unwrap();
+        assert!(
+            body.contains("tcp_keepalive(Some(tcp_keepalive_ms))"),
+            "create_pool must pass the resolved keepalive window to OptsBuilder::tcp_keepalive; \
+             mysql_async otherwise probes only on the OS's ~2-hour default schedule"
+        );
+    }
 
     // --- bulk completion metadata (B1) ---
 

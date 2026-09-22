@@ -1155,6 +1155,8 @@ pub async fn connect(url: &str, fallback_timeout: Duration) -> Result<Pool, Stri
             };
         }
 
+        apply_tcp_keepalive(&mut pg_config);
+
         let mgr_config = ManagerConfig { recycling_method: RecyclingMethod::Fast };
         let tls_config = postgres_tls_config(
             &pg_config,
@@ -1181,6 +1183,31 @@ pub async fn connect(url: &str, fallback_timeout: Duration) -> Result<Pool, Stri
         Ok(pool)
     })
     .await
+}
+
+/// Shrink the keepalive window on the startup config so the kernel probes a
+/// half-open socket (peer vanished, NAT entry expired) within minutes: the
+/// gaussdb fork enables keepalives by default but on the libpq schedule —
+/// first probe after ~2 idle hours, no interval/retries override. The fork
+/// applies the config on every connection it dials (plain or TLS), so the
+/// whole pool inherits this. Keepalive knobs given in the connection URL
+/// (`keepalives`, `keepalives_idle`, `keepalives_interval`,
+/// `keepalives_retries`) win over our defaults.
+fn apply_tcp_keepalive(pg_config: &mut tokio_postgres::Config) {
+    if !pg_config.get_keepalives() {
+        return;
+    }
+    // The fork's defaults: idle = 2 hours, interval/retries = OS default.
+    const FORK_DEFAULT_IDLE: Duration = Duration::from_secs(2 * 60 * 60);
+    if pg_config.get_keepalives_idle() == FORK_DEFAULT_IDLE {
+        pg_config.keepalives_idle(super::TCP_KEEPALIVE_IDLE);
+    }
+    if pg_config.get_keepalives_interval().is_none() {
+        pg_config.keepalives_interval(super::TCP_KEEPALIVE_INTERVAL);
+    }
+    if pg_config.get_keepalives_retries().is_none() {
+        pg_config.keepalives_retries(super::TCP_KEEPALIVE_RETRIES);
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -2367,6 +2394,41 @@ pub async fn copy_in(pool: &Pool, sql: &str, data: &[u8]) -> Result<(), String> 
 mod tests {
     use super::*;
     use tokio_postgres::types::FromSql;
+
+    // --- native socket TCP keepalive (T28) ---
+
+    #[test]
+    fn postgres_connect_config_applies_the_default_keepalive_schedule() {
+        let mut pg_config = tokio_postgres::Config::from_str("postgres://u:p@localhost:5432/db").unwrap();
+        // The gaussdb fork's own defaults: keepalives on, first probe after 2
+        // idle hours, OS defaults for interval/retries.
+        assert!(pg_config.get_keepalives());
+        assert_eq!(pg_config.get_keepalives_idle(), Duration::from_secs(2 * 60 * 60));
+        assert_eq!(pg_config.get_keepalives_interval(), None);
+        assert_eq!(pg_config.get_keepalives_retries(), None);
+
+        apply_tcp_keepalive(&mut pg_config);
+
+        assert!(pg_config.get_keepalives());
+        assert_eq!(pg_config.get_keepalives_idle(), crate::db::TCP_KEEPALIVE_IDLE);
+        assert_eq!(pg_config.get_keepalives_interval(), Some(crate::db::TCP_KEEPALIVE_INTERVAL));
+        assert_eq!(pg_config.get_keepalives_retries(), Some(crate::db::TCP_KEEPALIVE_RETRIES));
+    }
+
+    #[test]
+    fn postgres_keepalive_url_params_win_over_the_default_schedule() {
+        let mut pg_config = tokio_postgres::Config::from_str(
+            "postgres://u:p@localhost/db?keepalives=0&keepalives_idle=90&keepalives_interval=17&keepalives_retries=3",
+        )
+        .unwrap();
+
+        apply_tcp_keepalive(&mut pg_config);
+
+        assert!(!pg_config.get_keepalives(), "keepalives=0 in the URL must stay off");
+        assert_eq!(pg_config.get_keepalives_idle(), Duration::from_secs(90));
+        assert_eq!(pg_config.get_keepalives_interval(), Some(Duration::from_secs(17)));
+        assert_eq!(pg_config.get_keepalives_retries(), Some(3));
+    }
 
     // --- bulk completion metadata (B1) ---
 

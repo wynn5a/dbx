@@ -50,6 +50,42 @@ pub const TCP_PROBE_TIMEOUT_SECS: u64 = 3;
 /// `crate::process` filters server-side process listings to this tag.
 pub const CONNECTION_APP_NAME: &str = "dbx";
 
+/// TCP keepalive schedule applied to native DB sockets at connect (PostgreSQL,
+/// MySQL, SQL Server; the SSH tunnel keeps its own 30s session keepalive and
+/// Redis rides on the connection manager). Without an explicit schedule the OS
+/// sends the first probe only after ~2 idle hours, so a half-open socket (peer
+/// vanished, NAT entry expired) hangs the session for that long instead of
+/// erroring and letting the pool redial. Worst-case detection is
+/// idle + retries × interval ≈ 3.5 minutes.
+pub const TCP_KEEPALIVE_IDLE: Duration = Duration::from_secs(60);
+/// Interval between keepalive probes once the idle window has expired.
+pub const TCP_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+/// Unanswered probes before the kernel declares the socket dead (ETIMEDOUT).
+pub const TCP_KEEPALIVE_RETRIES: u32 = 5;
+
+/// The shared schedule as a socket2 descriptor, for drivers that dial the TCP
+/// socket themselves (SQL Server's raw TDS stream). The per-option cfgs mirror
+/// the gaussdb fork's `keepalive.rs`: not every OS exposes TCP_KEEPINTVL /
+/// TCP_KEEPCNT, and Windows has no probe-count knob in socket2.
+pub(crate) fn socket2_tcp_keepalive() -> socket2::TcpKeepalive {
+    let mut keepalive = socket2::TcpKeepalive::new().with_time(TCP_KEEPALIVE_IDLE);
+    #[cfg(not(any(target_os = "aix", target_os = "redox", target_os = "solaris", target_os = "openbsd")))]
+    {
+        keepalive = keepalive.with_interval(TCP_KEEPALIVE_INTERVAL);
+    }
+    #[cfg(not(any(
+        target_os = "aix",
+        target_os = "redox",
+        target_os = "solaris",
+        target_os = "windows",
+        target_os = "openbsd"
+    )))]
+    {
+        keepalive = keepalive.with_retries(TCP_KEEPALIVE_RETRIES);
+    }
+    keepalive
+}
+
 pub fn connection_timeout() -> Duration {
     Duration::from_secs(CONNECTION_TIMEOUT_SECS)
 }
