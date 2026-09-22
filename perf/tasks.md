@@ -44,7 +44,7 @@
 | T23 | 网格 FK 点击跳转 | improvement-plan §6 E7-1 | M | ✅ 37fc558b |
 | T24 | 方言函数目录（CH/DuckDB/Oracle） | improvement-plan §4 C6 | M | ✅ 9a8178b2 |
 | T25 | Leaflet 按需加载 | improvement-plan §3 B5 | S | ✅ b963ea14 |
-| T26 | PG JSON 列免 parse-再序列化 | improvement-plan §3 B4 | S | ⬜ |
+| T26 | PG JSON 列免 parse-再序列化 | improvement-plan §3 B4 | S | ✅ 057fa533 |
 | T27 | SSH 隧道放弃时驱逐连接池 | improvement-plan §2 A5 | S | ⬜ |
 | T28 | 原生 DB socket TCP keepalive | improvement-plan §2 A6 | S | ⬜ |
 | T29 | idle_timeout 设置诚实化 | improvement-plan §2 A7 | S | ⬜ |
@@ -331,13 +331,14 @@
   - [x] 构建 + 手工验证（GUI 手工点击在本环境不可行，以构建产物断言替代并如实标注：`pnpm build` 产物断言——入口链 index.html（entry + rolldown-runtime + ui + index.css）与 DataGrid chunk 均无 leaflet/对话框标记（改前 DataGrid chunk 含对话框代码与 3 处 leaflet 样式类名），对话框代码（openstreetmap 底图串、leaflet 引用）位于独立异步 chunk；`pnpm check` 全绿：format + lint + typecheck + vitest 172 文件 1241 测试）
 - **实现说明**：`DataGrid.vue` 去掉 `import "@/lib/previewHandlers/geometryMapPreview"`，改为 `ensurePreviewHandlersLoaded()`（memoized 动态 import，失败重置以允许重试）+ `previewHandlersVersion` ref（handler 注册完成后使 `previewActions` computed 失效重查 registry）+ watch（结果含 geometry/geography 列时立即预热，右键前动作已注册）。`geometryMapPreview.execute()` 改 async，在构建完要素集合之后才 `await import("@/components/grid/LayerPreviewDialog.vue")`——无可展示要素时不加载任何东西；`PreviewAction.execute` 签名放宽为可返回 Promise，`executePreviewAction` await 并 catch，失败以 toast 呈现。Leaflet 依赖未删除；其 CSS 由对话框内动态 import 携带，随异步 chunk 走，无需额外处理。
 
-### T26 PG JSON 列免 parse-再序列化 ⬜
+### T26 PG JSON 列免 parse-再序列化 ✅ 057fa533
 
 - **来源** improvement-plan-2026-09.md §3 B4（Track B）· **规模** S
 - **内容** `postgres.rs:709-716` 读成 `serde_json::Value` 再 `.to_string()`。先按 `String` 读，`Value` 仅作回退。
 - **验收**
-  - [ ] json/jsonb 读取路径无 parse→serialize 往返（代码断言或微基准对照）
-  - [ ] 输出与原先逐字节一致（对照测试）
+  - [x] json/jsonb 读取路径无 parse→serialize 往返（代码断言：新增 `PgJsonText` FromSql 适配器直读线上文本——先做线上探针实验确认可行性：PG 对 json 列传存储原文（`{ "b" : 1.000 }` 原样）、对 jsonb 列传 1 字节版本号 + jsonb_out 规范文本（`0x01 + {"a": 1, "bb": 2}`），文本协议/无前缀载荷同样直读（JSON 文本不可能以 `0x01` 开头）；单测断言 `from_sql` 输出与线上字节逐字节相等（带空白/重复键/转义的原文是 parse+serialize 无法复现的）+ jsonb 仅剥版本字节 + accepts 矩阵（JSON/JSONB 是、TEXT 否）。微基准对照（release、2.1KB 文档、2 万次）：原路径 ≈4.1µs/格 vs 直读 ≈0.08µs/格，约 51x；仓库无 criterion，不新增基准依赖，时间数字不入测试）
+  - [x] 输出与数据库原文逐字节一致（语义修正见实现说明；对照测试 `tests/live_postgres_json.rs`：env 门控 `DBX_TEST_POSTGRES_URL`，Docker 临时 PG16 实测通过、用后弃容器；11 行覆盖嵌套对象/数组/unicode/转义/重复键/30 位大整数/38 位高精度小数/指数/顶层标量/空对象空数组/NULL/>50KB 大对象，逐格断言 json/jsonb 列 == 服务端 `::text` 原文（经驱动 TEXT 路径读取，同版本同服务器），另加精确钉子防 parse 路径回归：json 空白与重复键原文保留、30 位整数完整、jsonb 键序按长度+字典序）
+- **实现说明**：`pg_value_to_json` 的 JSON/JSONB 分支改为先 `PgJsonText` 直读（jsonb 仅剥一节版本字节；类型匹配按 OID 与名字双重判断，对齐 gaussdb fork 的 `is_json_type`，GaussDB 兼容端同样适用），`serde_json::Value` parse 仅作防御回退，NULL 仍为 Null；顺带删除本就不可达的 `try_get::<String>`（fork 的 `String::accepts` 不含 json/jsonb）。**行为契约（语义修正，经实验决定）**：输出不再与旧 serde_json 序列化逐字节一致——旧路径是 parse 后重排：规范化空白与数字字面量（`1.000`→`1.0`、`1e2`→`100.0`）、丢弃重复键、解转义、**超 f64 精度数字被静默改写（30 位整数显示为 `1.2345678901234568e+29`）**；直读产出 PG 自己的文本（psql 所见），才是"展示数据库真实内容"的正确结果，也是原实现想要的效果。网格仍收到 JSON 字符串，前端展示形态不变。验证：`cargo fmt --check` + `cargo test -p dbx-core` 全绿（873 通过）；live PG 实测 json/network/completion_metadata/query_cancel/transaction_recovery 全过；`live_postgres_transfer` 在本环境的 base 提交上同样失败（gaussdb fork `Row::get` 对 domain 类型列索引越界，与本任务无关，如实记录）。
 
 ### T27 SSH 隧道放弃时驱逐连接池 ⬜
 
