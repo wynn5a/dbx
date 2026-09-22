@@ -3118,6 +3118,7 @@ export const useConnectionStore = defineStore("connection", () => {
     refreshCompletionObjects,
     refreshCompletionColumns,
     refreshCompletionSchemas,
+    invalidateCompletionCache,
     listElasticsearchCompletionIndices,
     exportConnectionsToFile,
     readImportFile,

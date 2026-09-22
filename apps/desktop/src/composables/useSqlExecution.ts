@@ -32,6 +32,39 @@ function primarySqlOperation(sql: string): string {
   return statement?.match(/^([a-z]+)/i)?.[1]?.toUpperCase() || "SQL";
 }
 
+type MetadataRefreshingStore = Pick<
+  ReturnType<typeof useConnectionStore>,
+  "invalidateCompletionCache" | "loadDatabases" | "refreshObjectListTreeNode"
+>;
+
+/**
+ * After an editor execution, drop the caches a successful statement may have
+ * made stale. DDL detection reuses `sqlMetadataRefreshTarget` — the same
+ * classification that drives the sidebar tree refresh — so CREATE/ALTER/DROP/
+ * RENAME on database/schema/table-like objects (comments stripped) trigger and
+ * pure SELECT/DML does not. TRUNCATE stays data-only there on purpose: it
+ * changes table contents, not structure, so completion listings remain valid.
+ * On DDL, the completion caches for the affected connection + database are
+ * invalidated alongside the tree refresh, so new objects are completable on
+ * the next completion request without reconnecting or refreshing by hand.
+ */
+export async function refreshMetadataAfterExecution(
+  connectionStore: MetadataRefreshingStore,
+  tab: { connectionId: string; database: string; schema?: string },
+  sql: string,
+  success: boolean,
+): Promise<void> {
+  if (!success) return;
+  const refreshTarget = sqlMetadataRefreshTarget(sql, tab.schema);
+  if (refreshTarget.scope === "connection") {
+    connectionStore.invalidateCompletionCache(tab.connectionId);
+    await connectionStore.loadDatabases(tab.connectionId, { force: true });
+  } else if (refreshTarget.scope === "database") {
+    connectionStore.invalidateCompletionCache(tab.connectionId, tab.database);
+    await connectionStore.refreshObjectListTreeNode(tab.connectionId, tab.database, refreshTarget.schema);
+  }
+}
+
 export function useSqlExecution(deps: {
   activeTab: ComputedRef<QueryTab | undefined>;
   activeConnection: ComputedRef<ConnectionConfig | undefined>;
@@ -95,14 +128,7 @@ export function useSqlExecution(deps: {
       operation: primarySqlOperation(sql),
       affected_rows: success ? tab.result?.affected_rows : undefined,
     });
-    if (success) {
-      const refreshTarget = sqlMetadataRefreshTarget(sql, tab.schema);
-      if (refreshTarget.scope === "connection") {
-        await connectionStore.loadDatabases(tab.connectionId, { force: true });
-      } else if (refreshTarget.scope === "database") {
-        await connectionStore.refreshObjectListTreeNode(tab.connectionId, tab.database, refreshTarget.schema);
-      }
-    }
+    await refreshMetadataAfterExecution(connectionStore, tab, sql, success);
   }
 
   function cancelActiveExecution() {
