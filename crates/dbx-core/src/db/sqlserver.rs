@@ -4,6 +4,7 @@ use futures::{FutureExt, TryStreamExt};
 use rust_decimal::Decimal;
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tiberius::{AuthMethod, Client, ColumnData, Config, FromSql, QueryItem, QueryStream, SqlBrowser};
 use tokio::net::TcpStream;
@@ -12,6 +13,201 @@ use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
 pub type SqlServerClient = Client<Compat<TcpStream>>;
 const SIMPLE_QUERY_MODULE_KEYWORDS: &[&str] = &["FUNCTION", "PROC", "PROCEDURE", "TRIGGER", "VIEW"];
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Maximum number of concurrent TDS connections per SQL Server pool, aligned
+/// with the PG/MySQL pool size (QUERY_POOL_MAX_SIZE) so one slow query can no
+/// longer serialize the schema tree, completion metadata, and every query tab
+/// behind a single socket.
+pub const SQLSERVER_POOL_MAX_SIZE: usize = 3;
+
+/// How many times lease acquisition may shed a connection that fails its
+/// health check and try another before giving up (same pattern as MySQL's
+/// `get_conn_with_health_check`).
+const MAX_LEASE_ATTEMPTS: usize = 3;
+
+/// Connection parameters retained by the pool so it can redial transparently
+/// when a leased or idle connection turns out to be stale.
+#[derive(Clone)]
+pub struct SqlServerConnectParams {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    pub database: Option<String>,
+    pub connect_timeout: Duration,
+}
+
+/// A small connection pool over raw TDS sockets. Idle sockets sit in a list;
+/// a semaphore caps the total number of live connections at
+/// [SQLSERVER_POOL_MAX_SIZE]. Callers check connections out via
+/// [SqlServerPool::lease_checked], which health-checks the socket and sheds a
+/// stale one by dialling a replacement — so a server-side restart, an idle
+/// timeout, or a KILLed session heals on the next statement instead of
+/// surfacing an error.
+pub struct SqlServerPool {
+    inner: Arc<SqlServerPoolInner>,
+}
+
+struct SqlServerPoolInner {
+    params: SqlServerConnectParams,
+    idle: tokio::sync::Mutex<Vec<SqlServerClient>>,
+    permits: Arc<tokio::sync::Semaphore>,
+}
+
+impl SqlServerPool {
+    /// Create a pool and eagerly open one healthy connection so unreachable
+    /// servers fail pool creation with the usual connect error instead of
+    /// deferring it to the first query.
+    pub async fn open(params: SqlServerConnectParams) -> Result<Self, String> {
+        let mut conn = connect(
+            &params.host,
+            params.port,
+            &params.username,
+            &params.password,
+            params.database.as_deref(),
+            params.connect_timeout,
+        )
+        .await?;
+        check_conn_health(&mut conn).await?;
+        Ok(Self {
+            inner: Arc::new(SqlServerPoolInner {
+                params,
+                idle: tokio::sync::Mutex::new(vec![conn]),
+                permits: Arc::new(tokio::sync::Semaphore::new(SQLSERVER_POOL_MAX_SIZE)),
+            }),
+        })
+    }
+
+    pub fn max_size(&self) -> usize {
+        SQLSERVER_POOL_MAX_SIZE
+    }
+
+    /// Check out a raw connection, bounded by the pool's semaphore. Prefer
+    /// [Self::lease_checked] on product call paths.
+    async fn lease(&self) -> Result<SqlServerLease, String> {
+        let permit = self.inner.permits.clone().acquire_owned().await.map_err(|e| e.to_string())?;
+        let conn = match self.inner.idle.lock().await.pop() {
+            Some(conn) => conn,
+            None => {
+                let params = &self.inner.params;
+                connect(
+                    &params.host,
+                    params.port,
+                    &params.username,
+                    &params.password,
+                    params.database.as_deref(),
+                    params.connect_timeout,
+                )
+                .await?
+            }
+        };
+        Ok(SqlServerLease { inner: Arc::clone(&self.inner), _permit: permit, conn: Some(conn), reusable: false })
+    }
+
+    /// Check out a connection whose socket is proven alive: a stale idle
+    /// connection is discarded and redialled (up to [MAX_LEASE_ATTEMPTS]) the
+    /// same way MySQL sheds dead pooled connections at checkout. Returns the
+    /// session id (SPID) so callers can register a server-side cancel target.
+    pub async fn lease_checked(&self) -> Result<(SqlServerLease, Option<String>), String> {
+        let mut lease = self.lease().await?;
+        let mut last_err = String::new();
+        for attempt in 1..=MAX_LEASE_ATTEMPTS {
+            match lease.health_check().await {
+                Ok(spid) => {
+                    if attempt > 1 {
+                        log::info!("[sqlserver][pool] recovered a healthy connection on attempt {attempt}");
+                    }
+                    return Ok((lease, spid));
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[sqlserver][pool] lease health check failed (attempt {attempt}/{MAX_LEASE_ATTEMPTS}): {err}; discarding stale connection"
+                    );
+                    last_err = err;
+                    if attempt < MAX_LEASE_ATTEMPTS {
+                        lease.redial().await?;
+                    }
+                }
+            }
+        }
+        Err(format!("SQL Server connection health check failed after {MAX_LEASE_ATTEMPTS} attempts: {last_err}"))
+    }
+}
+
+/// A pooled connection checked out of a [SqlServerPool].
+///
+/// A lease starts life *not* reusable: when it is dropped mid-flight (query
+/// timeout or cancellation dropped the executing future), unread TDS tokens
+/// may be left on the wire and the socket is closed rather than recycled.
+/// Callers mark the connection with [SqlServerLease::keep] once a statement
+/// has round-tripped cleanly, or [SqlServerLease::poison] to force a discard.
+pub struct SqlServerLease {
+    inner: Arc<SqlServerPoolInner>,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+    conn: Option<SqlServerClient>,
+    reusable: bool,
+}
+
+impl SqlServerLease {
+    pub fn conn(&mut self) -> &mut SqlServerClient {
+        self.conn.as_mut().expect("lease connection must exist while the lease is held")
+    }
+
+    /// Mark the connection healthy so release returns it to the idle list.
+    pub fn keep(&mut self) {
+        self.reusable = true;
+    }
+
+    /// Mark the connection as unusable (abandoned wire, broken socket) so
+    /// release drops it instead of recycling it.
+    pub fn poison(&mut self) {
+        self.reusable = false;
+    }
+
+    /// Bounded staleness probe (`SELECT @@SPID`): validates the socket and
+    /// returns the session id for server-side cancel registration.
+    async fn health_check(&mut self) -> Result<Option<String>, String> {
+        match self.conn.as_mut() {
+            Some(conn) => check_conn_health(conn).await,
+            None => Err("SQL Server lease has no connection".to_string()),
+        }
+    }
+
+    /// Replace the connection with a freshly dialled one. The old socket is
+    /// dropped, never recycled.
+    async fn redial(&mut self) -> Result<(), String> {
+        self.conn = None;
+        let params = &self.inner.params;
+        let conn = connect(
+            &params.host,
+            params.port,
+            &params.username,
+            &params.password,
+            params.database.as_deref(),
+            params.connect_timeout,
+        )
+        .await?;
+        self.conn = Some(conn);
+        Ok(())
+    }
+}
+
+impl Drop for SqlServerLease {
+    fn drop(&mut self) {
+        if !self.reusable {
+            return; // the socket closes with the connection
+        }
+        if let Some(conn) = self.conn.take() {
+            let inner = Arc::clone(&self.inner);
+            // Returning to the idle list needs an async lock; do it off-thread
+            // so Drop stays synchronous. Without a runtime (shutdown, some
+            // tests) the connection is simply closed.
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move { inner.idle.lock().await.push(conn) });
+            }
+        }
+    }
+}
 
 // Markers used to wrap an estimated-plan request. Kept in sync with
 // query_execution_sql::build_explain_sql, which constructs the wrapper.
@@ -55,13 +251,6 @@ async fn collect_spid(stream: QueryStream<'_>) -> Option<String> {
         .map(|spid| spid.to_string())
         .or_else(|| row.try_get::<i16, _>(0).ok().flatten().map(|spid| spid.to_string()))
         .or_else(|| row.try_get::<&str, _>(0).ok().flatten().map(str::to_string))
-}
-
-/// Fetch the server session id (SPID) of the current connection. Used by the
-/// multi-statement path, whose batches skip the per-query health check.
-pub async fn current_spid(client: &mut SqlServerClient) -> Option<String> {
-    let stream = client.query("SELECT @@SPID", &[]).await.ok()?;
-    collect_spid(stream).await
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -994,23 +1183,20 @@ pub async fn list_triggers(
 }
 
 pub async fn execute_query(client: &mut SqlServerClient, sql: &str) -> Result<QueryResult, String> {
-    execute_query_with_max_rows(client, sql, None, &Default::default()).await.map(|(result, _)| result)
+    execute_query_with_max_rows(client, sql, None).await.map(|(result, _)| result)
 }
 
-/// Executes a query, returning the result plus a flag telling whether the row
-/// limit made us abandon the response stream mid-flight. An abandoned stream
-/// leaves unread TDS packets on the wire, so callers must discard the pooled
-/// connection (the next statement would otherwise block draining them).
+/// Executes a query on an already-checked-out connection, returning the result
+/// plus a flag telling whether the row limit made us abandon the response
+/// stream mid-flight. An abandoned stream leaves unread TDS packets on the
+/// wire, so the caller must discard the connection (mark the lease poisoned)
+/// instead of returning it to the pool — the next statement would otherwise
+/// block draining them.
 pub async fn execute_query_with_max_rows(
     client: &mut SqlServerClient,
     sql: &str,
     max_rows: Option<usize>,
-    server_cancel_registrar: &crate::query_cancel::ServerCancelRegistrar,
 ) -> Result<(QueryResult, bool), String> {
-    let spid = check_conn_health(client).await?;
-    if let Some(spid) = &spid {
-        server_cancel_registrar.register_sqlserver_kill(spid);
-    }
     let start = Instant::now();
 
     // SQL Server explain: `SET SHOWPLAN_ALL ON; <query>; SET SHOWPLAN_ALL OFF;`
@@ -1275,6 +1461,27 @@ mod tests {
     use chrono::NaiveDate;
     use std::time::Instant;
     use tiberius::{ColumnData, IntoSql};
+
+    #[test]
+    fn sqlserver_pool_open_fails_fast_on_unreachable_server() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let err = rt.block_on(async {
+            let params = super::SqlServerConnectParams {
+                host: "127.0.0.1".to_string(),
+                port: 1,
+                username: "sa".to_string(),
+                password: "x".to_string(),
+                database: None,
+                connect_timeout: std::time::Duration::from_secs(1),
+            };
+            super::SqlServerPool::open(params).await
+        });
+        let Err(err) = err else { panic!("pool open to a dead port must fail") };
+        assert!(
+            err.contains("SQL Server connection failed") || err.contains("SQL Server connection timed out"),
+            "expected a connect-phase error, got: {err}"
+        );
+    }
 
     #[test]
     fn detects_and_unwraps_showplan_explain_batch() {

@@ -21,7 +21,7 @@
 |---|---|---|---|---|
 | T01 | 锁死 MCP 桥（鉴权 + 写门控） | improvement-plan §5 D1 | S | ✅ a0849b48 |
 | T02 | 查询真实服务端取消 | improvement-plan §2 A1 | M | ✅ d4485b14 |
-| T03 | SQL Server 连接池 | improvement-plan §2 A2 | M | ⬜ |
+| T03 | SQL Server 连接池 | improvement-plan §2 A2 | M | ✅ (见 §T03) |
 | T04 | 网格保存先展示 SQL | improvement-plan §6 E1 | M | ⬜ |
 | T05 | 补全上下文剥离注释 | improvement-plan §4 C1 | M | ⬜ |
 | T06 | MySQL/SQL Server 标识符引号 | improvement-plan §4 C2 | S | ⬜ |
@@ -91,15 +91,16 @@
   - [x] DuckDB 既有中断路径（`query.rs:626-631`）不回退；全量回归通过（`cargo fmt --check` + dbx-core 797 过 + dbx --lib 42 过 + `pnpm check` 全绿）
 - **附带修复**：PG SELECT 走 `BEGIN…DECLARE…FETCH` 游标事务，服务端停止后连接带已中止事务回池，fast recycle 会把脏连接给下一条查询 —— 取消/超时触发服务端停止后丢弃重建 PG 池。
 
-### T03 SQL Server 连接池 ⬜
+### T03 SQL Server 连接池 ✅ (hash 待补)
 
 - **来源** improvement-plan-2026-09.md §2 A2（Track A）· **规模** M
 - **内容** `connection.rs:51` 的 `PoolKind::SqlServer(Arc<Mutex<SqlServerClient>>)` 单 socket 单互斥锁，树/补全/所有标签页排在一条慢查询后面。改为 2–3 连接小池（semaphore，`QUERY_POOL_MAX_SIZE = 3` 对齐 PG/MySQL）；`check_conn_health`（`sqlserver.rs:21-39`）失败按 `mysql.rs:1448-1497` 模式透明重拨。
 - **验收**
-  - [ ] 并发测试：两条慢查询并行执行（原先串行）
-  - [ ] 断连后下一次查询透明恢复；健康检查失败触发重拨而非报错
-  - [ ] 一条慢查询不再阻塞树加载与补全（并发测试或手工佐证）
-  - [ ] 全量回归通过
+  - [x] 并发测试：两条慢查询并行执行（`tests/live_sqlserver_pool.rs` `live_sqlserver_pool_runs_slow_queries_in_parallel`：同池两条 2s WAITFOR 总耗时 <3s，azure-sql-edge 实测通过）
+  - [x] 断连后下一次查询透明恢复；健康检查失败触发重拨而非报错（`live_sqlserver_pool_recovers_after_killed_session`：外部 `KILL` 会话后下一条查询 16ms 内经重拨恢复；`live_sqlserver_pool_schema_load_not_blocked_by_slow_query` 同时佐证慢查询不阻塞树加载）
+  - [x] 一条慢查询不再阻塞树加载与补全（树加载在 WAITFOR 运行中 24ms 返回；T02 取消 live 测试回归通过）
+  - [x] 全量回归通过（`cargo fmt --check` + dbx-core 798 过 + dbx --lib 42 过）
+- **实现说明**：新增 `db::sqlserver::SqlServerPool`（`Semaphore(3)` 限并发 + 空闲列表）与 `SqlServerLease` 租约——借出前 `SELECT @@SPID` 健康检查（3s 上界）失败即丢弃重拨（≤3 次，对齐 MySQL）；租约默认 Drop 即丢 socket（超时/取消中断的连接绝不回池），`keep()`/`poison()` 控制健康回收；行限制 abandoned-wire 与连接错误从"废弃整池"改为"只丢当前连接"。`execute_query_with_max_rows` 去掉内部健康检查与 registrar 参数（SPID 注册移到租约借出处），查询语句往返开销与改造前持平。
 
 ### T04 网格保存先展示 SQL ⬜
 

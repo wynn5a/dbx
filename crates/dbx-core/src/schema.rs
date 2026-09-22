@@ -28,10 +28,17 @@ macro_rules! dispatch_mysql {
 
 macro_rules! try_sqlserver {
     ($connections:expr, $pool_key:expr, $method:ident $(, $arg:expr)*) => {
-        if let Some(client) = extract_pool!(&$connections, $pool_key, SqlServer) {
+        if let Some(pool) = extract_pool!(&$connections, $pool_key, SqlServer) {
             drop($connections);
-            let mut client = client.lock().await;
-            return db::sqlserver::$method(&mut client $(, $arg)*).await;
+            // lease_checked health-checks the socket and redials stale
+            // connections transparently, so a dropped idle connection never
+            // surfaces as a metadata error.
+            let (mut lease, _) = pool.lease_checked().await?;
+            let result = db::sqlserver::$method(lease.conn() $(, $arg)*).await;
+            // Metadata failures (SQL or connection) round-trip cleanly; a dead
+            // socket is shed at the next lease's health check.
+            lease.keep();
+            return result;
         }
     };
 }
@@ -564,10 +571,12 @@ async fn get_table_comment_once(
             // SQLite has no table-comment concept; skip the lookup entirely.
             return Ok(None);
         }
-        if let Some(client) = extract_pool!(&connections, &pool_key, SqlServer) {
+        if let Some(pool) = extract_pool!(&connections, &pool_key, SqlServer) {
             drop(connections);
-            let mut client = client.lock().await;
-            return db::sqlserver::get_table_comment(&mut client, schema, table).await;
+            let (mut lease, _) = pool.lease_checked().await?;
+            let result = db::sqlserver::get_table_comment(lease.conn(), schema, table).await;
+            lease.keep();
+            return result;
         }
     }
 
@@ -1506,10 +1515,12 @@ pub async fn get_table_ddl_core(
                 .map(|s| s.to_string())
                 .ok_or_else(|| "Table not found".to_string());
         }
-        if let Some(client) = extract_pool!(&connections, &pool_key, SqlServer) {
+        if let Some(pool) = extract_pool!(&connections, &pool_key, SqlServer) {
             drop(connections);
-            let mut client = client.lock().await;
-            return build_sqlserver_ddl(&mut client, schema, table).await;
+            let (mut lease, _) = pool.lease_checked().await?;
+            let result = build_sqlserver_ddl(lease.conn(), schema, table).await;
+            lease.keep();
+            return result;
         }
         try_agent!(connections, &pool_key, get_table_ddl, database, schema, table);
     }
@@ -1757,13 +1768,15 @@ pub async fn get_object_source_core(
                 .await?;
             return Ok(result);
         }
-        if let Some(client) = extract_pool!(&connections, &pool_key, SqlServer) {
+        if let Some(pool) = extract_pool!(&connections, &pool_key, SqlServer) {
             drop(connections);
-            let mut client = client.lock().await;
-            first_string_cell(
-                db::sqlserver::execute_query(&mut client, &sqlserver_object_source_sql(schema, name, &object_type))
+            let (mut lease, _) = pool.lease_checked().await?;
+            let result = first_string_cell(
+                db::sqlserver::execute_query(lease.conn(), &sqlserver_object_source_sql(schema, name, &object_type))
                     .await?,
-            )?
+            )?;
+            lease.keep();
+            result
         } else if let Some(client) = extract_pool!(&connections, &pool_key, Agent) {
             drop(connections);
             if db_config.as_ref().is_some_and(|config| config.db_type == DatabaseType::Oracle)

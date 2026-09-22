@@ -755,41 +755,67 @@ pub async fn do_execute(
             .await
             .map(|result| truncate_result_with_max_rows(result, max_rows))
         }
-        PoolKind::SqlServer(client) => {
-            let client = client.clone();
+        PoolKind::SqlServer(pool) => {
+            let pool = pool.clone();
             let max_rows = options.max_rows;
             drop(connections);
-            let mut client = match cancel_token.as_ref() {
+            // Check out a validated connection: lease_checked health-checks
+            // the socket and transparently redials stale ones. Cancellation is
+            // honored while waiting for a free slot or a fresh dial.
+            let (mut lease, spid) = match cancel_token.as_ref() {
                 Some(token) => tokio::select! {
                     biased;
                     _ = token.cancelled() => return Err(canceled_error()),
-                    guard = client.lock() => guard,
+                    lease = pool.lease_checked() => lease?,
                 },
-                None => client.lock().await,
+                None => pool.lease_checked().await?,
             };
+            if let Some(spid) = &spid {
+                server_cancel_registrar.register_sqlserver_kill(spid);
+            }
             let mut abandoned_wire = false;
+            // Set once the statement fully round-tripped (result or clean SQL
+            // error). Still false after wait_for_query_opt means the future
+            // was dropped mid-flight by timeout/cancel: the lease then drops
+            // the desynced socket instead of recycling it.
+            let mut wire_completed = false;
             let outcome = wait_for_query_opt(cancel_token, query_timeout, async {
-                let (result, abandoned) =
-                    db::sqlserver::execute_query_with_max_rows(&mut client, sql, max_rows, &server_cancel_registrar)
-                        .await?;
-                abandoned_wire = abandoned;
-                Ok(result)
+                let result = db::sqlserver::execute_query_with_max_rows(lease.conn(), sql, max_rows).await;
+                wire_completed = true;
+                result.map(|(result, abandoned)| {
+                    abandoned_wire = abandoned;
+                    result
+                })
             })
             .await;
             match outcome {
                 Ok(result) => {
                     if abandoned_wire {
-                        // The row limit made the driver drop the response stream:
-                        // unread TDS packets are left on this connection and the
-                        // next statement would stall draining them. Rebuild.
+                        // The row limit made the driver drop the response
+                        // stream: unread TDS packets are left on this
+                        // connection. Drop just this socket; the rest of the
+                        // pool stays healthy.
                         log::warn!(
-                            "[query][do_execute] discarding protocol-stateful pool '{pool_key}' after row-limit stream break"
+                            "[query][do_execute] discarding abandoned-wire SQL Server connection from '{pool_key}'"
                         );
-                        state.discard_pool(pool_key).await;
+                        lease.poison();
+                    } else {
+                        lease.keep();
                     }
                     Ok(truncate_result_with_max_rows(result, max_rows))
                 }
-                Err(e) => Err(e),
+                Err(e) => {
+                    if wire_completed {
+                        // The statement round-tripped; only shed the socket
+                        // when the failure itself says the connection is gone.
+                        if is_connection_error(&e) {
+                            lease.poison();
+                        } else {
+                            lease.keep();
+                        }
+                    }
+                    Err(e)
+                }
             }
         }
         PoolKind::Elasticsearch(client) => {
@@ -884,13 +910,15 @@ pub async fn do_execute(
 /// Whether a pool must be discarded after a query-execution timeout.
 ///
 /// Only protocol-stateful single-connection pools qualify: a dropped/timed-out
-/// future leaves them desynced (unread TDS tokens for SqlServer, an in-flight
-/// stdio response that would become the next call's reply for Agent, or a
-/// self-killed child process for an out-of-process plugin driver). HTTP-per-request
-/// clients (ClickHouse/Elasticsearch) and self-recycling native pools
-/// (MySQL/Postgres/SQLite/DuckDb/...) recover on their own and are kept.
+/// future leaves them desynced (an in-flight stdio response that would become
+/// the next call's reply for Agent, or a self-killed child process for an
+/// out-of-process plugin driver). HTTP-per-request clients
+/// (ClickHouse/Elasticsearch), self-recycling native pools
+/// (MySQL/Postgres/SQLite/DuckDb/...), and the SQL Server pool — whose lease
+/// drops only the affected socket when the future is dropped mid-flight —
+/// recover on their own and are kept.
 fn pool_discards_on_query_timeout(pool: &PoolKind) -> bool {
-    matches!(pool, PoolKind::Agent(_) | PoolKind::SqlServer(_) | PoolKind::ExternalDriver { .. })
+    matches!(pool, PoolKind::Agent(_) | PoolKind::ExternalDriver { .. })
 }
 
 fn external_driver_query_params(
@@ -1286,16 +1314,26 @@ async fn execute_multi_sqlserver(
     let mut batches_abandoned_wire = false;
     let max_rows = options.max_rows;
 
-    // The script's batches all share one session; capture its SPID once up
-    // front (one cheap round trip) so a cancel/timeout can KILL it server-side.
-    {
+    // The script's batches all share one session: check out a single pooled
+    // connection for the whole script and capture its SPID once up front (one
+    // cheap round trip) so a cancel/timeout can KILL it server-side.
+    let pool = {
         let connections = state.connections.read().await;
-        if let Some(PoolKind::SqlServer(client)) = connections.get(pool_key) {
-            let mut client = client.lock().await;
-            if let Some(spid) = db::sqlserver::current_spid(&mut client).await {
-                server_cancel_registrar.register_sqlserver_kill(&spid);
-            }
+        match connections.get(pool_key) {
+            Some(PoolKind::SqlServer(pool)) => pool.clone(),
+            _ => return Err("Expected SQL Server connection".to_string()),
         }
+    };
+    let (mut lease, spid) = match cancel_token.as_ref() {
+        Some(token) => tokio::select! {
+            biased;
+            _ = token.cancelled() => return Err(canceled_error()),
+            lease = pool.lease_checked() => lease?,
+        },
+        None => pool.lease_checked().await?,
+    };
+    if let Some(spid) = &spid {
+        server_cancel_registrar.register_sqlserver_kill(spid);
     }
 
     for batch in &batches {
@@ -1313,28 +1351,11 @@ async fn execute_multi_sqlserver(
             break;
         }
 
-        let connections = state.connections.read().await;
-        let pool = connections.get(pool_key).ok_or("Connection not found")?;
-        let client = match pool {
-            PoolKind::SqlServer(c) => c.clone(),
-            _ => return Err("Expected SQL Server connection".to_string()),
-        };
-        drop(connections);
-
-        let mut client = match cancel_token.as_ref() {
-            Some(token) => tokio::select! {
-                biased;
-                _ = token.cancelled() => return Err(canceled_error()),
-                guard = client.lock() => guard,
-            },
-            None => client.lock().await,
-        };
-
-        match db::sqlserver::execute_batch_with_max_rows(&mut client, batch, max_rows).await {
+        match db::sqlserver::execute_batch_with_max_rows(lease.conn(), batch, max_rows).await {
             Ok((results, abandoned_wire)) => {
-                // Mid-loop the pool must stay usable for the remaining batches
-                // (they pay a one-time wire drain instead), so remember the
-                // break and discard the pool once the whole script is done.
+                // Mid-loop the connection must stay usable for the remaining
+                // batches (they pay a one-time wire drain instead), so remember
+                // the break and shed the socket once the whole script is done.
                 batches_abandoned_wire |= abandoned_wire;
                 all_results.extend(results);
             }
@@ -1355,12 +1376,16 @@ async fn execute_multi_sqlserver(
 
     if batches_abandoned_wire {
         // A batch hit the row limit and abandoned its response stream: unread
-        // TDS packets remain on this connection, so discard the pool and let
-        // the next command rebuild it.
+        // TDS packets remain on this connection, so shed just this socket and
+        // let the pool redial for the next command.
         log::warn!(
-            "[query][execute_multi_sqlserver] discarding protocol-stateful pool '{pool_key}' after row-limit stream break"
+            "[query][execute_multi_sqlserver] discarding abandoned-wire SQL Server connection from '{pool_key}'"
         );
-        state.discard_pool(pool_key).await;
+        lease.poison();
+    } else {
+        // Batches may all have failed (e.g. the session was killed server-side);
+        // a dead socket is shed transparently at the next lease's health check.
+        lease.keep();
     }
 
     if all_results.is_empty() {

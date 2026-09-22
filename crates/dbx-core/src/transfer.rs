@@ -1824,16 +1824,22 @@ pub async fn execute_on_pool_with_max_rows(
             drop(connections);
             db::clickhouse_driver::execute_query_with_max_rows(&client, &database, sql, max_rows).await
         }
-        PoolKind::SqlServer(client) => {
-            let client = client.clone();
+        PoolKind::SqlServer(pool) => {
+            let pool = pool.clone();
             drop(connections);
-            let mut client = client.lock().await;
+            let (mut lease, _) = pool.lease_checked().await?;
             // Transfer batches read well under the row limit, so the abandoned-
-            // wire flag is not expected here; the pool stays in place (dropping
-            // it mid-transfer would break the caller's cached pool handle).
-            db::sqlserver::execute_query_with_max_rows(&mut client, sql, max_rows, &Default::default())
-                .await
-                .map(|(result, _)| result)
+            // wire flag is not expected here; shedding just this connection
+            // (instead of the whole pool) keeps the caller's cached pool handle
+            // intact either way.
+            let (result, abandoned_wire) =
+                db::sqlserver::execute_query_with_max_rows(lease.conn(), sql, max_rows).await?;
+            if abandoned_wire {
+                lease.poison();
+            } else {
+                lease.keep();
+            }
+            Ok(result)
         }
         PoolKind::Agent(client) => {
             let client = client.clone();
@@ -1965,13 +1971,15 @@ pub async fn get_columns_for_transfer(
         drop(connections);
         return db::clickhouse_driver::get_columns(&client, &database, &table).await;
     }
-    if let Some(PoolKind::SqlServer(client)) = connections.get(pool_key) {
-        let client = client.clone();
+    if let Some(PoolKind::SqlServer(pool)) = connections.get(pool_key) {
+        let pool = pool.clone();
         let schema = schema.to_string();
         let table = table.to_string();
         drop(connections);
-        let mut client = client.lock().await;
-        return db::sqlserver::get_columns(&mut client, &schema, &table).await;
+        let (mut lease, _) = pool.lease_checked().await?;
+        let result = db::sqlserver::get_columns(lease.conn(), &schema, &table).await;
+        lease.keep();
+        return result;
     }
     if let Some(PoolKind::Agent(client)) = connections.get(pool_key) {
         let client = client.clone();

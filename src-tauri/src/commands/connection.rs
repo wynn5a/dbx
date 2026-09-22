@@ -533,16 +533,16 @@ pub async fn connect_db(state: State<'_, Arc<AppState>>, config: ConnectionConfi
             PoolKind::ClickHouse(client)
         }
         DatabaseType::SqlServer => {
-            let client = db::sqlserver::connect(
-                &host,
+            let params = db::sqlserver::SqlServerConnectParams {
+                host: host.clone(),
                 port,
-                &db_config.username,
-                &db_config.password,
-                db_config.database.as_deref(),
+                username: db_config.username.clone(),
+                password: db_config.password.clone(),
+                database: db_config.database.clone(),
                 connect_timeout,
-            )
-            .await?;
-            PoolKind::SqlServer(std::sync::Arc::new(tokio::sync::Mutex::new(client)))
+            };
+            let pool = db::sqlserver::SqlServerPool::open(params).await?;
+            PoolKind::SqlServer(std::sync::Arc::new(pool))
         }
         DatabaseType::Elasticsearch => {
             let mut client = db::elasticsearch_driver::EsClient::from_config(

@@ -48,7 +48,7 @@ pub enum PoolKind {
     DuckDb(Arc<std::sync::Mutex<duckdb::Connection>>),
     MongoDb(mongodb::Client),
     ClickHouse(db::clickhouse_driver::ChClient),
-    SqlServer(Arc<tokio::sync::Mutex<db::sqlserver::SqlServerClient>>),
+    SqlServer(Arc<db::sqlserver::SqlServerPool>),
     Elasticsearch(db::elasticsearch_driver::EsClient),
     Agent(Arc<tokio::sync::Mutex<db::agent_driver::AgentDriverClient>>),
     ExternalDriver { driver_id: String, config: Arc<ConnectionConfig>, session: Arc<PluginDriverSession> },
@@ -493,16 +493,16 @@ impl AppState {
                 PoolKind::ClickHouse(client)
             }
             DatabaseType::SqlServer => {
-                let client = db::sqlserver::connect(
-                    &host,
+                let params = db::sqlserver::SqlServerConnectParams {
+                    host: host.clone(),
                     port,
-                    &db_config.username,
-                    &db_config.password,
-                    db_config.database.as_deref(),
+                    username: db_config.username.clone(),
+                    password: db_config.password.clone(),
+                    database: db_config.database.clone(),
                     connect_timeout,
-                )
-                .await?;
-                PoolKind::SqlServer(Arc::new(tokio::sync::Mutex::new(client)))
+                };
+                let pool = db::sqlserver::SqlServerPool::open(params).await?;
+                PoolKind::SqlServer(Arc::new(pool))
             }
             DatabaseType::Elasticsearch => {
                 let mut client = db::elasticsearch_driver::EsClient::from_config(
