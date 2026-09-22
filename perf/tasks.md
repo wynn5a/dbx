@@ -31,7 +31,7 @@
 | T10 | Redis 自动重连 | improvement-plan §2 A3 | S | ✅ 4c8c98e2 |
 | T11 | 健康扫描覆盖全部驱动 | improvement-plan §2 A4 | S | ✅ fe4c270c |
 | T12 | Agent 工具查询可取消可见 | improvement-plan §5 D2 | M | ✅ b2e2f9d8 |
-| T13 | 启动并行加载 + 加载态 | improvement-plan §3 B3 | S | ⬜ |
+| T13 | 启动并行加载 + 加载态 | improvement-plan §3 B3 | S | ✅ 014307e0 |
 | T14 | DDL 后失效补全缓存 | improvement-plan §4 C4 | S | ⬜ |
 | T15 | 启动无暗色闪烁 | improvement-plan §6 E2 | S | ⬜ |
 | T16 | 全局错误处理器 | improvement-plan §6 E3 | S | ⬜ |
@@ -198,14 +198,15 @@
   - [x] 测试 + 全量回归通过（`cargo fmt --check` + `cargo check --workspace --locked` + dbx-core 848 过（基线 842 + 新增 6）+ T02 既有 PG live 取消测试复跑通过；未动前端）
 - **实现说明**：`ai.rs` 新增 per-run `AI_AGENT_CANCELS` 注册表（`register_agent_cancel`），`cancel_stream` 同时翻转流 Notify 与该 token，`unregister_stream` 一并清理；`run_agent_loop` 增收 `tool_cancel: CancellationToken` 传给 `execute_tool_calls`/`run_with_confirmation`（写确认等待 `await_confirmation` 一并改为 select 该 token，签名从 `&Notify` 改为 `&CancellationToken`，轮首取消检查加 `|| tool_cancel.is_cancelled()`）。`agent_tools.rs` 新增 `execute_registered_query`：执行前注册（execution_id 唯一、并发工具调用不冲突），executor 拿注册表 token（等价编辑器路径），并 select run token——取消时翻转查询 token 让 `do_execute` 走既有取消 teardown（PG 连接按 T02 附带修复废弃重建），随后取出 checkout 注册的后端 id 走 T02 `fire_server_cancel`（best-effort、5s 上界）真正停掉服务端语句，最后 `RegisteredQuery` drop 注销；无取消信号时除注册条目外行为与原 `cancel_token = None` 完全一致。三处 SQL 工具（execute_query/get_sample_data/explain_query）全部接入；agent 查询超时路径顺带获得 T02 的服务端停止（execution_id 就位后 `do_execute` 既有逻辑生效）。
 
-### T13 启动并行加载 + 加载态 ⬜
+### T13 启动并行加载 + 加载态 ✅ 014307e0
 
 - **来源** improvement-plan-2026-09.md §3 B3（Track B）· **规模** S
 - **内容** `initFromDisk`（`connectionStore.ts:2872-2889`）串行 await 三个独立 IPC；`WelcomeScreen.vue:171` 在完成前显示"无连接"。改 `Promise.all`，加 `connectionsLoading` 标志让空态等待首载。
 - **验收**
-  - [ ] 启动 3 个调用并行发出，总耗时 ≈ 最慢项（IPC 时间线佐证）
-  - [ ] 加载期间显示加载态而非"无连接"；加载完成且确为空才显示空态
-  - [ ] 测试通过
+  - [x] 启动 3 个调用并行发出，总耗时 ≈ 最慢项（`connectionStoreStartupLoad.test.ts` mock 佐证：三个 IPC 命令在任一未决时全部在途（串行实现会在首个挂起读取上死锁、测试必失败）；另有墙钟上界用例——3×50ms 读取 250ms 内完成，串行需 ≥150ms）
+  - [x] 加载期间显示加载态而非"无连接"；加载完成且确为空才显示空态（WelcomeScreen 快捷连接卡与侧栏 ConnectionTree 空态均以 `connectionsLoading` 门控，加载中显示 Loader2 + 新文案 `sidebar.loadingConnections`；非空列表在重载期间保持渲染；store 标志语义有单测锁定——UI 组件无既有挂载测试设施，按任务约定断言 store 标志）
+  - [x] 测试通过（`pnpm check` 全绿：vitest 164 文件 1142 用例）
+- **实现说明**：三个读取改 `Promise.all` 并发、全部成功后按原顺序提交（`reconcileLayout` 依赖已装载的 connections，`rebuildTreeNodes` 依赖两者）；容错语义与原串行版一致——`loadPinnedTreeNodeIds` 自行 catch IPC，`loadConnections`/`loadSidebarLayout` 失败向上传播（App.vue toast `connection.loadFailed`），任一失败不阻止其余扇出。一处有意收紧：`Promise.all` 下任一读取失败则什么都不提交（原串行版会在 layout 失败后留下 connections 已装载但树未重建的半载状态）；失败时 `connectionsLoading` 在 `finally` 清除。标志初值 `true`（store 创建即加载中），冷启动首帧即加载态、无"无连接"闪现；后续 `initFromDisk` 重载（mcp-reload-connections 等事件）期间同样置位。UI 跟随仓库既有 Loader2 + `animate-spin` + `--ds-*` token 风格，文案六个 locale 全部就位。
 
 ### T14 DDL 后失效补全缓存 ⬜
 
