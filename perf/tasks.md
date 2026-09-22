@@ -48,7 +48,7 @@
 | T27 | SSH 隧道放弃时驱逐连接池 | improvement-plan §2 A5 | S | ✅ 43e5c824 |
 | T28 | 原生 DB socket TCP keepalive | improvement-plan §2 A6 | S | ✅ 7ffeb3ad |
 | T29 | idle_timeout 设置诚实化 | improvement-plan §2 A7 | S | ✅ ed3c4bae |
-| T30 | 展示 token 用量与成本 | improvement-plan §5 D7 | S | ⬜ |
+| T30 | 展示 token 用量与成本 | improvement-plan §5 D7 | S | ✅ 96fbac3b |
 | T31 | AI 连接失败重试一次 | improvement-plan §5 D6 | S | ⬜ |
 | T32 | 聊天结果一键图表 | improvement-plan §5 D8 | S | ⬜ |
 | T33 | 关键字大小写跟随输入 | improvement-plan §4 C7-1 | S | ⬜ |
@@ -370,13 +370,14 @@
     - **隐藏**：MySQL 族 MySQL/Doris/StarRocks/Databend（`mysql.rs create_pool` 硬编码 `with_inactive_connection_ttl(300s)`）；PG 族 Postgres/Redshift/Gaussdb/Kwdb/OpenGauss（deadpool 无 idle TTL，`postgres.rs` 全文零 `idle_timeout`）；SQL Server（`SqlServerPool` 无 idle 过期概念）；SQLite/DuckDB/RQLite/Redis/ClickHouse/Elasticsearch（长连接客户端，无该配置消费点）；全部 agent/JDBC 引擎（`agent_connect_params` 不转发该字段）
 - **实现说明**：`IDLE_TIMEOUT_SUPPORTED_TYPES` 集合 + `supportsIdleTimeout()` 谓词落在既有 `databaseCapabilitySets.ts`/`databaseFeatureSupport.ts` 能力集模式上，作为"哪些驱动支持 idle_timeout"的单一事实源（文档注释记录后端审计依据）。测试加在 `databaseCapabilities.test.ts`（4 例）：支持清单对整个 DatabaseType union 穷举断言（union 从 `types/database.ts` 解析，新引擎加入时测试失败、强制显式归类）；与后端消费点对齐的源码契约（connection.rs 恰好一处绑定 + 一处 Mongo 消费、src-tauri 副本两处、mongo `max_idle_time` 映射、MySQL 硬编码 300s、postgres.rs 零命中——任一后端接线变化都会触发清单复审）；对话框以共享谓词接线 + 旧内联门控已移除；六 locale 文案。未动后端（无需 cargo）。`pnpm check` 全绿（format + lint + typecheck + vitest 173 文件 1252 用例）。
 
-### T30 展示 token 用量与成本 ⬜
+### T30 展示 token 用量与成本 ✅ 96fbac3b
 
 - **来源** improvement-plan-2026-09.md §5 D7（Track D）· **规模** S
 - **内容** `AgentEvent::AgentEnd` 带真实 usage（`agent_loop.rs:244`），前端丢弃（`AiAssistant.vue:795` `case "agent_end": break`）。持久化到消息并渲染尾部，可选静态价格表算成本。
+- **实现说明**：`agent_end` 事件把累计 usage 写进当前回答消息；逻辑落在 `lib/aiTokenUsage.ts`（事件提取 / 历史容错读取 / 紧凑格式化），消息经 `AiChatMessage.usage` 随会话持久化——`TokenUsage` 加 serde derive（`default` + 缺省跳过），字段出现前的旧消息原样加载、原样回存。回答尾部渲染 "↑ 1.2k / ↓ 3.4k tokens" 小字 meta 行（hairline 分隔、`--ds-text-4`），重载历史后保留；Ask 模式与不报 usage 的 provider 不渲染任何行。**成本估算不做**：8 个 provider（claude/openai/gemini/deepseek/qwen/ollama/openai-compatible/custom）模型名与端点自由填写，仓库内无价格数据且价格漂移，静态表会把编造数字当事实呈现——只展示 token 数。六 locale 新增 `ai.tokenUsage.tokens`。含少量 Rust 序列化改动（`ai.rs`），故跑了 cargo 三件套。
 - **验收**
-  - [ ] 回答尾部显示 token 用量；历史消息中保留
-  - [ ] 无 usage 的 provider 显示为空不报错；测试通过
+  - [x] 回答尾部显示 token 用量；历史消息中保留（agent_end 写入消息 → persistConversation 携带 usage → selectConversation 容错回读；`aiTokenUsage.test.ts` 断言新格式消息读出 usage、旧格式消息读出 undefined）
+  - [x] 无 usage 的 provider 显示为空不报错；测试通过（text-only 回退路径 `AgentEnd{None,None}` 两字段省略 → 提取 undefined → 无行；畸形持久化值（字符串/负数/数组/Infinity）→ undefined 不抛错；`pnpm check` 全绿 format + lint + typecheck + vitest 174 文件 1268 用例；`cargo fmt --check` / `cargo check --workspace --locked` / `cargo test -p dbx-core`（854 通过）全绿）
 
 ### T31 AI 连接失败重试一次 ⬜
 
