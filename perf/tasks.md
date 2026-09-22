@@ -53,7 +53,7 @@
 | T32 | 聊天结果一键图表 | improvement-plan §5 D8 | S | ✅ b7ad137e |
 | T33 | 关键字大小写跟随输入 | improvement-plan §4 C7-1 | S | ✅ b4588cba |
 | T34 | 标签页切换快捷键 | improvement-plan §6 E6-1 | S | ✅ e66e03dc |
-| T35 | Format SQL 快捷键 | improvement-plan §6 E6-2 | S | ⬜ |
+| T35 | Format SQL 快捷键 | improvement-plan §6 E6-2 | S | ✅ fa0e42a8 |
 | T36 | getSqlCompletionResultValidFor 落地 | improvement-plan §4 C7-2 | S | ⬜ |
 | T37 | prefers-reduced-motion 支持 | improvement-plan §6 E9-1 | S | ⬜ |
 | T38 | 启动阶段 performance.mark | improvement-plan §6 E9-2 | S | ⬜ |
@@ -414,12 +414,13 @@
   - [x] 与既有绑定无冲突（清单断言/测试）
 - **实现说明**：三组绑定注册进 `shortcutRegistry.ts`（scope 均为 global），经既有 App.vue 全局 keydown 路径生效。键位选择：next tab `Mod+Alt+ArrowRight`（macOS Cmd+Alt+→，其余 Ctrl+Alt+→）、prev tab `Mod+Alt+ArrowLeft`——跟随 Chrome/VS Code 的编辑器循环惯例，且与 CodeMirror 不冲突（mac 上 CM 只绑不带 Cmd 的 Alt-Arrow 词移动）；弃选 Ctrl+Tab（webview 可能吞键不送达页面）。`Mod+1..Mod+9` 跳第 N 个，跟随浏览器惯例：`Mod+9` = 最后一个标签页，`Mod+1..8` 直映射位置 1..8，位置超界（打开数不足 N）为 no-op——已知取舍：恰好开 10 个标签页时第 9 个无键可达（与 Chrome 相同）。next/prev 首尾环绕；无活动标签（仅驱动商店打开）时 next 进第一个、prev 进最后一个。解析逻辑在新增纯模块 `lib/tabSwitch.ts`（`resolveTabSwitchTarget`）；App.vue 的 `switchTab` 仅赋值 `queryStore.activeTabId`，既有 activeTabId watcher 照常触发 `dbx:before-tab-switch`（网格待存快照）、关闭驱动商店标签并复位分标签 UI 状态——与标签点击/closeTab 同一路径。面板可见性零改动即得（面板逐行渲染 registry）；`gotoTab1..8` 共享 `settings.shortcutGotoTabN` 标签，为此给 `ShortcutDefinition` 增加可选 `labelParams`（vue-i18n 命名参数），面板 label 渲染/搜索统一走带参 helper，`gotoTab9` 用 `settings.shortcutGotoLastTab`；六个 locale 均补 4 个标签 key。老用户快捷键设置无需迁移：`normalizeShortcutSettings` 以默认值回填新 id；默认值在 global scope 内两两不同。测试：新增 `packages/app-tests/tabSwitch.test.ts`（相邻移动、环绕、单/零标签、活动 id 缺失、goto 位置与超界、10 标签下 9=末尾 vs 8=第 8）；新增 `packages/app-tests/shortcutRegistry.test.ts`（三组绑定 id/scope/默认键清单断言、逐 scope 默认键唯一性 + `findShortcutConflict` 全默认零冲突、面板可见性契约——每条 labelKey 在六个 locale 均为字符串且 labelParams 占位符存在）；`keyboardShortcuts.test.ts` 增 matcher 用例（Mod+Alt+方向键的修饰键缺失/多余/自定义重绑、`gotoTabNumberFromShortcut` 1..9 解析与 0/Shift/Alt/无修饰键拒绝、自定义重绑）。`pnpm check` 全绿（format + lint + typecheck + vitest 178 文件 1323 用例）。
 
-### T35 Format SQL 快捷键 ⬜
+### T35 Format SQL 快捷键 ✅ fa0e42a8
 
 - **来源** improvement-plan-2026-09.md §6 E6 第 2 项（Track E）· **规模** S
 - **内容** `formatActiveSql` 仅工具栏可达。注册快捷键。
 - **验收**
-  - [ ] 编辑器内快捷键触发格式化；registry 可见；测试通过
+  - [x] 编辑器内快捷键触发格式化；registry 可见；测试通过（编辑器内触发与 registry 可见性以清单断言 + 源码契约 + matcher 测试佐证，`pnpm check` 全绿）
+- **实现说明**：绑定注册进 `shortcutRegistry.ts`（scope 为 editor，与 execute/save 同组），经既有 App.vue 全局 keydown 路径生效。键位选择 `Mod+Shift+F`（macOS Cmd+Shift+F，其余 Ctrl+Shift+F）——跟随 DBeaver 的 Format SQL 惯例，SQL 客户端用户的肌肉记忆所在；与既有绑定零冲突（所有 scope 均无 Mod+Shift+F，逐 scope 唯一性断言覆盖），CodeMirror 在用的键位表（default/search/history/fold/completion）均未绑定 Mod-Shift-f，按键从编辑器冒泡到 window handler；弃选 VS Code 的 Shift+Alt+F——macOS 上 Option 合成按键字符（event.key 不再是 "F"），matcher 无法匹配。分发逻辑镜像 executeSql 块：活动 tab 须为 query tab、事件 target 在 `[data-query-editor-root]` 内，随后调用工具栏按钮同一入口 `formatActiveSql()`——作用域语义不变：请求携带活动 tab id，只格式化当前活动 tab 的编辑器，空 SQL 为 no-op（`formatActiveSql` 自带守卫）。面板可见性零改动即得（面板逐行渲染 registry），label `settings.shortcutFormatSql` 六 locale 均补。老用户快捷键设置无需迁移：`normalizeShortcutSettings` 以默认值回填新 id，默认值在 editor scope 内唯一。测试：`shortcutRegistry.test.ts` 增 formatSql 清单断言（id/scope/默认键/label）与 App.vue 接线源码契约（限定 query editor 作用域并调用 `formatActiveSql`，connectionStoreCancel 同款源码契约方式）；既有逐 scope 默认键唯一性、`findShortcutConflict` 全默认零冲突、六 locale label 检查自动覆盖新绑定；`keyboardShortcuts.test.ts` 增 matcher 用例（Cmd/Ctrl+Shift+F 匹配，仅 Shift/仅 Mod/缺 Shift/多 Alt 拒绝、composing 拒绝、自定义重绑）。`pnpm check` 全绿（format + lint + typecheck + vitest 178 文件 1328 用例）。
 
 ### T36 getSqlCompletionResultValidFor 落地 ⬜
 
