@@ -21,7 +21,7 @@
 |---|---|---|---|---|
 | T01 | 锁死 MCP 桥（鉴权 + 写门控） | improvement-plan §5 D1 | S | ✅ a0849b48 |
 | T02 | 查询真实服务端取消 | improvement-plan §2 A1 | M | ✅ d4485b14 |
-| T03 | SQL Server 连接池 | improvement-plan §2 A2 | M | ✅ (见 §T03) |
+| T03 | SQL Server 连接池 | improvement-plan §2 A2 | M | ✅ b523ab5a |
 | T04 | 网格保存先展示 SQL | improvement-plan §6 E1 | M | ⬜ |
 | T05 | 补全上下文剥离注释 | improvement-plan §4 C1 | M | ⬜ |
 | T06 | MySQL/SQL Server 标识符引号 | improvement-plan §4 C2 | S | ⬜ |
@@ -91,7 +91,7 @@
   - [x] DuckDB 既有中断路径（`query.rs:626-631`）不回退；全量回归通过（`cargo fmt --check` + dbx-core 797 过 + dbx --lib 42 过 + `pnpm check` 全绿）
 - **附带修复**：PG SELECT 走 `BEGIN…DECLARE…FETCH` 游标事务，服务端停止后连接带已中止事务回池，fast recycle 会把脏连接给下一条查询 —— 取消/超时触发服务端停止后丢弃重建 PG 池。
 
-### T03 SQL Server 连接池 ✅ (hash 待补)
+### T03 SQL Server 连接池 ✅ b523ab5a
 
 - **来源** improvement-plan-2026-09.md §2 A2（Track A）· **规模** M
 - **内容** `connection.rs:51` 的 `PoolKind::SqlServer(Arc<Mutex<SqlServerClient>>)` 单 socket 单互斥锁，树/补全/所有标签页排在一条慢查询后面。改为 2–3 连接小池（semaphore，`QUERY_POOL_MAX_SIZE = 3` 对齐 PG/MySQL）；`check_conn_health`（`sqlserver.rs:21-39`）失败按 `mysql.rs:1448-1497` 模式透明重拨。
