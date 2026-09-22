@@ -36,7 +36,7 @@
 | T15 | 启动无暗色闪烁 | improvement-plan §6 E2 | S | ✅ 73011fe7 |
 | T16 | 全局错误处理器 | improvement-plan §6 E3 | S | ✅ 6609cd39 |
 | T17 | 可行动的连接错误提示 | improvement-plan §6 E4 | M | ✅ 0bbf6f2d |
-| T18 | 连接与 schema 加载可取消 | improvement-plan §6 E5 | M | ⬜ |
+| T18 | 连接与 schema 加载可取消 | improvement-plan §6 E5 | M | ✅ 58f1c843 |
 | T19 | 高危 SQL 增加确认摩擦 | improvement-plan §5 D3 | S | ⬜ |
 | T20 | search_tables 工具 | improvement-plan §5 D4 | S | ⬜ |
 | T21 | Gemini/Ollama 工具调用 | improvement-plan §5 D5 | M | ⬜ |
@@ -248,14 +248,15 @@
   - [x] `pnpm check` 通过（format + lint + typecheck + vitest 全绿：167 文件 1168 用例）
 - **实现说明**：分类器在 `lib/connectionErrorHints.ts`（无框架依赖），三类按 auth → tls → network 优先级匹配（auth 关键字最具体，refused/timeout 最宽泛）；裸驱动错误码（18456、ERROR 2003/1045/2026、SQLSTATE 28P01）歧义大，仅在调用方能提供 `db_type` 时参与匹配（对话框表单、连接配置处顺带可得）。接线走现有展示链路：`backend-errors.ts` 新增 `presentConnectionError`（toast title + hint description）与 `formatConnectionError`（hint 追加到字符串），App/TreeItem/AppSidebar/AiAssistant 的连接失败 toast 把 hint 放进 DsToast 既有 description 弱色行、对话框测试结果按 Mongo hint 先例追加、侧栏 ConnectionErrorIndicator 气泡在原文下加 hint 块。原文永不替换；连接失败 toast 在所有语言下显式走 error 变体（原 `inferVariant` 对"连接失败"这类非英文文案会误判为 success）。
 
-### T18 连接与 schema 加载可取消 ⬜
+### T18 连接与 schema 加载可取消 ✅ 58f1c843
 
 - **来源** improvement-plan-2026-09.md §6 E5（Track E）· **规模** M
 - **内容** `connect()` 与树加载器只有 `withConnectionAttemptTimeout`。按 attempt 引入 abort/取消令牌，spinner 上加 Cancel 交互（对齐查询取消）。
 - **验收**
-  - [ ] 连接中点 Cancel：attempt 中止、UI 恢复、可立即重试
-  - [ ] 不产生半开连接或重复池条目（后端日志/状态佐证）
-  - [ ] 测试通过
+  - [x] 连接中点 Cancel：attempt 中止、UI 恢复、可立即重试（侧栏树行 loading 时显示 X 取消按钮（`sidebar.cancelLoading`，六 locale）；点击 → `cancelTreeNodeLoading` 立即复位行状态并调 `cancel_connection_attempt`，后端 `connect_db` 的 `tokio::select!` 被 token 中止；`connectionStoreCancel.test.ts` 断言取消后行复位、同一 attempt id 被取消、取消后可立即再次 connect 成功）
+  - [x] 不产生半开连接或重复池条目（后端结构保证：池/config 写入收敛到 `commit_connection_pool`——先取两把写锁、两次 insert 之间无 await 点，被中止的 attempt 要么零注册条目、要么完整连接；取消落在 commit 之后时注册表已清理、cancel 返回 false 且保留完整池（下次 connect_db 先 `remove_connection_pools` 重建，无重复条目）；dbx-core `ConnectionAttempts` 单测锁 cancel 翻转 token + 清条目/未知 id no-op/unregister 不取消）
+  - [x] 测试通过（`cargo fmt --check` + `cargo test -p dbx-core` 851 过（含 3 条新注册表单测）+ `cargo check --workspace --locked` + `cargo test -p dbx --lib` 42 过；`pnpm check` 全绿：vitest 168 文件 1177 用例，含新增 9 例）
+- **实现说明**：后端 `connect_db` 新增 `attempt_id` 参数并注册进 `AppState.connection_attempts`（dbx-core 新 `ConnectionAttempts` 注册表，模式对齐 T02 `RunningQueries` / T12 `AI_AGENT_CANCELS`），新命令 `cancel_connection_attempt` 翻 token 中止 connect future。前端 `connect()` 每 attempt 生成 uuid 传入；前端超时路径同样 fire-and-forget 取消（对齐 queryStore 查询超时取消先例），后端不再无人监听地跑完。树加载取消按任务约定只需丢弃 future（元数据读无服务端语句可杀）：loadDatabases/loadSchemas/loadTables/loadRedisDatabases/loadMongoDatabases/loadMongoCollections/loadSqlServerDatabaseObjects/loadObjectGroupChildren/loadColumns/loadIndexes/loadForeignKeys/loadTriggers 全部接 per-node attempt guard——取消/被新 attempt 取代后 `attemptIsActive` 为 false，迟到结果不写 children、不展开、不记错误（静默）。取消以 `ConnectionAttemptCancelledError` reject `connect()`，ConnectionDialog/App.vue/useFileDrop 对其静默（不弹"连接失败"也不弹"成功"，one_time 连接仍清理）；透明后台重连（ensureConnected/reconnectForMetadata）不传 attempt id，保持现状（不产生半开状态，最多留下完整池）。UI 组件无挂载测试设施，TreeItem 取消按钮与 App/useFileDrop/对话框的静默接线以源码契约测试锁定（同 T15/T16 先例）。
 
 ### T19 高危 SQL 增加确认摩擦 ⬜
 
