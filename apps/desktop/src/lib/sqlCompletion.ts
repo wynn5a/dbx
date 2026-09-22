@@ -3268,21 +3268,23 @@ function buildComparisonValueItems(
 
   const items: SqlCompletionItem[] = [];
 
-  // NULL check — always useful
+  // NULL check — always useful. Same typed-prefix casing as keyword completions:
+  // the value hint would otherwise duplicate the catalog's NULL item under a
+  // different case (both are `type: "keyword"` and dedupe by label).
   items.push({
-    label: "NULL",
+    label: applyKeywordCasing("NULL", context.prefix),
     type: "keyword" as const,
     detail: t?.nullValue ?? "NULL value",
     boost: 1300,
   });
   items.push({
-    label: "IS NULL",
+    label: applyKeywordCasing("IS NULL", context.prefix),
     type: "keyword" as const,
     detail: t?.isNull ?? "Checks whether the value is NULL",
     boost: 1250,
   });
   items.push({
-    label: "IS NOT NULL",
+    label: applyKeywordCasing("IS NOT NULL", context.prefix),
     type: "keyword" as const,
     detail: t?.isNotNull ?? "Checks whether the value is not NULL",
     boost: 1200,
@@ -3332,8 +3334,18 @@ function buildComparisonValueItems(
   // Boolean-ish: tinyint or bit
   if (dt === "bit" || dt === "boolean" || dt === "bool") {
     items.push(
-      { label: "TRUE", type: "keyword" as const, detail: t?.booleanValue ?? "Boolean value", boost: 1700 },
-      { label: "FALSE", type: "keyword" as const, detail: t?.booleanValue ?? "Boolean value", boost: 1650 },
+      {
+        label: applyKeywordCasing("TRUE", prefix),
+        type: "keyword" as const,
+        detail: t?.booleanValue ?? "Boolean value",
+        boost: 1700,
+      },
+      {
+        label: applyKeywordCasing("FALSE", prefix),
+        type: "keyword" as const,
+        detail: t?.booleanValue ?? "Boolean value",
+        boost: 1650,
+      },
     );
   }
 
@@ -3953,6 +3965,57 @@ export function snippetBodyToTemplate(body: string): string {
   return body.replace(/(?<![#$])\{(\w+)\}/g, "${$1}");
 }
 
+// --- Keyword casing: inserted completions follow the typed prefix ---
+
+/**
+ * Casing of a keyword completion's inserted text, derived from the word the user
+ * typed. The keyword catalogs are canonically uppercase; the inserted (and popup)
+ * text matches the in-progress typing style: the case of the first alphabetic
+ * character of the prefix decides — `sel` inserts `select`, `SEL` and `Sel` insert
+ * `SELECT`, and an empty (or letter-less) prefix — e.g. a completion invoked with no
+ * word typed — keeps the canonical uppercase. Deciding on the first letter keeps the
+ * choice stable while the prefix grows (`se` → `sel` never flips an already-offered
+ * completion) and resolves mixed input like `sEL` deterministically.
+ */
+export function applyKeywordCasing(keyword: string, prefix: string): string {
+  const firstLetter = /[A-Za-z]/.exec(prefix)?.[0];
+  return firstLetter && firstLetter === firstLetter.toLowerCase() ? keyword.toLowerCase() : keyword.toUpperCase();
+}
+
+// Canonical (uppercase) keywords recognized inside snippet bodies for casing —
+// the union of the generic catalog and every per-dialect list.
+const SNIPPET_KEYWORD_CANONICAL = new Set<string>([
+  ...SQL_KEYWORDS,
+  ...COMMON_SQL_KEYWORDS,
+  ...POSTGRES_SQL_KEYWORDS,
+  ...MYSQL_SQL_KEYWORDS,
+  ...SQLITE_SQL_KEYWORDS,
+  ...SQLSERVER_SQL_KEYWORDS,
+]);
+
+// A snippet body token is either a placeholder (`{name}` and pre-existing `${name}` /
+// `#{name}` CodeMirror fields) or a bare word. Placeholders must win the alternation
+// so the words inside them are never treated as casable keywords.
+const SNIPPET_BODY_TOKEN_PATTERN = /(\$\{[^{}]*\}|#\{[^{}]*\}|\{[^{}]*\})|([A-Za-z_][A-Za-z0-9_$]*)/g;
+
+/**
+ * Casing for a snippet body's inserted text: SQL keyword words follow the typed
+ * prefix (same rule as `applyKeywordCasing`); placeholders, numbers, punctuation
+ * and non-keyword words (e.g. user-authored identifiers) stay exactly as authored.
+ */
+export function applySnippetBodyCasing(body: string, prefix: string): string {
+  return body.replace(
+    SNIPPET_BODY_TOKEN_PATTERN,
+    (match: string, placeholder: string | undefined, word: string | undefined) => {
+      if (placeholder !== undefined) return placeholder;
+      if (word !== undefined && SNIPPET_KEYWORD_CANONICAL.has(word.toUpperCase())) {
+        return applyKeywordCasing(word, prefix);
+      }
+      return match;
+    },
+  );
+}
+
 // Snippets whose body starts a new statement (SELECT/INSERT/CREATE/WITH/…). These make
 // no sense mid-expression (e.g. inside a WHERE clause), mirroring how DDL keywords are
 // gated by `showDdl` in buildKeywordItems.
@@ -3989,13 +4052,16 @@ function buildSnippetItems(
       // the real keyword can rank higher. In a secondary (expression) context the base
       // is smaller still, so contextually-relevant columns outrank these snippets.
       const baseBoost = matchesByPrefix ? (secondary ? 1500 : 4000) : 0;
+      // Keyword words in the body follow the typed prefix casing so the inserted
+      // template matches the user's style; everything else stays as authored.
+      const casedBody = applySnippetBodyCasing(snippet.body, prefix);
       return {
         label: snippet.label,
         type: "snippet" as const,
-        // `detail` shows the human-readable body (with `{name}` placeholders),
-        // while `apply` carries the CodeMirror field template.
-        detail: snippet.body,
-        apply: snippetBodyToTemplate(snippet.body),
+        // `detail` previews the body (with `{name}` placeholders) in the same case
+        // that will be inserted, while `apply` carries the CodeMirror field template.
+        detail: casedBody,
+        apply: snippetBodyToTemplate(casedBody),
         boost: Math.max(boostByPrefix, boostByLabel) + baseBoost,
       };
     });
@@ -4151,8 +4217,10 @@ function buildKeywordItems(
     .map((keyword) => {
       const base = computeBoost(keyword, prefix);
       const freqBoost = HIGH_FREQUENCY_KEYWORDS.has(keyword) ? 100 : 0;
+      // Keyword items carry no `apply`: the editor inserts `apply ?? label`, so the
+      // cased label is both what the popup shows and what lands in the document.
       return {
-        label: keyword,
+        label: applyKeywordCasing(keyword, prefix),
         type: "keyword" as const,
         boost: base + freqBoost,
       };

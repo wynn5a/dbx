@@ -12,7 +12,8 @@ describe("buildSnippetItems", () => {
     const items = buildSnippetItemsForTest("sel", TEST_SNIPPETS);
     expect(items).toHaveLength(1);
     expect(items[0].label).toBe("select all");
-    expect(items[0].apply).toBe("SELECT *\nFROM my_table;");
+    // Keyword words in the body follow the typed prefix case (T33): `sel` → lowercase.
+    expect(items[0].apply).toBe("select *\nfrom my_table;");
   });
 
   it("returns matching snippet by label substring", () => {
@@ -51,8 +52,10 @@ describe("buildSnippetItems", () => {
       { id: "1", label: "select all", prefix: "sel", body: "SELECT *\nFROM {table}\nLIMIT 100;" },
     ]);
     expect(items).toHaveLength(1);
-    expect(items[0].apply).toBe("SELECT *\nFROM ${table}\nLIMIT 100;");
-    expect(items[0].detail).toBe("SELECT *\nFROM {table}\nLIMIT 100;");
+    // Keyword casing follows the typed prefix (T33); the `{table}` placeholder name
+    // is never re-cased.
+    expect(items[0].apply).toBe("select *\nfrom ${table}\nlimit 100;");
+    expect(items[0].detail).toBe("select *\nfrom {table}\nlimit 100;");
   });
 });
 

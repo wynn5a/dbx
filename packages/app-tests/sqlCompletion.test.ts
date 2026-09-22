@@ -72,7 +72,8 @@ test("suggests SQL keywords for generic keyword input", () => {
     columnsByTable,
   });
 
-  const keyword = items.find((item) => item.type === "keyword" && item.label === "SELECT");
+  // Inserted keywords follow the typed prefix case (T33): `sel` → `select`.
+  const keyword = items.find((item) => item.type === "keyword" && item.label === "select");
   assert.ok(keyword);
   assert.equal(keyword.type, "keyword");
 });
@@ -108,8 +109,8 @@ test("suggests PostgreSQL-specific data types and functions", () => {
     databaseType: "postgres",
   });
 
-  assert.ok(typeItems.some((item) => item.type === "keyword" && item.label === "JSONB"));
-  assert.ok(serialItems.some((item) => item.type === "keyword" && item.label === "SERIAL"));
+  assert.ok(typeItems.some((item) => item.type === "keyword" && item.label === "jsonb"));
+  assert.ok(serialItems.some((item) => item.type === "keyword" && item.label === "serial"));
   assert.ok(functionItems.some((item) => item.type === "function" && item.label === "JSONB_BUILD_OBJECT"));
   assert.ok(mysqlFunctionItems.some((item) => item.type === "function" && item.label === "DATE_FORMAT"));
   assert.equal(
@@ -528,7 +529,7 @@ test("suggests keywords when typing without context", () => {
     columnsByTable,
   });
 
-  assert.ok(items.some((item) => item.type === "keyword" && item.label === "USING"));
+  assert.ok(items.some((item) => item.type === "keyword" && item.label === "using"));
 });
 
 test("suggests only matching table names after FROM object input", () => {
@@ -742,9 +743,10 @@ test("suggests SQL snippets for common abbreviations", () => {
 
   const snippet = items.find((item) => item.type === "snippet" && item.label === "select *");
   assert.ok(snippet);
-  // `{table}` placeholder is converted to a CodeMirror field for apply; detail stays readable.
-  assert.equal(snippet.apply, "SELECT *\nFROM ${table}\nLIMIT 100;");
-  assert.equal(snippet.detail, "SELECT *\nFROM {table}\nLIMIT 100;");
+  // Snippet keyword words follow the typed prefix case (T33); `{table}` is converted
+  // to a CodeMirror field for apply and the detail previews the inserted casing.
+  assert.equal(snippet.apply, "select *\nfrom ${table}\nlimit 100;");
+  assert.equal(snippet.detail, "select *\nfrom {table}\nlimit 100;");
 });
 
 test("suggests DATE_FORMAT as parameter snippet", () => {
@@ -1194,10 +1196,11 @@ test("suggests CASE WHEN snippet", () => {
   });
   const caseSnippet = items.find((item) => item.type === "snippet" && item.label === "case when");
   assert.ok(caseSnippet);
-  assert.ok(caseSnippet.apply!.includes("CASE"), "should include CASE");
-  assert.ok(caseSnippet.apply!.includes("WHEN"), "should include WHEN");
-  assert.ok(caseSnippet.apply!.includes("THEN"), "should include THEN");
-  assert.ok(caseSnippet.apply!.includes("END"), "should include END");
+  // Lowercase prefix `case` inserts a lowercase body (T33).
+  assert.ok(caseSnippet.apply!.includes("case"), "should include case");
+  assert.ok(caseSnippet.apply!.includes("when"), "should include when");
+  assert.ok(caseSnippet.apply!.includes("then"), "should include then");
+  assert.ok(caseSnippet.apply!.includes("end"), "should include end");
 });
 
 // --- Expanded function signatures ---
