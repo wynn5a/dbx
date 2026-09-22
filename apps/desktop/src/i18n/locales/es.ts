@@ -936,6 +936,7 @@ export default {
         unknown: "No reconocida",
       },
       production: "Producción",
+      highRiskAck: "He revisado esta sentencia y confirmo que quiero ejecutarla.",
       reasons: {
         multi_statement: "Varias sentencias",
         empty_sql: "Sentencia vacía",

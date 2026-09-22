@@ -121,3 +121,18 @@ export function shouldAttemptAiAutoExecute(instruction: string, action: string):
   if (!normalized || NEGATIVE_EXECUTION_RE.test(normalized)) return false;
   return true;
 }
+
+/**
+ * Categories whose agent confirmation card demands an extra friction step (an
+ * explicit acknowledgment checkbox) before Run becomes clickable: destructive
+ * statements and schema changes. `low_risk_write` and read-only categories stay
+ * one-click.
+ */
+export function requiresAiConfirmFriction(category: AiSqlExecutionCategory): boolean {
+  return category === "dangerous" || category === "schema_change";
+}
+
+/** The confirm card's Run is available unless the category needs the extra acknowledgment and it was not given. */
+export function isAiConfirmRunEnabled(category: AiSqlExecutionCategory, highRiskAcknowledged: boolean): boolean {
+  return !requiresAiConfirmFriction(category) || highRiskAcknowledged;
+}

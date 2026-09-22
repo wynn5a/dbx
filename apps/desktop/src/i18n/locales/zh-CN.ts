@@ -923,6 +923,7 @@ export default {
         unknown: "无法识别",
       },
       production: "生产环境",
+      highRiskAck: "我已确认这条语句的影响范围，同意执行。",
       reasons: {
         multi_statement: "多条语句",
         empty_sql: "空语句",

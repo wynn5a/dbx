@@ -54,6 +54,8 @@ import {
 } from "@/lib/ai";
 import {
   classifyAiSqlExecution,
+  isAiConfirmRunEnabled,
+  requiresAiConfirmFriction,
   type AiSqlExecutionCategory,
   type AiSqlExecutionDecision,
 } from "@/lib/aiSqlExecutionPolicy";
@@ -111,6 +113,8 @@ interface PendingToolConfirm {
   toolName: string;
   sql: string;
   decision: AiSqlExecutionDecision;
+  /** High-risk cards (dangerous / schema_change) must be acknowledged before Run; reset per new card. */
+  frictionAcknowledged: boolean;
 }
 
 interface ChatMessage {
@@ -785,6 +789,7 @@ function handleAgentEvent(assistantIdx: number, sessionId: string, event: AgentE
         toolName: event.tool_name,
         sql: event.sql,
         decision: classifyAiSqlExecution(event.sql, props.connection),
+        frictionAcknowledged: false,
       };
       scrollToBottom();
       break;
@@ -812,8 +817,16 @@ async function confirmTool(assistantIdx: number, approved: boolean) {
   const msg = messages.value[assistantIdx];
   const confirm = msg?.pendingConfirm;
   if (!confirm) return;
+  // High-risk categories need the explicit acknowledgment even if Run is
+  // triggered programmatically; the disabled button is the first guard.
+  if (approved && !isAiConfirmRunEnabled(confirm.decision.category, confirm.frictionAcknowledged)) return;
   if (msg) msg.pendingConfirm = null;
   await aiAgentConfirmTool(confirm.sessionId, confirm.toolCallId, approved).catch(() => {});
+}
+
+function setConfirmFrictionAck(assistantIdx: number, acknowledged: boolean) {
+  const msg = messages.value[assistantIdx];
+  if (msg?.pendingConfirm) msg.pendingConfirm.frictionAcknowledged = acknowledged;
 }
 
 function clearPendingConfirms() {
@@ -1175,8 +1188,30 @@ watch(streamingIndex, () => {
                   class="mt-1.5 max-h-32 overflow-auto rounded bg-[var(--ds-bg-canvas)] px-2 py-1 font-mono text-[10px] text-[var(--ds-text-1)] whitespace-pre-wrap"
                   >{{ msg.pendingConfirm.sql }}</pre
                 >
+                <label
+                  v-if="requiresAiConfirmFriction(msg.pendingConfirm.decision.category)"
+                  class="mt-2 flex cursor-pointer items-start gap-1.5 text-[10px] leading-relaxed text-[var(--ds-text-2)]"
+                >
+                  <input
+                    type="checkbox"
+                    class="mt-0.5 h-3 w-3 shrink-0 accent-[var(--ds-red)]"
+                    :checked="msg.pendingConfirm.frictionAcknowledged"
+                    @change="setConfirmFrictionAck(i, ($event.target as HTMLInputElement).checked)"
+                  />
+                  <span>{{ t("ai.toolConfirm.highRiskAck") }}</span>
+                </label>
                 <div class="mt-2 flex items-center gap-1.5">
-                  <Button size="sm" class="h-6 gap-1 text-[10px]" @click="confirmTool(i, true)">
+                  <Button
+                    size="sm"
+                    class="h-6 gap-1 text-[10px]"
+                    :disabled="
+                      !isAiConfirmRunEnabled(
+                        msg.pendingConfirm.decision.category,
+                        msg.pendingConfirm.frictionAcknowledged,
+                      )
+                    "
+                    @click="confirmTool(i, true)"
+                  >
                     <Play class="h-3 w-3" />
                     {{ t("ai.toolConfirm.run") }}
                   </Button>

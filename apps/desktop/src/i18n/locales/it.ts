@@ -944,6 +944,7 @@ export default {
         unknown: "Non riconosciuta",
       },
       production: "Produzione",
+      highRiskAck: "Ho verificato questa istruzione e confermo di volerla eseguire.",
       reasons: {
         multi_statement: "Più istruzioni",
         empty_sql: "Istruzione vuota",

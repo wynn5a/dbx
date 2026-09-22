@@ -943,6 +943,7 @@ export default {
         unknown: "Unrecognized",
       },
       production: "Production",
+      highRiskAck: "I have reviewed this statement and confirm I want to run it.",
       reasons: {
         multi_statement: "Multiple statements",
         empty_sql: "Empty SQL",

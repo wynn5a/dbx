@@ -890,6 +890,7 @@ export default {
         unknown: "無法辨識",
       },
       production: "正式環境",
+      highRiskAck: "我已確認這條語句的影響範圍，同意執行。",
       reasons: {
         multi_statement: "多條語句",
         empty_sql: "空語句",
