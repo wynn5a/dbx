@@ -190,10 +190,15 @@ pub struct ToolCallRef {
     pub arguments: Value,
 }
 
-/// Best-effort token accounting accumulated across a streamed response.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+/// Best-effort token accounting accumulated across a streamed response. Also
+/// persisted on saved assistant messages (`AiChatMessage::usage`), hence the
+/// serde derives (camelCase on the wire, matching that struct's convention).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TokenUsage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u32>,
 }
 
@@ -223,6 +228,11 @@ pub struct AiChatMessage {
     pub content: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
+    /// Total token usage of the agent turn that produced this answer, when the
+    /// provider reported it. Defaulted + skipped when absent so conversations
+    /// persisted before the field existed still load unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<TokenUsage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1839,8 +1849,8 @@ mod tests {
         gemini_text, ollama_native_show_endpoint, openai_response_text, openai_stream_text, parse_gemini_tool_event,
         parse_model_list_response, provider_supports_function_calling, register_agent_cancel, register_stream,
         resolve_endpoint, resolve_model_list_endpoint, responses_max_output_tokens, responses_text, unregister_stream,
-        validate_config, AiApiStyle, AiConfig, AiMessage, AiModelInfo, AiProvider, AiStreamChunk, StreamToolEvent,
-        StreamingToolCallAccumulator, TokenUsage, ToolCallRef,
+        validate_config, AiApiStyle, AiChatMessage, AiConfig, AiMessage, AiModelInfo, AiProvider, AiStreamChunk,
+        StreamToolEvent, StreamingToolCallAccumulator, TokenUsage, ToolCallRef,
     };
     use serde_json::json;
 
@@ -2288,5 +2298,21 @@ mod tests {
         // Teardown clears the registry: a second cancel finds nothing to flip.
         unregister_stream(&session).await;
         assert!(!cancel_stream(&session).await);
+    }
+
+    #[test]
+    fn chat_message_usage_round_trips_and_stays_backward_compatible() {
+        // New messages persist their usage (camelCase on the wire).
+        let msg: AiChatMessage = serde_json::from_str(
+            r#"{"role":"assistant","content":"ok","usage":{"inputTokens":1200,"outputTokens":3400}}"#,
+        )
+        .unwrap();
+        assert_eq!(msg.usage, Some(TokenUsage { input_tokens: Some(1200), output_tokens: Some(3400) }));
+
+        // Conversations saved before the field existed still load, with no usage.
+        let old: AiChatMessage = serde_json::from_str(r#"{"role":"assistant","content":"ok"}"#).unwrap();
+        assert_eq!(old.usage, None);
+        // Absent usage is not written back out, keeping old payloads unchanged.
+        assert!(!serde_json::to_string(&old).unwrap().contains("usage"));
     }
 }

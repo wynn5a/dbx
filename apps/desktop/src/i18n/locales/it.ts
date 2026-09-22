@@ -918,6 +918,9 @@ export default {
     newChat: "Nuova Chat",
     thinking: "Riflessione...",
     reasoningProcess: "Processo di riflessione",
+    tokenUsage: {
+      tokens: "token",
+    },
     stopGenerating: "Interrompi generazione",
     tableMentionHeader: "Tabelle",
     tableMentionEmpty: "Nessuna tabella corrispondente",

@@ -430,10 +430,17 @@ export async function readExternalSqlFile(path: string): Promise<string> {
 
 // --- AI Conversations ---
 
+/** Token usage of the agent turn that produced an answer; mirrors Rust `TokenUsage` (camelCase serde). */
+export interface AiMessageUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
 export interface AiChatMessage {
   role: string;
   content: string;
   reasoning?: string;
+  usage?: AiMessageUsage;
 }
 
 export interface AiConversation {

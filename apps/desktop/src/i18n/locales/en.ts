@@ -917,6 +917,9 @@ export default {
     newChat: "New Chat",
     thinking: "Thinking...",
     reasoningProcess: "Thinking process",
+    tokenUsage: {
+      tokens: "tokens",
+    },
     stopGenerating: "Stop generating",
     tableMentionHeader: "Tables",
     tableMentionEmpty: "No matching tables",

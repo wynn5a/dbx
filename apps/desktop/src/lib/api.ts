@@ -290,6 +290,7 @@ export type {
   AiStreamChunk,
   AiModelInfo,
   AiChatMessage,
+  AiMessageUsage,
   AiConversation,
   AgentEvent,
   AgentStreamRequest,

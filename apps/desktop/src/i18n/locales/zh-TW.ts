@@ -863,6 +863,9 @@ export default {
     newChat: "新對話",
     thinking: "思考中……",
     reasoningProcess: "思考過程",
+    tokenUsage: {
+      tokens: "tokens",
+    },
     stopGenerating: "停止產生",
     tableMentionHeader: "資料表",
     tableMentionEmpty: "沒有相符的資料表",

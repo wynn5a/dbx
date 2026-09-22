@@ -927,6 +927,9 @@ export default {
     newChat: "Nuevo chat",
     thinking: "Procesando...",
     reasoningProcess: "Proceso de razonamiento",
+    tokenUsage: {
+      tokens: "tokens",
+    },
     stopGenerating: "Detener generación",
     fixWithAi: "Corregir con IA",
     tableMentionHeader: "Tablas",

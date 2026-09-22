@@ -74,7 +74,7 @@ import {
   deleteAiConversation,
   type AiConversation,
 } from "@/lib/api";
-import type { AgentEvent, AgentStreamRequest, AiMessage } from "@/lib/api";
+import type { AgentEvent, AgentStreamRequest, AiMessage, AiMessageUsage } from "@/lib/api";
 import type { ConnectionConfig, QueryTab } from "@/types/database";
 import type { SqlCompletionTable } from "@/lib/sqlCompletion";
 import { useDatabaseOptions } from "@/composables/useDatabaseOptions";
@@ -87,6 +87,7 @@ import {
 import { copyToClipboard } from "@/lib/clipboard";
 import { formatAiTableMention, parseAiTableMentions, type AiTableMention } from "@/lib/aiTableMentions";
 import { isAiPromptImeCompositionEvent, shouldSubmitAiPromptOnKeydown } from "@/lib/aiPromptKeyboard";
+import { formatTokenUsage, hasTokenUsage, usageFromAgentEndEvent, usageFromPersistedMessage } from "@/lib/aiTokenUsage";
 
 const { t } = useI18n();
 const settings = useSettingsStore();
@@ -124,6 +125,8 @@ interface ChatMessage {
   isThinking?: boolean;
   toolSteps?: AgentToolStep[];
   pendingConfirm?: PendingToolConfirm | null;
+  /** Total token usage of the agent turn, when the provider reported it. */
+  usage?: AiMessageUsage;
 }
 
 const props = defineProps<{
@@ -799,8 +802,15 @@ function handleAgentEvent(assistantIdx: number, sessionId: string, event: AgentE
       break;
     case "turn_start":
     case "turn_end":
-    case "agent_end":
       break;
+    case "agent_end": {
+      // The loop's terminal event carries best-effort token usage (accumulated
+      // across turns). Persist it on the message so the footer can show it now
+      // and after the conversation is reloaded from history.
+      const usage = usageFromAgentEndEvent(event);
+      if (usage) msg.usage = usage;
+      break;
+    }
   }
 }
 
@@ -893,6 +903,7 @@ async function persistConversation() {
       role: m.role,
       content: m.content,
       ...(m.reasoning ? { reasoning: m.reasoning } : {}),
+      ...(m.usage ? { usage: m.usage } : {}),
     })),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -910,6 +921,8 @@ function selectConversation(conv: AiConversation) {
     role: m.role as "user" | "assistant",
     content: m.content,
     reasoning: m.reasoning,
+    // Tolerant read: conversations saved before usage existed simply get none.
+    usage: usageFromPersistedMessage(m.usage),
   }));
   cachedSchemaContext.value = null;
   showConversationList.value = false;
@@ -1274,6 +1287,12 @@ watch(streamingIndex, () => {
                   ><code v-html="seg.html"></code></pre>
                 </div>
               </template>
+              <div
+                v-if="hasTokenUsage(msg.usage)"
+                class="mt-2 flex items-center gap-1 border-t border-[var(--ds-border)] pt-1.5 text-[10px] text-[var(--ds-text-4)]"
+              >
+                {{ formatTokenUsage(msg.usage, t("ai.tokenUsage.tokens")) }}
+              </div>
             </div>
           </div>
         </template>

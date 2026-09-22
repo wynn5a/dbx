@@ -896,6 +896,9 @@ export default {
     newChat: "新对话",
     thinking: "思考中...",
     reasoningProcess: "思考过程",
+    tokenUsage: {
+      tokens: "tokens",
+    },
     stopGenerating: "停止生成",
     tableMentionHeader: "数据表",
     tableMentionEmpty: "没有匹配的表",
