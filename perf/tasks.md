@@ -23,7 +23,7 @@
 | T02 | 查询真实服务端取消 | improvement-plan §2 A1 | M | ✅ d4485b14 |
 | T03 | SQL Server 连接池 | improvement-plan §2 A2 | M | ✅ b523ab5a |
 | T04 | 网格保存先展示 SQL | improvement-plan §6 E1 | M | ✅ 0dacdb2a |
-| T05 | 补全上下文剥离注释 | improvement-plan §4 C1 | M | ⬜ |
+| T05 | 补全上下文剥离注释 | improvement-plan §4 C1 | M | ✅ fc95f900 |
 | T06 | MySQL/SQL Server 标识符引号 | improvement-plan §4 C2 | S | ⬜ |
 | T07 | 前后端方言映射统一 | improvement-plan §4 C3 | M | ⬜ |
 | T08 | 一次 IPC 取全部 schema 表 | improvement-plan §3 B1 | M | ⬜ |
@@ -113,14 +113,15 @@
   - [x] `pnpm test && pnpm typecheck && pnpm lint` 通过（另 `pnpm check` 全绿；vitest 160 文件 1109 用例）
 - **实现说明**：`useDataGridEditor` 新增 `confirmBeforeSave` 选项（DataGrid 接到既有 `confirmDangerousSqlExecution` 设置），开启时 `saveChanges` 在 prepare 后暂停，经 `showSaveConfirm` / `pendingSaveStatements` / `pendingSaveRollbackStatements` 弹出复用的 `DangerConfirmDialog`，确认（`confirmDataGridSave`）才继续执行；取消/关闭弹窗不执行任何语句、待保存更改保留。弹窗内为"将执行的语句"与"回滚语句"两个编号分区——后端回滚语句顺序与保存语句不一一对应（回滚按 new→deleted→dirty 生成），不做 1:1 配对展示。预览文本由 `dataGridSql.ts` 新增纯函数 `formatDataGridSavePreview` 生成；弹窗带"不再提示"开关，写回同一设置。测试覆盖弹窗展示不执行（含多行删除全部语句）、取消保留待保存、设置关闭直接保存及格式化函数。
 
-### T05 补全上下文剥离注释 ⬜
+### T05 补全上下文剥离注释 ✅ fc95f900
 
 - **来源** improvement-plan-2026-09.md §4 C1（Track C）· **规模** M
 - **内容** `getSqlCompletionContext`（`sqlCompletion.ts:1350`）及所有 helper 只剥字符串字面量，不剥 `--` 与 `/* */`，被注释的 SQL 污染 `referencedTables` 与语句类型。入口加一次 `stripSqlComments()`，注释体替换为等长空格保持所有 offset 有效。
 - **验收**
-  - [ ] 新测试：光标在注释内返回中性上下文；注释之后的代码上下文正确；`$$...$$` 体不被误剥
-  - [ ] 被注释掉的表不再进入表引用/语句类型判断
-  - [ ] `packages/app-tests/sqlCompletion*.test.ts` 全过，补全性能回归测试不劣化
+  - [x] 新测试：光标在注释内返回中性上下文；注释之后的代码上下文正确；`$$...$$` 体不被误剥
+  - [x] 被注释掉的表不再进入表引用/语句类型判断
+  - [x] `packages/app-tests/sqlCompletion*.test.ts` 全过，补全性能回归测试不劣化
+- **实现说明**：`getSqlCompletionContext` 入口一次 `stripSqlComments()`（私有、offset 保持）：`--` 行注释与 `/* */` 块注释体替换为等长空格（换行保留），分隔符 `--`/`/*`/块结束符保持可见，避免整行注释被当成空行而截断语句块；扫描时跳过 `'…'`/`"…"`/反引号（含 `''` 转义）与 PG dollar-quote（`$$…$$`、`$tag$…$tag$`，tag 首字符须为字母/下划线，`$1` 占位符不受影响）内的注释起始符。光标落在注释内时直接返回与空文档一致的中性上下文。测试加在 `sqlCompletion.context.test.ts`（9 例：行/块注释内中性、注释后代码上下文、跨注释行语句完整、注释表不进引用/语句类型、dollar-quote 体不误剥、字符串内 `--`/`/*` 不误剥、尾注释后引号限定符解析）；`pnpm check` 全绿（vitest 160 文件 1118 用例，含 sqlCompletionPerformance 回归）。
 
 ### T06 MySQL/SQL Server 标识符引号 ⬜
 
