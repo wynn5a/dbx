@@ -42,7 +42,7 @@
 | T21 | Gemini/Ollama 工具调用 | improvement-plan §5 D5 | M | ✅ ed844722 |
 | T22 | 置信门控未知列诊断 | improvement-plan §4 C5 | L | ✅ 4d08758a |
 | T23 | 网格 FK 点击跳转 | improvement-plan §6 E7-1 | M | ✅ 37fc558b |
-| T24 | 方言函数目录（CH/DuckDB/Oracle） | improvement-plan §4 C6 | M | ⬜ |
+| T24 | 方言函数目录（CH/DuckDB/Oracle） | improvement-plan §4 C6 | M | ✅ 9a8178b2 |
 | T25 | Leaflet 按需加载 | improvement-plan §3 B5 | S | ⬜ |
 | T26 | PG JSON 列免 parse-再序列化 | improvement-plan §3 B4 | S | ⬜ |
 | T27 | SSH 隧道放弃时驱逐连接池 | improvement-plan §2 A5 | S | ⬜ |
@@ -312,13 +312,14 @@
   - [x] 测试 + 手工验证（手工点击验证在本环境不可行，以 20 项测试佐证接线链路每一环：`gridForeignKeyNavigation.test.ts` 覆盖 whereInput 构造纯函数（数字/布尔/字符串字面量、各方言标识符引用与转义——引号全方言双写、反斜杠仅 MySQL 系双写、SQL Server N 前缀）、可点判定矩阵（NULL/NaN/Infinity/对象/数组不可点、空串可点）、ref_schema 回落；源码契约测试锁定 DataGrid 接线（FK 预热拉取、修饰键守卫、DOM/Canvas 两种渲染模式的可点样式与点击 handler、emit 链 ContentArea→App.vue→`openTableTarget`、canvas 渲染器 hover 下划线选项）与六语言 tooltip；`pnpm check` 通过（format + lint + typecheck + vitest 170 文件 1224 测试）、`pnpm build` 通过）
 - **实现说明**：新增 `lib/gridForeignKeyNavigation.ts` 纯函数模块（FK 按列索引、可点判定、SQL 字面量/whereInput 构造、NavigationTarget 组装）。FK 元数据从"仅打开表信息抽屉才拉取"改为表格数据展示时预热（沿用 loaded/loading 守卫，失败静默=不可点，不影响 results 上下文——无 tableMeta 即不拉取）。两处渲染模式都接了交互：DOM 单元格 pointer 光标 + hover 下划线 + title（`grid.foreignKeyNavigateHint`，六语言，含平台修饰键 Cmd/Ctrl）；canvas 渲染器新增 `isForeignKeyCell` 选项绘制同样式 hover 下划线 + pointer 光标，canvas click 仅在落点 = mousedown 单元格时导航（拖拽框选不误触）。同列多 FK 取第一个；复合外键点击仅按所点列过滤（与主流工具一致）。
 
-### T24 方言函数目录（ClickHouse/DuckDB/Oracle） ⬜
+### T24 方言函数目录（ClickHouse/DuckDB/Oracle） ✅ 9a8178b2
 
 - **来源** improvement-plan-2026-09.md §4 C6（Track C，计划指定的优先三方言）· **规模** M
 - **内容** `DATABASE_FUNCTION_SIGNATURES`（`sqlCompletion.ts:848`）只覆盖 5/25+ 引擎。先补 ClickHouse、DuckDB、Oracle；存储过程参数提示（`information_schema.parameters`/`pg_proc`）留待后续。
 - **验收**
-  - [ ] 三方言函数名+签名补全生效；其他方言清单不变
-  - [ ] 测试通过
+  - [x] 三方言函数名+签名补全生效；其他方言清单不变（补全走既有 `databaseType` 消费路径（`activeFunctionSignatures` 覆盖共用目录），QueryEditor 已传该 prop，零接线改动；签名卡新增可选 `databaseType` 参数并由 QueryEditor 传入，方言条目按大小写不敏感解析、优先于共用目录、显示引擎规范拼写，不带 `databaseType` 时行为逐字节不变；既有 5 方言目录条目数/内容/共享引用（rqlite≡sqlite）与 apply 模板被测试钉死，并断言新函数不泄漏到其他方言）
+  - [x] 测试通过（新增 `packages/app-tests/sqlCompletion.dialectFunctions.test.ts` 9 项：三方言注册与结构完整性（目录条目数 74/76/50、描述与签名 key 一一对应、无大小写重复——可捕捉 Map 字面量重复键静默覆盖）、每方言代表性函数补全（精确 apply 模板与描述文案，CH 抽 countIf/toYYYYMM/groupArray/arrayJoin，DuckDB 抽 list_transform/struct_extract/json_extract*，Oracle 抽 LISTAGG/NVL2/ADD_MONTHS）、签名卡参数提示（含规范拼写与大写输入、activeParameter 位次）、跨方言不泄漏、共用目录行为不变、既有 5 方言清单钉死；`pnpm check` 全绿（format + lint + typecheck + vitest 171 文件 1233 测试，含 sqlCompletionPerformance 通过——目录扩大不影响既有补全性能测试））
+- **实现说明**：新增 `CLICKHOUSE/DUCKDB/ORACLE_FUNCTION_SIGNATURES`（`Map<string, string[]>` 参数签名）与 `DATABASE_FUNCTION_DESCRIPTIONS`（每函数一行英文说明，作为补全 item detail；与签名目录 key 一一对应，由测试锁定）。CH 保留 camelCase 规范拼写（该引擎函数名大小写敏感，`TODATETIME` 无法解析），DuckDB 按 docs 的小写/下划线拼写，Oracle 全大写。覆盖：聚合、字符串、日期/时间、数学、类型转换、条件、空值处理，CH/DuckDB 另有数组/list/struct/map/lambda（`list_transform` 等），Oracle 另有分析/层级函数；通用函数（COUNT/SUM/窗口函数族等）继续由共用目录 + `WINDOW_FUNCTIONS` 提供，未重复收录。签名由可靠知识编写，参数名参照各方言官方文档风格；不确定的变体（如 ClickHouse 参数化聚合 `quantile(level)(expr)`、`topK(N)(x)`）宁缺勿错未收录。存储过程参数提示按计划留待后续。`pnpm test && pnpm typecheck && pnpm lint` 全部通过。
 
 ### T25 Leaflet 按需加载 ⬜
 
