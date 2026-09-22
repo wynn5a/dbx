@@ -47,7 +47,7 @@
 | T26 | PG JSON 列免 parse-再序列化 | improvement-plan §3 B4 | S | ✅ 057fa533 |
 | T27 | SSH 隧道放弃时驱逐连接池 | improvement-plan §2 A5 | S | ✅ 43e5c824 |
 | T28 | 原生 DB socket TCP keepalive | improvement-plan §2 A6 | S | ✅ 7ffeb3ad |
-| T29 | idle_timeout 设置诚实化 | improvement-plan §2 A7 | S | ⬜ |
+| T29 | idle_timeout 设置诚实化 | improvement-plan §2 A7 | S | ✅ ed3c4bae |
 | T30 | 展示 token 用量与成本 | improvement-plan §5 D7 | S | ⬜ |
 | T31 | AI 连接失败重试一次 | improvement-plan §5 D6 | S | ⬜ |
 | T32 | 聊天结果一键图表 | improvement-plan §5 D8 | S | ⬜ |
@@ -358,13 +358,17 @@
   - [x] 半开连接（手工断网）不挂死，能被探测或报错恢复（如实标注验证方式：live 测试 phase 2（Linux 宿主机）在容器内 `iptables DROP` 制造真半开——对端无 ACK 无 RST，断言挂起查询在 keepalive 窗口内报错、同池在规则移除后新连接自愈；本机为 macOS + Docker Desktop，发布端口由宿主 `com.docker.backend` 代理终结，客户端 TCP 对端永不变哑（`docker pause` 亦不可用：暂停容器的内核仍会 ACK），故该环境只跑 phase 1。机制等价验证已在 Linux 容器间完成：直连容器 IP + 相同 schedule（idle=10s/interval=5s/retries=3）对 `pg_sleep` 挂起连接，`pg_stat_activity` 确认服务端执行后落 DROP 规则，25.5s ETIMEDOUT（恰为 10+3×5），DROP 计数器逐包计入探测；phase 2 代码即按此编排）
 - **实现说明**：统一常量与 socket2 schedule 构造放 `db::mod`（SSH 隧道自身 30s keepalive 不动；Redis 走 ConnectionManager 自带探测不在范围）。`socket2` 作为直接依赖加入 dbx-core，版本 0.6 + feature "all"——与 gaussdb fork 已编译的构建完全一致，不引入新代码；仅 SQL Server 路径使用（PG/MySQL 经各自 crate 内部 socket2）。三驱动 URL 参数优先策略：PG 按 getter 探测 fork 默认值（2h/None/None）缺省才填，MySQL 取 `opts.tcp_keepalive()` 缺省才填，避免覆盖用户显式配置。验证：`cargo fmt --check` + `cargo test -p dbx-core` 全绿（lib 853 通过，新增 7）+ `cargo check --workspace --locked`；live 测试 env 门控 `DBX_TEST_POSTGRES_KEEPALIVE_URL`/`DBX_TEST_POSTGRES_KEEPALIVE_CONTAINER`，Docker 临时 postgres:16-alpine（`--cap-add=NET_ADMIN`，用后弃容器）实测通过。
 
-### T29 idle_timeout 设置诚实化 ⬜
+### T29 idle_timeout 设置诚实化 ✅ ed3c4bae
 
 - **来源** improvement-plan-2026-09.md §2 A7（Track A）· **规模** S
 - **内容** `idle_timeout_secs` 只到 Mongo（`connection.rs:451`）；PG（`postgres.rs:1119`）与 MySQL（`mysql.rs:371` 硬编码 300s）忽略。按原文档"懒方案"：对不生效的引擎隐藏该控件。
 - **验收**
-  - [ ] PG/MySQL 连接表单不再出现可调但无效的 idle_timeout 控件
-  - [ ] Mongo 行为不变；i18n 文案与测试就位
+  - [x] PG/MySQL 连接表单不再出现可调但无效的 idle_timeout 控件（控件显隐由 lib 层 `supportsIdleTimeout` 谓词门控，支持清单 = 仅 mongodb；替换对话框原 `v-show="form.db_type === 'mongodb'"` 内联判断）
+  - [x] Mongo 行为不变；i18n 文案与测试就位（Mongo 仍显示控件、后端零改动；`connection.idleTimeout` 六 locale 文案由测试逐一断言；已保存连接的现存 idle_timeout 值原样保留——表单装载/保存归一化对所有引擎照常透传，只隐藏 UI 不清理数据）
+  - [x] 各引擎核查清单（依据 = 后端 `idle_timeout_secs` 实际消费点，见下"实现说明"）：
+    - **显示**：MongoDB（native 驱动 `db::mongo_driver::connect` → `ClientOptions::max_idle_time`；dbx-core `connection.rs` 的 `get_or_create_pool` 与 src-tauri test/probe 的两份池构建副本各消费一次）
+    - **隐藏**：MySQL 族 MySQL/Doris/StarRocks/Databend（`mysql.rs create_pool` 硬编码 `with_inactive_connection_ttl(300s)`）；PG 族 Postgres/Redshift/Gaussdb/Kwdb/OpenGauss（deadpool 无 idle TTL，`postgres.rs` 全文零 `idle_timeout`）；SQL Server（`SqlServerPool` 无 idle 过期概念）；SQLite/DuckDB/RQLite/Redis/ClickHouse/Elasticsearch（长连接客户端，无该配置消费点）；全部 agent/JDBC 引擎（`agent_connect_params` 不转发该字段）
+- **实现说明**：`IDLE_TIMEOUT_SUPPORTED_TYPES` 集合 + `supportsIdleTimeout()` 谓词落在既有 `databaseCapabilitySets.ts`/`databaseFeatureSupport.ts` 能力集模式上，作为"哪些驱动支持 idle_timeout"的单一事实源（文档注释记录后端审计依据）。测试加在 `databaseCapabilities.test.ts`（4 例）：支持清单对整个 DatabaseType union 穷举断言（union 从 `types/database.ts` 解析，新引擎加入时测试失败、强制显式归类）；与后端消费点对齐的源码契约（connection.rs 恰好一处绑定 + 一处 Mongo 消费、src-tauri 副本两处、mongo `max_idle_time` 映射、MySQL 硬编码 300s、postgres.rs 零命中——任一后端接线变化都会触发清单复审）；对话框以共享谓词接线 + 旧内联门控已移除；六 locale 文案。未动后端（无需 cargo）。`pnpm check` 全绿（format + lint + typecheck + vitest 173 文件 1252 用例）。
 
 ### T30 展示 token 用量与成本 ⬜
 
