@@ -51,7 +51,7 @@
 | T30 | 展示 token 用量与成本 | improvement-plan §5 D7 | S | ✅ 96fbac3b |
 | T31 | AI 连接失败重试一次 | improvement-plan §5 D6 | S | ✅ b051862a |
 | T32 | 聊天结果一键图表 | improvement-plan §5 D8 | S | ✅ b7ad137e |
-| T33 | 关键字大小写跟随输入 | improvement-plan §4 C7-1 | S | ⬜ |
+| T33 | 关键字大小写跟随输入 | improvement-plan §4 C7-1 | S | ✅ b4588cba |
 | T34 | 标签页切换快捷键 | improvement-plan §6 E6-1 | S | ⬜ |
 | T35 | Format SQL 快捷键 | improvement-plan §6 E6-2 | S | ⬜ |
 | T36 | getSqlCompletionResultValidFor 落地 | improvement-plan §4 C7-2 | S | ⬜ |
@@ -396,13 +396,14 @@
   - [x] 查询结果卡可打开图表并正确渲染（数据/列经 `chartResultFromToolText` 从结果卡文本直接映射为 QueryChart 的 `result` prop；本环境无 Tauri 运行时无法手工点验，以测试+构建佐证：解析器/映射/接线契约测试 + `pnpm check` 全绿 + `pnpm build` 通过，echarts 走既有异步 chunk）
   - [x] 无新增图表组件/依赖；手工验证（手工不可行，如上以 `packages/app-tests/aiChartResult.test.ts` —— 解析、映射、可图表化判定、AiAssistant 源码契约（懒加载引入/谓词门控/prop 透传）、六 locale i18n —— 及 typecheck/lint/test/build 全绿佐证并如实标注）
 
-### T33 关键字大小写跟随输入 ⬜
+### T33 关键字大小写跟随输入 ✅ b4588cba
 
 - **来源** improvement-plan-2026-09.md §4 C7 第 1 项（Track C）· **规模** S
 - **内容** 补全关键字硬编码大写。改为跟随输入前缀大小写（或加设置项）。
 - **验收**
-  - [ ] 小写前缀得到小写补全（或设置生效并有默认值）
-  - [ ] 测试通过
+  - [x] 小写前缀得到小写补全（或设置生效并有默认值）
+  - [x] 测试通过
+- **实现说明**：选"跟随前缀"方案（无设置面）。新增纯函数 `applyKeywordCasing(keyword, prefix)`（`sqlCompletion.ts`）：以前缀首个字母的大小写决策——小写插入 `select`、大写插入 `SELECT`、空前缀/无字母前缀（未键入单词即唤起补全）保持规范大写；混合输入（`Sel`/`sEL`）按首字母确定性归入大/小写。按首字母（而非全大写/全小写/混合三分规则）决策使选择随前缀增长保持稳定（`se`→`sel` 已弹出的补全不会中途翻转大小写，对未来 T36 的 case-insensitive `validFor` 正则同样成立）。接线全部在 `sqlCompletion.ts` 内：关键字 item 无 `apply`（编辑器插入 `apply ?? label`），label 即弹出文本即插入文本，编辑器零改动；内置语句 snippet 体硬编码大写，新增 `applySnippetBodyCasing` 仅对命中关键字目录的单词重设大小写，`{name}`/`${name}`/`#{name}` 占位符、数字、标点与非关键字单词（用户自写的标识符）原样保留，`detail` 预览与插入同大小写；比较值提示（NULL/IS NULL/IS NOT NULL/TRUE/FALSE）同为 keyword 类型且按 label 去重，一并跟随同一规则，避免与目录项分裂成两条不同大小写的条目。函数目录补全（`COUNT(`、`DATE_FORMAT(...)`）不在范围——其规范拼写即方言文档（如 ClickHouse camelCase）。已知取舍：历史加权的 key 是 item label，`select` 与 `SELECT` 的选择统计分开累计。测试：新增 `packages/app-tests/sqlCompletion.keywordCasing.test.ts`（纯函数矩阵 + 端到端：小写/大写/混合/空前缀、前缀增长稳定性、占位符不重写、方言关键字、NULL 值提示、内置 snippet apply 模板）；既有断言大写插入的用例更新为新契约（`sqlCompletion.test.ts` 的 SELECT/jsonb/SERIAL/USING 标签与 `select *`/CASE WHEN snippet apply/detail、`sqlCompletion.snippet.test.ts` 两处 apply/detail），函数项断言未动。`pnpm check` 全绿（format + lint + typecheck + vitest 176 文件 1304 用例，含补全性能回归测试）。
 
 ### T34 标签页切换快捷键 ⬜
 
