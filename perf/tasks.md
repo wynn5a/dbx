@@ -26,7 +26,7 @@
 | T05 | 补全上下文剥离注释 | improvement-plan §4 C1 | M | ✅ fc95f900 |
 | T06 | MySQL/SQL Server 标识符引号 | improvement-plan §4 C2 | S | ✅ db20604b |
 | T07 | 前后端方言映射统一 | improvement-plan §4 C3 | M | ✅ fccd9dcd |
-| T08 | 一次 IPC 取全部 schema 表 | improvement-plan §3 B1 | M | ⬜ |
+| T08 | 一次 IPC 取全部 schema 表 | improvement-plan §3 B1 | M | ✅ 879d2673 |
 | T09 | 补全缓存按超集缓存 | improvement-plan §3 B2 | M | ⬜ |
 | T10 | Redis 自动重连 | improvement-plan §2 A3 | S | ⬜ |
 | T11 | 健康扫描覆盖全部驱动 | improvement-plan §2 A4 | S | ⬜ |
@@ -148,14 +148,15 @@
 
 ## P1 —— 稳定性与延迟
 
-### T08 一次 IPC 取全部 schema 表 ⬜
+### T08 一次 IPC 取全部 schema 表 ✅ 879d2673
 
 - **来源** improvement-plan-2026-09.md §3 B1（Track B）· **规模** M
 - **内容** `connectionStore.ts:2277-2358` 的 `listCompletionTables` / `listCompletionObjects` 逐 schema 发 `listTables`（5 并发扇出）。新增接受 schema 列表的后端命令一次返回分组表（PG `table_schema = ANY($1)`），一次 checkout。
 - **验收**
-  - [ ] 多 schema 库加载补全元数据只产生 1 次 invoke（IPC 日志佐证）
-  - [ ] 返回结果与逐 schema 查询一致（对照测试）
-  - [ ] PG/MySQL/SQLite 至少各一条测试；全量回归通过
+  - [x] 多 schema 库加载补全元数据只产生 1 次 invoke（IPC 日志佐证；前端 store 测试断言 `list_completion_metadata` 恰好 1 次、`list_tables`/`list_completion_objects` 0 次）
+  - [x] 返回结果与逐 schema 查询一致（对照测试：SQLite 内存对照走 core 全链路；PG/MySQL env 门控 live 对照 Docker 实测通过）
+  - [x] PG/MySQL/SQLite 至少各一条测试；全量回归通过（`cargo fmt --check` + dbx-core 811 过 + `cargo check --workspace --locked` + `pnpm check` 全绿，vitest 162 文件 1133 用例）
+- **实现说明**：新增 `list_completion_metadata` 命令（`SchemaCompletionGroup { schema, tables, objects }` 按请求 schema 顺序分组）。PG 用 `n.nspname = ANY($1)`（表/例程两条 SQL，例程保留既有无时间戳回退并套 `filter_completion_objects`）；MySQL 用 `TABLE_SCHEMA IN (...)` + 例程/触发器 IN 查询（信息为空时回退逐 schema 以保留 SHOW 兜底）；SQLite 单条 `sqlite_master` 查询按请求 schema 复制分组；其余引擎（SQL Server/Agent/DuckDB/ClickHouse/外部驱动/Doris/OB-Oracle 等）在这一次 invoke 内循环既有 per-schema 调用。`filter`/`limit` 保持 `list_tables` 逐 schema 语义（含 yashandb 回收站过滤）。前端多 schema 补全加载（表+例程）一次 invoke，结果按 (connection, database) 缓存于 `completionMetadataCache`（进 `invalidateCompletionCache`）；击键过滤/宽松重试在客户端以与后端一致的 contains 语义完成，不再触发新 invoke；显式指定 schema 仍走单次 `list_tables`/`list_completion_objects`；bulk 失败回退逐 schema 调用（一轮取齐表+例程），不回归。附带效果：T09 的"按超集缓存"在此已具雏形（缓存不再随击键增长）。
 
 ### T09 补全缓存按超集缓存 ⬜
 
