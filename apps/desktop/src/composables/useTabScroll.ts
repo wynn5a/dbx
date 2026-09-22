@@ -1,4 +1,5 @@
 import { onBeforeUnmount, ref, watch, type Ref } from "vue";
+import { scrollBehaviorForMotion } from "@/lib/reducedMotion";
 
 export function useTabScroll(
   tabsContainerRef: Ref<HTMLElement | null>,
@@ -46,7 +47,10 @@ export function useTabScroll(
     const el = tabsContainerRef.value;
     if (!el) return;
     const scrollAmount = Math.max(160, el.clientWidth * 0.65);
-    el.scrollBy({ left: direction === "left" ? -scrollAmount : scrollAmount, behavior: "smooth" });
+    el.scrollBy({
+      left: direction === "left" ? -scrollAmount : scrollAmount,
+      behavior: scrollBehaviorForMotion("smooth"),
+    });
     scheduleScrollButtonUpdate();
     window.setTimeout(updateScrollButtons, 260);
   }

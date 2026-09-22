@@ -693,6 +693,26 @@ html.disable-transitions *::after {
   animation-duration: 0s !important;
 }
 
+/* OS "reduce motion" accessibility setting. Collapses every transition/animation to a
+   single near-instant frame instead of removing the declarations: state changes stay
+   immediate, and loaders (animate-spin / animate-pulse) remain visible as static glyphs
+   next to their loading text. 0.01ms rather than 0s keeps transitionend/animationend
+   firing so Vue <Transition> enter/leave and overlay presence lifecycles complete;
+   animation-iteration-count: 1 stops infinite loops (spinners, skeletons, tree status
+   pulse) on their first frame. scroll-behavior is pinned to auto; the JS-driven smooth
+   scrolls of the tab bar are not reachable from here — lib/reducedMotion.ts gates
+   those calls instead. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 body.dbx-table-reference-dragging,
 body.dbx-table-reference-dragging * {
   user-select: none !important;

@@ -31,6 +31,7 @@ import {
   tabTooltipLines,
 } from "@/lib/tabPresentation";
 import { hexToRgba } from "@/lib/color";
+import { scrollBehaviorForMotion } from "@/lib/reducedMotion";
 import type { QueryTab } from "@/types/database";
 
 const props = defineProps<{
@@ -137,7 +138,7 @@ function scrollActiveTabIntoView(behavior: ScrollBehavior) {
   if (!container) return;
   const activeEl = container.querySelector('[data-active-tab="true"]');
   if (activeEl) {
-    activeEl.scrollIntoView({ behavior, block: "nearest", inline: "center" });
+    activeEl.scrollIntoView({ behavior: scrollBehaviorForMotion(behavior), block: "nearest", inline: "center" });
   }
   updateScrollButtons();
 }
@@ -181,7 +182,7 @@ watch(
       if (!container) return;
       const el = container.querySelector("[data-driver-store-tab]");
       if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+        el.scrollIntoView({ behavior: scrollBehaviorForMotion("smooth"), block: "nearest", inline: "center" });
       }
       updateScrollButtons();
     });
