@@ -6,8 +6,9 @@
 //! calling tools or [`MAX_AGENT_TURNS`] is reached. Every step is reported via
 //! `on_event`; the Tauri/web layers forward those events to the frontend.
 //!
-//! Providers without native function calling (Ollama, and Gemini in this
-//! codebase) fall back to a single schema-injected completion.
+//! Gemini and tool-capable Ollama models run the native loop (see
+//! `ai::provider_supports_function_calling`); providers without native function
+//! calling fall back to a single schema-injected completion.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -124,7 +125,7 @@ pub async fn run_agent_loop(
     temperature: Option<f32>,
     is_agent_mode: bool,
 ) -> Result<String, String> {
-    if !ai::provider_supports_function_calling(config) {
+    if !ai::provider_supports_function_calling(config).await {
         return run_agent_loop_text_only(
             config,
             system_prompt,

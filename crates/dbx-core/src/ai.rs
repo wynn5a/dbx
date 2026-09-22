@@ -191,7 +191,7 @@ pub struct ToolCallRef {
 }
 
 /// Best-effort token accounting accumulated across a streamed response.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct TokenUsage {
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
@@ -1162,22 +1162,75 @@ async fn stream_gemini(
 // Provider-agnostic core: each provider parser emits `StreamToolEvent`s, the
 // `StreamingToolCallAccumulator` collapses streamed (fragmented) tool-call JSON
 // into the canonical `ToolCall` shape, and text/reasoning chunks pass straight
-// through to `on_chunk`. Only OpenAI-style and Claude are wired here; Gemini and
-// Ollama report `false` from `provider_supports_function_calling` and the agent
-// loop uses its text-only fallback for them.
+// through to `on_chunk`. Claude, Gemini (`functionCall`/`functionResponse`
+// turns) and tool-capable Ollama models are wired here; every other case
+// reports `false` from `provider_supports_function_calling` and the agent loop
+// uses its text-only fallback.
 // ---------------------------------------------------------------------------
 
 /// Whether the provider/config can do native function calling in this codebase.
-pub fn provider_supports_function_calling(config: &AiConfig) -> bool {
+///
+/// Claude and Gemini (the `functionCall`/`functionResponse` turn format) always
+/// can, the OpenAI-compatible providers can on the completions API style. Ollama
+/// opts in per model: only models whose `/api/show` capability list includes
+/// `tools` run the tool loop (see [`ollama_model_supports_tools`]); anything
+/// else keeps the text-only fallback.
+pub async fn provider_supports_function_calling(config: &AiConfig) -> bool {
     match config.provider {
-        AiProvider::Ollama | AiProvider::Gemini => false,
-        AiProvider::Claude => true,
+        AiProvider::Ollama => ollama_model_supports_tools(config).await,
+        AiProvider::Claude | AiProvider::Gemini => true,
         AiProvider::Openai
         | AiProvider::Deepseek
         | AiProvider::Qwen
         | AiProvider::OpenaiCompatible
         | AiProvider::Custom => config.api_style != AiApiStyle::Responses,
     }
+}
+
+/// Ollama reports each model's abilities from its native `/api/show`; a `tools`
+/// capability opts the model into the tool loop. Any failure — older server
+/// without the endpoint, connection error, unexpected response shape — resolves
+/// to `false`, i.e. today's text-only behavior with unchanged request traffic.
+///
+/// This routes Ollama through its OpenAI-compatible `/v1/chat/completions`
+/// endpoint (where this codebase already sends it), whose `tools` / `tool_calls`
+/// shape is the same one `/api/chat` uses.
+async fn ollama_model_supports_tools(config: &AiConfig) -> bool {
+    if config.api_style != AiApiStyle::Completions {
+        return false;
+    }
+    let client = match build_ai_http_client(config, 10) {
+        Ok(client) => client,
+        Err(_) => return false,
+    };
+    let res =
+        match client.post(ollama_native_show_endpoint(config)).json(&json!({ "model": config.model })).send().await {
+            Ok(res) => res,
+            Err(_) => return false,
+        };
+    if !res.status().is_success() {
+        return false;
+    }
+    let Ok(data) = res.json::<serde_json::Value>().await else {
+        return false;
+    };
+    data["capabilities"].as_array().map(|caps| caps.iter().any(|cap| cap.as_str() == Some("tools"))).unwrap_or(false)
+}
+
+/// The Ollama native API root for the configured endpoint. The Ollama provider
+/// config points at the OpenAI-compatible base (`…/v1`, or a full
+/// `…/v1/chat/completions`); the capability probe lives one level up at
+/// `<root>/api/show`.
+fn ollama_native_show_endpoint(config: &AiConfig) -> String {
+    let ep = config.endpoint.trim().trim_end_matches('/');
+    let without_completions = ep
+        .strip_suffix("/chat/completions")
+        .or_else(|| ep.strip_suffix("/responses"))
+        .or_else(|| ep.strip_suffix("/messages"))
+        .unwrap_or(ep)
+        .trim_end_matches('/');
+    let base = without_completions.strip_suffix("/v1").unwrap_or(without_completions).trim_end_matches('/');
+    format!("{base}/api/show")
 }
 
 /// Normalized streaming event emitted by every provider tool parser.
@@ -1287,6 +1340,9 @@ pub async fn stream_with_tools(
 
     let usage = match config.provider {
         AiProvider::Claude => stream_claude_with_tools(&client, request, &emit).await?,
+        AiProvider::Gemini => stream_gemini_with_tools(&client, request, &emit).await?,
+        // Ollama (when its model opted in via the /api/show probe) rides the
+        // OpenAI-compatible completions path.
         _ => stream_openai_with_tools(&client, request, &emit).await?,
     };
 
@@ -1587,6 +1643,143 @@ fn parse_claude_tool_event(event: &Value, session_id: &str, emit: &impl Fn(Strea
     }
 }
 
+/// Convert our flat message list into Gemini `contents`. Assistant turns that
+/// invoked tools become `model` contents with `functionCall` parts; tool results
+/// become `functionResponse` parts on `user` contents (consecutive results are
+/// grouped into one turn, mirroring `claude_messages_with_tools`). Gemini has no
+/// tool-call ids — responses are keyed by function name — so each result's name
+/// is resolved from the most recent assistant turn that declared the id.
+fn gemini_contents_with_tools(messages: &[AiMessage]) -> Vec<Value> {
+    let mut call_names: HashMap<&str, &str> = HashMap::new();
+    for m in messages {
+        for tc in &m.tool_calls {
+            call_names.insert(tc.id.as_str(), tc.name.as_str());
+        }
+    }
+
+    let mut out: Vec<Value> = Vec::new();
+    let mut pending: Vec<Value> = Vec::new();
+    for m in messages {
+        if m.role == "tool" {
+            let name = m.tool_call_id.as_deref().and_then(|id| call_names.get(id)).copied().unwrap_or_default();
+            pending.push(json!({
+                "functionResponse": { "name": name, "response": { "result": m.content } },
+            }));
+            continue;
+        }
+
+        if !pending.is_empty() {
+            out.push(json!({ "role": "user", "parts": std::mem::take(&mut pending) }));
+        }
+
+        if m.role == "assistant" && !m.tool_calls.is_empty() {
+            let mut parts = Vec::with_capacity(m.tool_calls.len() + 1);
+            if !m.content.is_empty() {
+                parts.push(json!({ "text": m.content }));
+            }
+            for tc in &m.tool_calls {
+                parts.push(json!({ "functionCall": { "name": tc.name, "args": tc.arguments } }));
+            }
+            out.push(json!({ "role": "model", "parts": parts }));
+        } else {
+            let role = if m.role == "assistant" { "model" } else { "user" };
+            out.push(json!({ "role": role, "parts": [{ "text": m.content }] }));
+        }
+    }
+    if !pending.is_empty() {
+        out.push(json!({ "role": "user", "parts": pending }));
+    }
+    out
+}
+
+async fn stream_gemini_with_tools(
+    client: &reqwest::Client,
+    request: &ToolStreamRequest<'_>,
+    emit: &impl Fn(StreamToolEvent),
+) -> Result<TokenUsage, String> {
+    let config = request.config;
+    let tool_defs: Vec<Value> = request.tools.iter().map(|t| t.to_gemini_tool()).collect();
+
+    let mut body = json!({
+        "systemInstruction": {
+            "parts": [{ "text": request.system_prompt }],
+        },
+        "contents": gemini_contents_with_tools(request.messages),
+        "generationConfig": {
+            "maxOutputTokens": request.max_tokens.unwrap_or(2048),
+            "temperature": request.temperature.unwrap_or(0.2),
+        },
+    });
+    if !tool_defs.is_empty() {
+        body["tools"] = json!([{ "functionDeclarations": tool_defs }]);
+    }
+
+    let res = client
+        .post(resolve_gemini_stream_endpoint(config))
+        .query(&[("key", config.api_key.as_str()), ("alt", "sse")])
+        .header(CONTENT_TYPE, "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Gemini request failed: {e}"))?;
+
+    if !res.status().is_success() {
+        let data: Value = res.json().await.map_err(|e| e.to_string())?;
+        return Err(extract_error(&data).unwrap_or_else(|| "Gemini API error".to_string()));
+    }
+
+    let mut usage = TokenUsage::default();
+    read_sse_stream(res, request.cancelled, |line| {
+        let Some(data) = stream_data_payload(line) else {
+            return ControlFlow::Continue(());
+        };
+        if let Ok(event) = serde_json::from_str::<Value>(data) {
+            parse_gemini_tool_event(&event, request.session_id, emit, &mut usage);
+        }
+        ControlFlow::Continue(())
+    })
+    .await?;
+
+    Ok(usage)
+}
+
+/// Parse one Gemini `streamGenerateContent` SSE payload: `text` parts stream as
+/// text deltas, `functionCall` parts arrive complete (no argument fragmentation)
+/// and are fed through the accumulator as start+delta+complete. Best-effort
+/// usage comes from the chunks' `usageMetadata`.
+fn parse_gemini_tool_event(event: &Value, session_id: &str, emit: &impl Fn(StreamToolEvent), usage: &mut TokenUsage) {
+    if let Some(u) = event.get("usageMetadata").filter(|u| !u.is_null()) {
+        if let Some(prompt) = u["promptTokenCount"].as_u64() {
+            usage.input_tokens = Some(prompt as u32);
+        }
+        let output = u["candidatesTokenCount"].as_u64().unwrap_or(0) + u["thoughtsTokenCount"].as_u64().unwrap_or(0);
+        if output > 0 {
+            usage.output_tokens = Some(output as u32);
+        }
+    }
+
+    let Some(parts) = event["candidates"].get(0).and_then(|candidate| candidate["content"]["parts"].as_array()) else {
+        return;
+    };
+    for (position, part) in parts.iter().enumerate() {
+        if let Some(text) = part["text"].as_str().filter(|s| !s.is_empty()) {
+            emit(StreamToolEvent::Chunk(AiStreamChunk {
+                session_id: session_id.to_string(),
+                delta: text.to_string(),
+                reasoning_delta: None,
+                done: false,
+            }));
+        }
+        let Some(call) = part.get("functionCall") else { continue };
+        let Some(name) = call["name"].as_str().filter(|s| !s.is_empty()) else { continue };
+        let index = position as u32;
+        emit(StreamToolEvent::ToolCallStart { index, id: String::new(), name: name.to_string() });
+        let args = call.get("args").cloned().unwrap_or_else(|| json!({}));
+        emit(StreamToolEvent::ToolCallDelta { index, fragment: args.to_string() });
+        emit(StreamToolEvent::ToolCallComplete { index });
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Conversation persistence (path-based)
 // ---------------------------------------------------------------------------
@@ -1642,12 +1835,14 @@ pub fn load_config(path: &Path) -> Result<Option<AiConfig>, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_ai_http_client, cancel_stream, claude_system_blocks, drain_complete_lines, gemini_text,
-        openai_response_text, openai_stream_text, parse_model_list_response, provider_supports_function_calling,
-        register_agent_cancel, register_stream, resolve_endpoint, resolve_model_list_endpoint,
-        responses_max_output_tokens, responses_text, unregister_stream, validate_config, AiApiStyle, AiConfig,
-        AiModelInfo, AiProvider, AiStreamChunk, StreamToolEvent, StreamingToolCallAccumulator,
+        build_ai_http_client, cancel_stream, claude_system_blocks, drain_complete_lines, gemini_contents_with_tools,
+        gemini_text, ollama_native_show_endpoint, openai_response_text, openai_stream_text, parse_gemini_tool_event,
+        parse_model_list_response, provider_supports_function_calling, register_agent_cancel, register_stream,
+        resolve_endpoint, resolve_model_list_endpoint, responses_max_output_tokens, responses_text, unregister_stream,
+        validate_config, AiApiStyle, AiConfig, AiMessage, AiModelInfo, AiProvider, AiStreamChunk, StreamToolEvent,
+        StreamingToolCallAccumulator, TokenUsage, ToolCallRef,
     };
+    use serde_json::json;
 
     #[test]
     fn accumulator_collapses_fragmented_tool_call() {
@@ -1682,8 +1877,8 @@ mod tests {
         assert_eq!(calls[1].name, "list_tables");
     }
 
-    #[test]
-    fn function_calling_support_by_provider() {
+    #[tokio::test]
+    async fn function_calling_support_by_provider() {
         let mk = |provider: AiProvider, api_style: AiApiStyle| AiConfig {
             provider,
             api_key: "k".into(),
@@ -1694,11 +1889,131 @@ mod tests {
             proxy_url: String::new(),
             enable_thinking: true,
         };
-        assert!(provider_supports_function_calling(&mk(AiProvider::Openai, AiApiStyle::Completions)));
-        assert!(provider_supports_function_calling(&mk(AiProvider::Claude, AiApiStyle::Completions)));
-        assert!(!provider_supports_function_calling(&mk(AiProvider::Ollama, AiApiStyle::Completions)));
-        assert!(!provider_supports_function_calling(&mk(AiProvider::Gemini, AiApiStyle::Completions)));
-        assert!(!provider_supports_function_calling(&mk(AiProvider::Openai, AiApiStyle::Responses)));
+        assert!(provider_supports_function_calling(&mk(AiProvider::Openai, AiApiStyle::Completions)).await);
+        assert!(provider_supports_function_calling(&mk(AiProvider::Claude, AiApiStyle::Completions)).await);
+        assert!(provider_supports_function_calling(&mk(AiProvider::Gemini, AiApiStyle::Completions)).await);
+        // Ollama is per-model opt-in via the /api/show probe; covered against a
+        // mock server in tests/ai_tool_stream.rs.
+        assert!(!provider_supports_function_calling(&mk(AiProvider::Openai, AiApiStyle::Responses)).await);
+    }
+
+    #[test]
+    fn ollama_native_show_endpoint_strips_completions_and_v1() {
+        let mk = |endpoint: &str| AiConfig {
+            provider: AiProvider::Ollama,
+            api_key: String::new(),
+            endpoint: endpoint.into(),
+            model: "llama3.1".into(),
+            api_style: AiApiStyle::Completions,
+            proxy_enabled: false,
+            proxy_url: String::new(),
+            enable_thinking: true,
+        };
+        let show = |endpoint: &str| ollama_native_show_endpoint(&mk(endpoint));
+        assert_eq!(show("http://localhost:11434/v1"), "http://localhost:11434/api/show");
+        assert_eq!(show("http://localhost:11434/v1/"), "http://localhost:11434/api/show");
+        assert_eq!(show("http://localhost:11434/v1/chat/completions"), "http://localhost:11434/api/show");
+        assert_eq!(show("http://localhost:11434"), "http://localhost:11434/api/show");
+        assert_eq!(show("http://localhost:11434/"), "http://localhost:11434/api/show");
+    }
+
+    #[test]
+    fn gemini_contents_replay_function_calls_and_group_function_responses() {
+        let messages = vec![
+            AiMessage::text("user", "What tables do I have?"),
+            AiMessage {
+                role: "assistant".into(),
+                content: "Checking.".into(),
+                tool_call_id: None,
+                tool_calls: vec![
+                    ToolCallRef { id: "call_0".into(), name: "list_tables".into(), arguments: json!({}) },
+                    ToolCallRef {
+                        id: "call_1".into(),
+                        name: "get_columns".into(),
+                        arguments: json!({ "table": "users" }),
+                    },
+                ],
+            },
+            AiMessage {
+                role: "tool".into(),
+                content: "users\norders".into(),
+                tool_call_id: Some("call_0".into()),
+                tool_calls: vec![],
+            },
+            AiMessage {
+                role: "tool".into(),
+                content: "id INTEGER".into(),
+                tool_call_id: Some("call_1".into()),
+                tool_calls: vec![],
+            },
+            AiMessage::text("user", "Thanks"),
+        ];
+
+        let contents = gemini_contents_with_tools(&messages);
+        assert_eq!(contents.len(), 4);
+        assert_eq!(contents[0]["role"], "user");
+        assert_eq!(contents[1]["role"], "model");
+        assert_eq!(contents[1]["parts"][0]["text"], "Checking.");
+        assert_eq!(contents[1]["parts"][1]["functionCall"]["name"], "list_tables");
+        assert_eq!(contents[1]["parts"][2]["functionCall"]["args"]["table"], "users");
+        // Consecutive tool results collapse into one user turn of functionResponses.
+        assert_eq!(contents[2]["role"], "user");
+        assert_eq!(contents[2]["parts"][0]["functionResponse"]["name"], "list_tables");
+        assert_eq!(contents[2]["parts"][0]["functionResponse"]["response"]["result"], "users\norders");
+        assert_eq!(contents[2]["parts"][1]["functionResponse"]["name"], "get_columns");
+        assert_eq!(contents[3]["role"], "user");
+        assert_eq!(contents[3]["parts"][0]["text"], "Thanks");
+    }
+
+    #[test]
+    fn gemini_tool_event_parses_text_and_function_call_parts() {
+        let event = serde_json::json!({
+            "candidates": [{
+                "content": { "role": "model", "parts": [
+                    { "text": "Checking the schema." },
+                    { "functionCall": { "name": "list_tables", "args": { "schema": "public" } } }
+                ] }
+            }],
+            "usageMetadata": { "promptTokenCount": 42, "candidatesTokenCount": 7, "thoughtsTokenCount": 3 }
+        });
+        let acc = std::sync::Mutex::new(StreamingToolCallAccumulator::new());
+        let chunks = std::sync::Mutex::new(Vec::new());
+        let emit = |event: StreamToolEvent| {
+            acc.lock().unwrap().process(event, &|c: AiStreamChunk| chunks.lock().unwrap().push(c));
+        };
+        let mut usage = TokenUsage::default();
+        parse_gemini_tool_event(&event, "s", &emit, &mut usage);
+
+        let calls = acc.into_inner().unwrap().finalize();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_1"); // index of the functionCall part
+        assert_eq!(calls[0].name, "list_tables");
+        assert_eq!(calls[0].arguments["schema"], "public");
+        assert_eq!(chunks.lock().unwrap()[0].delta, "Checking the schema.");
+        assert_eq!(usage.input_tokens, Some(42));
+        assert_eq!(usage.output_tokens, Some(10)); // candidates + thoughts
+    }
+
+    #[test]
+    fn gemini_tool_event_ignores_textless_and_empty_chunks() {
+        let mut usage = TokenUsage::default();
+        let acc = std::sync::Mutex::new(StreamingToolCallAccumulator::new());
+        let emit = |event: StreamToolEvent| acc.lock().unwrap().process(event, &|_| {});
+        parse_gemini_tool_event(&serde_json::json!({ "candidates": [] }), "s", &emit, &mut usage);
+        parse_gemini_tool_event(
+            &serde_json::json!({ "candidates": [{ "content": { "parts": [{ "text": "" }] } }] }),
+            "s",
+            &emit,
+            &mut usage,
+        );
+        parse_gemini_tool_event(
+            &serde_json::json!({ "candidates": [{ "content": { "parts": [{ "functionCall": { "args": {} } }] } }] }),
+            "s",
+            &emit,
+            &mut usage,
+        );
+        assert!(acc.into_inner().unwrap().finalize().is_empty());
+        assert_eq!(usage, TokenUsage::default());
     }
 
     #[test]

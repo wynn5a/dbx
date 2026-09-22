@@ -121,7 +121,7 @@ impl ToolDefinition {
         })
     }
 
-    /// Gemini `functionDeclarations[]` entry (reserved for future Gemini tool support).
+    /// Gemini `functionDeclarations[]` entry — sent as `tools: [{ "functionDeclarations": [...] }]`.
     pub fn to_gemini_tool(&self) -> Value {
         json!({
             "name": self.name,
