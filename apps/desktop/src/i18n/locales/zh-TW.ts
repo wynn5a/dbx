@@ -577,6 +577,7 @@ export default {
     cellDetails: "儲存格詳情",
     cellDetailLayoutBottom: "移到底部",
     cellDetailLayoutRight: "移到右側",
+    foreignKeyNavigateHint: "{modifier}+點擊跳轉到 {target}（按此值定位）",
     openCellDetailsDialog: "儲存格詳情",
     rowDetails: "資料詳情",
     rowDetailsFor: "第 {row} 筆資料詳情",

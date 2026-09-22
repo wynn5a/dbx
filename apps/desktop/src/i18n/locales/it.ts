@@ -590,6 +590,7 @@ export default {
     cellDetails: "Dettagli Cella",
     cellDetailLayoutBottom: "Sposta in Basso",
     cellDetailLayoutRight: "Sposta a Destra",
+    foreignKeyNavigateHint: "{modifier}+clic per aprire {target} filtrato per questo valore",
     openCellDetailsDialog: "Apri Dettagli Cella",
     rowDetails: "Dettagli Riga",
     rowDetailsFor: "Dettagli Riga {row}",

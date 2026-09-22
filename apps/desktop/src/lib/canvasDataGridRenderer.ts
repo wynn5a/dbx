@@ -64,6 +64,7 @@ export interface DrawCanvasDataGridOptions {
   rowCellsUseSelectionVisual: (rowId: number) => boolean;
   cellIsSelected: (rowIndex: number, visibleColIdx: number) => boolean;
   cellCanHover: (row: CanvasDataGridRow, actualColIdx: number) => boolean;
+  isForeignKeyCell: (row: CanvasDataGridRow, actualColIdx: number) => boolean;
 }
 
 type NumericCanvasContext = CanvasRenderingContext2D & {
@@ -242,6 +243,7 @@ export function drawCanvasDataGrid(options: DrawCanvasDataGridOptions) {
     rowCellsUseSelectionVisual,
     cellIsSelected,
     cellCanHover,
+    isForeignKeyCell,
   } = options;
   const dpr = Math.max(1, options.pixelRatio ?? window.devicePixelRatio ?? 1);
   const pixelWidth = Math.max(1, Math.ceil(width * dpr));
@@ -430,6 +432,22 @@ export function drawCanvasDataGrid(options: DrawCanvasDataGridOptions) {
         const textMaxWidth = needsTruncation ? Math.max(0, x + colWidth - textLeft) : paddedMaxWidth;
         const text = isEditingThisCell ? displayText : fitCanvasText(ctx, displayText, textMaxWidth);
         ctx.fillText(text, textLeft, textY);
+        const hoveredForeignKeyCell =
+          hoverCell?.rowIndex === item.displayIndex &&
+          hoverCell.visibleColIdx === visibleColIdx &&
+          !isEditingThisCell &&
+          value !== null &&
+          isForeignKeyCell(item, actualColIdx);
+        if (hoveredForeignKeyCell) {
+          // Match the DOM grid's link affordance: hovered FK cells read as links.
+          const textWidth = Math.min(ctx.measureText(text).width, textMaxWidth);
+          const underlineY = alignCanvasPixel(y + CANVAS_DATA_GRID_ROW_HEIGHT - 6, dpr);
+          ctx.strokeStyle = theme.primary;
+          ctx.beginPath();
+          ctx.moveTo(textLeft, underlineY);
+          ctx.lineTo(alignCanvasPixel(textLeft + textWidth, dpr), underlineY);
+          ctx.stroke();
+        }
         if (item.isDeleted && text) {
           const textWidth = Math.min(ctx.measureText(text).width, textMaxWidth);
           ctx.strokeStyle = theme.foreground;

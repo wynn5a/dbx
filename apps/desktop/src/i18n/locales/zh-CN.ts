@@ -587,6 +587,7 @@ export default {
     cellDetails: "单元格详情",
     cellDetailLayoutBottom: "移动到底部",
     cellDetailLayoutRight: "移动到右侧",
+    foreignKeyNavigateHint: "{modifier}+点击跳转到 {target}（按此值定位）",
     openCellDetailsDialog: "单元格详情",
     rowDetails: "行详情",
     rowDetailsFor: "第 {row} 行详情",

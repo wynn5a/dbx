@@ -598,6 +598,7 @@ export default {
     cellDetails: "Detalles de celda",
     cellDetailLayoutBottom: "Mover abajo",
     cellDetailLayoutRight: "Mover a la derecha",
+    foreignKeyNavigateHint: "{modifier}+clic para abrir {target} filtrado por este valor",
     openCellDetailsDialog: "Abrir detalles de celda",
     rowDetails: "Detalles de fila",
     rowDetailsFor: "Detalles de fila {row}",

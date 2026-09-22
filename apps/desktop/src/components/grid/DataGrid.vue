@@ -92,6 +92,16 @@ import { coerceDataGridCellValue, dataGridCellDisplayText, dataGridCellEditorTex
 import { createColumnDrafts } from "@/lib/tableStructureEditorState";
 import type { BuildSingleColumnAlterSqlOptions } from "@/lib/tableStructureEditorSql";
 import { buildTableSelectSql, quoteTableIdentifier } from "@/lib/tableSelectSql";
+import {
+  buildForeignKeyNavigationTarget,
+  foreignKeyByColumnName,
+  foreignKeyForColumn,
+  formatForeignKeyTargetLabel,
+  isForeignKeyCellValueNavigable,
+  type ForeignKeyByColumn,
+  type ForeignKeyNavigationTarget,
+} from "@/lib/gridForeignKeyNavigation";
+import { isMacOS } from "@/lib/platform";
 import { uuid } from "@/lib/utils";
 import { resolveHeaderColumnType } from "@/lib/dataGridColumnType";
 import {
@@ -287,6 +297,7 @@ const emit = defineEmits<{
   sort: [column: string, columnIndex: number, direction: "asc" | "desc" | null, whereInput?: string];
   "update:whereInput": [value: string];
   "update:orderByInput": [value: string];
+  "open-fk-target": [target: ForeignKeyNavigationTarget];
 }>();
 
 console.info("[DBX][DataGrid:setup]", {
@@ -3566,6 +3577,9 @@ const canvasViewportWidth = ref(0);
 const canvasViewportHeight = ref(0);
 const canvasScrollTop = ref(0);
 const canvasHoverCell = ref<{ rowIndex: number; visibleColIdx: number } | null>(null);
+// Cell under the last canvas mousedown, so canvas clicks can tell a real click
+// on a cell from the mouseup of a drag that started elsewhere.
+const canvasMouseDownCell = ref<{ rowIndex: number; visibleColIdx: number } | null>(null);
 const canvasDevicePixelRatio = ref(typeof window === "undefined" ? 1 : window.devicePixelRatio || 1);
 const canvasBackingPixelRatio = computed(() =>
   Math.min(4, Math.max(1, canvasDevicePixelRatio.value * settingsStore.editorSettings.uiScale)),
@@ -3788,9 +3802,11 @@ function onCanvasMouseMove(event: MouseEvent) {
   if (canvasRef.value) {
     canvasRef.value.style.cursor = hit?.rowNumber
       ? "default"
-      : hitItem && actualColIdx !== undefined && canEditCellItem(hitItem, actualColIdx)
-        ? "text"
-        : "cell";
+      : hitItem && actualColIdx !== undefined && foreignKeyCell(hitItem, actualColIdx)
+        ? "pointer"
+        : hitItem && actualColIdx !== undefined && canEditCellItem(hitItem, actualColIdx)
+          ? "text"
+          : "cell";
   }
   if (
     next?.rowIndex === canvasHoverCell.value?.rowIndex &&
@@ -3843,6 +3859,8 @@ function onCanvasMouseDown(event: MouseEvent) {
   if (event.button !== 0) return;
   commitHiddenCanvasEditBeforeCellInteraction();
   const hit = canvasHitTest(event);
+  canvasMouseDownCell.value =
+    hit && !hit.rowNumber ? { rowIndex: hit.rowIndex, visibleColIdx: hit.visibleColIdx } : null;
   if (!hit) return;
   const item = displayItemAt(hit.rowIndex);
   if (!item) return;
@@ -3853,6 +3871,21 @@ function onCanvasMouseDown(event: MouseEvent) {
   }
   gridRef.value?.focus({ preventScroll: true });
   scheduleCanvasDraw();
+}
+
+function onCanvasClick(event: MouseEvent) {
+  if (!(event.metaKey || event.ctrlKey)) return;
+  const hit = canvasHitTest(event);
+  if (!hit || hit.rowNumber) return;
+  const down = canvasMouseDownCell.value;
+  if (!down || down.rowIndex !== hit.rowIndex || down.visibleColIdx !== hit.visibleColIdx) return;
+  const item = displayItemAt(hit.rowIndex);
+  const actualColIdx = visibleColumnIndexes.value[hit.visibleColIdx];
+  if (!item || actualColIdx === undefined) return;
+  const foreignKey = foreignKeyCell(item, actualColIdx);
+  if (!foreignKey) return;
+  event.preventDefault();
+  navigateForeignKeyCell(foreignKey, item.data[actualColIdx]);
 }
 
 function onCanvasContext(event: MouseEvent) {
@@ -4015,6 +4048,7 @@ function drawCanvasGrid() {
     rowCellsUseSelectionVisual,
     cellIsSelected,
     cellCanHover: canEditCellItem,
+    isForeignKeyCell: (row, actualColIdx) => !!foreignKeyCell(row, actualColIdx),
   });
 }
 
@@ -5609,6 +5643,52 @@ async function fetchForeignKeys() {
   }
 }
 
+const foreignKeyByColumn = computed<ForeignKeyByColumn>(() => foreignKeyByColumnName(foreignKeys.value));
+
+/** FK metadata for a grid column, resolved through the source-column mapping. */
+function foreignKeyForGridColumn(columnIndex: number): ForeignKeyInfo | undefined {
+  const columnName = props.sourceColumns?.[columnIndex] ?? props.result.columns[columnIndex];
+  return foreignKeyForColumn(foreignKeyByColumn.value, columnName);
+}
+
+/** The FK navigable for this cell, or undefined (no metadata / NULL / composite value). */
+function foreignKeyCell(item: RowItem | undefined, columnIndex: number): ForeignKeyInfo | undefined {
+  if (!item) return undefined;
+  const foreignKey = foreignKeyForGridColumn(columnIndex);
+  if (!foreignKey) return undefined;
+  return isForeignKeyCellValueNavigable(item.data[columnIndex]) ? foreignKey : undefined;
+}
+
+function foreignKeyCellTitle(item: RowItem | undefined, columnIndex: number): string | undefined {
+  const foreignKey = foreignKeyCell(item, columnIndex);
+  if (!foreignKey) return undefined;
+  return t("grid.foreignKeyNavigateHint", {
+    modifier: isMacOS() ? "Cmd" : "Ctrl",
+    target: formatForeignKeyTargetLabel(foreignKey),
+  });
+}
+
+function navigateForeignKeyCell(foreignKey: ForeignKeyInfo, value: CellValue) {
+  const target = buildForeignKeyNavigationTarget({
+    connectionId: props.connectionId,
+    database: props.database ?? "",
+    schema: props.tableMeta?.schema,
+    databaseType: props.databaseType,
+    foreignKey,
+    value,
+  });
+  if (!target) return;
+  emit("open-fk-target", target);
+}
+
+function onDataCellClick(item: RowItem, columnIndex: number, event: MouseEvent) {
+  if (!(event.metaKey || event.ctrlKey)) return;
+  const foreignKey = foreignKeyCell(item, columnIndex);
+  if (!foreignKey) return;
+  event.preventDefault();
+  navigateForeignKeyCell(foreignKey, item.data[columnIndex]);
+}
+
 async function fetchTriggers() {
   if (!props.connectionId || !props.tableMeta || triggersLoaded.value || triggersLoading.value) return;
   triggersLoading.value = true;
@@ -5642,11 +5722,16 @@ watch(
     triggersLoaded.value = false;
     triggersError.value = "";
     if (showTableInfo.value) selectTableInfoTab(activeTableInfoTab.value);
+    // Keep FK metadata warm even when the table-info drawer is closed so FK
+    // cells stay clickable from the moment the table's data is shown.
+    void fetchForeignKeys();
   },
 );
 
 if (showTableInfo.value && props.tableMeta && props.connectionId) {
   selectTableInfoTab(activeTableInfoTab.value);
+} else if (props.tableMeta && props.connectionId) {
+  void fetchForeignKeys();
 }
 
 function copyDdl() {
@@ -7444,6 +7529,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     @mousemove="onCanvasMouseMove"
                     @mouseleave="onCanvasMouseLeave"
                     @mousedown="onCanvasMouseDown"
+                    @click="onCanvasClick"
                     @contextmenu="onCanvasContext"
                     @dblclick="onCanvasDblClick"
                   />
@@ -7623,11 +7709,14 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                           col.actualColIdx,
                         ),
                         'tabular-nums': typeof item.data[col.actualColIdx] === 'number',
+                        'cursor-pointer': !!foreignKeyCell(item, col.actualColIdx),
                         'cursor-text hover:bg-[var(--data-grid-cell-hover-bg)]':
                           !isScrolling && canEditCellItem(item, col.actualColIdx),
                         'line-through': item.isDeleted,
                       }"
+                      :title="foreignKeyCellTitle(item, col.actualColIdx)"
                       @mousedown="handleDataCellMousedown(item.displayIndex, col.visibleColIdx, item.id, $event)"
+                      @click="onDataCellClick(item, col.actualColIdx, $event)"
                       @mouseenter="onCellMouseenter(item.displayIndex, col.visibleColIdx, col.actualColIdx)"
                       @mouseleave="onCellMouseleave(item.displayIndex, col.actualColIdx)"
                       @dblclick="canEditCellItem(item, col.actualColIdx) && startEdit(item.id, col.actualColIdx)"
@@ -7656,7 +7745,14 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                         />
                       </template>
                       <template v-else>
-                        {{ formatCellCached(item.data[col.actualColIdx], col.actualColIdx) }}
+                        <span
+                          v-if="foreignKeyCell(item, col.actualColIdx)"
+                          class="underline-offset-2 group-hover/cell:underline"
+                          >{{ formatCellCached(item.data[col.actualColIdx], col.actualColIdx) }}</span
+                        >
+                        <template v-else>{{
+                          formatCellCached(item.data[col.actualColIdx], col.actualColIdx)
+                        }}</template>
                         <div
                           v-if="cellDetailButtonVisible(item.displayIndex, col.actualColIdx)"
                           class="absolute right-0.5 top-0.5 flex items-center gap-1"

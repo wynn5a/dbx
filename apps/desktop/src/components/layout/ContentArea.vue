@@ -62,6 +62,7 @@ import { isTableDataEditable } from "@/lib/tableEditing";
 import { tableMetaForDataTab } from "@/lib/tableDataTabMeta";
 import { formatShortcut } from "@/lib/shortcutRegistry";
 import { effectiveDatabaseTypeForConnection } from "@/lib/jdbcDialect";
+import type { ForeignKeyNavigationTarget } from "@/lib/gridForeignKeyNavigation";
 import { sqlDialectForDatabaseType, type SqlDialect } from "@/lib/sqlDialect";
 import type { QueryTab, ConnectionConfig } from "@/types/database";
 import type { SqlFormatDialect } from "@/lib/sqlFormatter";
@@ -119,6 +120,7 @@ const emit = defineEmits<{
   executeSql: [sql: string];
   clickTable: [tableName: string];
   openObjectTable: [target: { tableName: string; schema?: string }];
+  openForeignKeyTarget: [target: ForeignKeyNavigationTarget];
   objectSchemaChange: [schema: string | undefined];
   structureEditorSaved: [commentChanged: boolean];
   structureEditorClose: [];
@@ -988,6 +990,7 @@ defineExpose({ focusSearch, refreshData, handleModRTarget });
             (column: string, columnIndex: number, direction: 'asc' | 'desc' | null, whereInput?: string) =>
               emit('sort', column, columnIndex, direction, whereInput)
           "
+          @open-fk-target="(target) => emit('openForeignKeyTarget', target)"
         />
         <div
           v-else-if="activeTab.isExecuting"

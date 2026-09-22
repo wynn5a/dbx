@@ -1129,6 +1129,7 @@ onUnmounted(() => {
                           tableName: target.tableName,
                         })
                     "
+                    @open-fk-target="openTableTarget"
                     @object-schema-change="(schema) => activeTab && queryStore.updateSchema(activeTab.id, schema)"
                     @structure-editor-saved="
                       (commentChanged) =>
