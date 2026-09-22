@@ -1,4 +1,5 @@
 import { strict as assert } from "node:assert";
+import { readFileSync } from "node:fs";
 import { test } from "vitest";
 import {
   DEFAULT_SHORTCUT_SETTINGS,
@@ -53,6 +54,14 @@ test("goto-tab labels name the position, the 9th names the last tab", () => {
   assert.equal(gotoTab9.labelParams, undefined);
 });
 
+test("registry contains the format SQL binding", () => {
+  const formatSql = definition("formatSql");
+  assert.equal(formatSql.scope, "editor");
+  assert.equal(formatSql.defaultShortcut, "Mod+Shift+F");
+  assert.equal(formatSql.labelKey, "settings.shortcutFormatSql");
+  assert.equal(formatSql.labelParams, undefined);
+});
+
 test("default shortcuts are unique within each scope (no binding conflicts)", () => {
   const scopes = new Set(SHORTCUT_DEFINITIONS.map((item) => item.scope));
   for (const scope of scopes) {
@@ -88,4 +97,20 @@ test("every binding is rendered by the shortcut panel and labeled in all six loc
       }
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// Source contract: the keydown dispatch lives in App.vue's template-free
+// handler (no mount test facility), so the wiring is asserted against the
+// source — same approach as the connectionStoreCancel contract tests.
+// ---------------------------------------------------------------------------
+
+test("App.vue dispatches the format SQL binding to the active query editor", () => {
+  const source = readFileSync(new URL("../../apps/desktop/src/App.vue", import.meta.url), "utf8");
+  assert.match(source, /isFormatSqlShortcut/, "App.vue must import the format SQL matcher");
+  assert.match(
+    source,
+    /isFormatSqlShortcut\(e, shortcuts\)[\s\S]{0,200}?data-query-editor-root[\s\S]{0,200}?formatActiveSql\(\)/,
+    "the keydown path must scope the binding to the query editor and call formatActiveSql",
+  );
 });

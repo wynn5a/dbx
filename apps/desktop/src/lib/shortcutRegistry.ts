@@ -1,6 +1,7 @@
 export type ShortcutActionId =
   | "executeSql"
   | "saveSql"
+  | "formatSql"
   | "acceptCompletion"
   | "copyCurrentRow"
   | "deleteCurrentRow"
@@ -77,6 +78,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     labelKey: "settings.shortcutSaveSql",
     scope: "editor",
     defaultShortcut: "Mod+S",
+  },
+  {
+    id: "formatSql",
+    labelKey: "settings.shortcutFormatSql",
+    scope: "editor",
+    defaultShortcut: "Mod+Shift+F",
   },
   {
     id: "acceptCompletion",

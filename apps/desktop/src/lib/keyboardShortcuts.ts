@@ -151,6 +151,10 @@ export function isSaveShortcut(event: ShortcutLikeEvent, shortcuts?: Partial<Sho
   return matchesShortcut(event, actionShortcut("saveSql", shortcuts));
 }
 
+export function isFormatSqlShortcut(event: ShortcutLikeEvent, shortcuts?: Partial<ShortcutSettings>): boolean {
+  return matchesShortcut(event, actionShortcut("formatSql", shortcuts));
+}
+
 export function isAcceptCompletionShortcut(event: ShortcutLikeEvent, shortcuts?: Partial<ShortcutSettings>): boolean {
   return matchesShortcut(event, actionShortcut("acceptCompletion", shortcuts));
 }

@@ -8,6 +8,7 @@ import {
   isCloseTabShortcut,
   isExecuteSqlShortcut,
   isFocusSearchShortcut,
+  isFormatSqlShortcut,
   isModRShortcut,
   isNewConnectionShortcut,
   isNewQueryShortcut,
@@ -260,6 +261,25 @@ test("ignores save shortcut while composing", () => {
 
 test("ignores Alt+S for saving", () => {
   assert.equal(isSaveShortcut({ key: "s", altKey: true }), false);
+});
+
+test("matches Mod+Shift+F for formatting the active SQL", () => {
+  assert.equal(isFormatSqlShortcut({ key: "F", metaKey: true, shiftKey: true }), true);
+  assert.equal(isFormatSqlShortcut({ key: "F", ctrlKey: true, shiftKey: true }), true);
+  assert.equal(eventToShortcut({ key: "F", metaKey: true, shiftKey: true } as any), "Shift+Mod+F");
+});
+
+test("rejects format SQL shortcuts with missing or extra modifiers", () => {
+  assert.equal(isFormatSqlShortcut({ key: "F", shiftKey: true }), false);
+  assert.equal(isFormatSqlShortcut({ key: "F", metaKey: true }), false);
+  assert.equal(isFormatSqlShortcut({ key: "F", ctrlKey: true }), false);
+  assert.equal(isFormatSqlShortcut({ key: "F", metaKey: true, shiftKey: true, altKey: true }), false);
+  assert.equal(isFormatSqlShortcut({ key: "F", metaKey: true, shiftKey: true, isComposing: true }), false);
+});
+
+test("matches custom format SQL shortcut settings", () => {
+  assert.equal(isFormatSqlShortcut({ key: "F", metaKey: true, shiftKey: true }, { formatSql: "Mod+Alt+F" } as any), false);
+  assert.equal(isFormatSqlShortcut({ key: "F", metaKey: true, altKey: true }, { formatSql: "Mod+Alt+F" } as any), true);
 });
 
 test("detects object source editor targets for contextual save", () => {

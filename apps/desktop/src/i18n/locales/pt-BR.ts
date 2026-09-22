@@ -1866,6 +1866,7 @@ export default {
     shortcutReplace: "Substituir",
     shortcutSaveSql: "Salvar SQL",
     shortcutAcceptCompletion: "Aceitar autocompletar",
+    shortcutFormatSql: "Formatar SQL",
     shortcutCopyCurrentRow: "Copiar linha de dados atual",
     shortcutDeleteCurrentRow: "Excluir linha de dados atual",
     shortcutNewQuery: "Nova consulta",

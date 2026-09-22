@@ -1874,6 +1874,7 @@ export default {
     shortcutReplace: "替换",
     shortcutSaveSql: "保存 SQL",
     shortcutAcceptCompletion: "接受补全",
+    shortcutFormatSql: "格式化 SQL",
     shortcutCopyCurrentRow: "复制当前数据行",
     shortcutDeleteCurrentRow: "删除当前数据行",
     shortcutNewQuery: "新建查询",

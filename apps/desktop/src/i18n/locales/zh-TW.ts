@@ -1807,6 +1807,7 @@ export default {
     shortcutReplace: "取代",
     shortcutSaveSql: "儲存 SQL",
     shortcutAcceptCompletion: "接受補全",
+    shortcutFormatSql: "格式化 SQL",
     shortcutCopyCurrentRow: "複製目前資料列",
     shortcutDeleteCurrentRow: "刪除目前資料列",
     shortcutNewQuery: "建立查詢",

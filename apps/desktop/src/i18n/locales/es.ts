@@ -1858,6 +1858,7 @@ export default {
     shortcutReplace: "Reemplazar",
     shortcutSaveSql: "Guardar SQL",
     shortcutAcceptCompletion: "Aceptar completado",
+    shortcutFormatSql: "Formatear SQL",
     shortcutCopyCurrentRow: "Copiar fila de datos actual",
     shortcutDeleteCurrentRow: "Eliminar fila de datos actual",
     shortcutNewQuery: "Nueva consulta",

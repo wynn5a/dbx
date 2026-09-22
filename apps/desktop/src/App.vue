@@ -46,6 +46,7 @@ import {
   isCloseTabShortcut,
   isExecuteSqlShortcut,
   isFocusSearchShortcut,
+  isFormatSqlShortcut,
   isModRShortcut,
   isNewConnectionShortcut,
   isNewQueryShortcut,
@@ -894,6 +895,17 @@ function handleKeydown(e: KeyboardEvent) {
     e.preventDefault();
     e.stopPropagation();
     tryExecute();
+    return;
+  }
+  if (
+    activeTab.value?.mode === "query" &&
+    isFormatSqlShortcut(e, shortcuts) &&
+    e.target instanceof Element &&
+    e.target.closest("[data-query-editor-root]")
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    formatActiveSql();
     return;
   }
   if (isModRShortcut(e) && e.target instanceof Element && contentAreaRef.value?.handleModRTarget(e.target)) {
