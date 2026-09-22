@@ -30,7 +30,7 @@
 | T09 | 补全缓存按超集缓存 | improvement-plan §3 B2 | M | ✅ 4025a0cc |
 | T10 | Redis 自动重连 | improvement-plan §2 A3 | S | ✅ 4c8c98e2 |
 | T11 | 健康扫描覆盖全部驱动 | improvement-plan §2 A4 | S | ✅ fe4c270c |
-| T12 | Agent 工具查询可取消可见 | improvement-plan §5 D2 | M | ⬜ |
+| T12 | Agent 工具查询可取消可见 | improvement-plan §5 D2 | M | ✅ b2e2f9d8 |
 | T13 | 启动并行加载 + 加载态 | improvement-plan §3 B3 | S | ⬜ |
 | T14 | DDL 后失效补全缓存 | improvement-plan §4 C4 | S | ⬜ |
 | T15 | 启动无暗色闪烁 | improvement-plan §6 E2 | S | ⬜ |
@@ -188,14 +188,15 @@
   - [x] 全量回归通过（`cargo fmt --check` + `cargo check --workspace --locked` + dbx-core 842 过（基线 837 + 新增 5）+ dbx --lib 42 过；未动前端）
 - **实现说明**：`PoolKind::SqlServer` 本就是 `Arc` 可克隆；`RedisConnection` 两变体改为 `Arc` 包裹（`Direct(Arc<Mutex<…>>)` / `Cluster(Arc<…>)`，行为不变，`redis_ops` 全部调用点零改动）使扫描能在读锁内克隆句柄、释放锁后再探测。SQL Server 分支复用池自身 `lease_checked`（`SELECT @@SPID` 健康检查 + 失效 socket 透明重拨，即既有 `check_conn_health` 语义），健康租约 `keep()` 归还空闲列表——扫描零副作用（不关 socket、不重建整池），仅当服务器真正不可达时租约失败、按既有 5s 每池上界驱逐。Redis 分支新增 `redis_driver::ping`（泛型 `ConnectionLike`，直连保持 T10 的 tracked-db 与重连记账，cluster 走自愈 `ClusterConnection`），失败同样驱逐。两个新 live 测试显式带 env 各跑一次；T10 standalone 重连 live 测试在 Arc 包裹后的 `RedisConnection` 上复跑通过。
 
-### T12 Agent 工具查询可取消可见 ⬜
+### T12 Agent 工具查询可取消可见 ✅ b2e2f9d8
 
 - **来源** improvement-plan-2026-09.md §5 D2（Track D）· **规模** M · **依赖** T02（复用其真实取消基础设施）
 - **内容** `agent_tools.rs:271,297,328` 传 `cancel_token = None` 且无 `execution_id`：Chat Cancel 只停流，SQL 跑满 30s。把循环的 cancelled `Notify` 接入 `QueryExecutionOptions` 并注册进 `RunningQueries`（对齐 `commands/query.rs:38-40`）。
 - **验收**
-  - [ ] Chat 取消后 agent 发起的 SQL 端到端停止（配合 T02 服务端取消），不再空跑到超时
-  - [ ] agent 查询出现在 RunningQueries 且可被取消
-  - [ ] 测试 + 全量回归通过
+  - [x] Chat 取消后 agent 发起的 SQL 端到端停止（配合 T02 服务端取消），不再空跑到超时（env 门控 live 测试 `tests/live_agent_tool_query_cancel.rs` 驱动 agent 工具层执行 `pg_sleep(30)`：run 取消 token 触发后（即 `ai::cancel_stream` 翻转的同一信号）断言错误 promptly 返回且 `pg_stat_activity` 探针消失；Docker 临时 PG16 实测通过。循环 cancelled `Notify` 经 `ai::cancel_stream` 在源头同时翻转该 token，不与 LLM 流的 Notify waiter 竞争单一 permit）
+  - [x] agent 查询出现在 RunningQueries 且可被取消（每条工具 SQL 以 `agent-{session}-{tool_call_id}` 注册进 `RunningQueries`；live 测试第 2 阶段走标准 `process::cancel_running_query`（即 `cancel_query` 命令入口）取消成功、探针同样从 `pg_stat_activity` 消失；单测覆盖注册可见/结束后注销）
+  - [x] 测试 + 全量回归通过（`cargo fmt --check` + `cargo check --workspace --locked` + dbx-core 848 过（基线 842 + 新增 6）+ T02 既有 PG live 取消测试复跑通过；未动前端）
+- **实现说明**：`ai.rs` 新增 per-run `AI_AGENT_CANCELS` 注册表（`register_agent_cancel`），`cancel_stream` 同时翻转流 Notify 与该 token，`unregister_stream` 一并清理；`run_agent_loop` 增收 `tool_cancel: CancellationToken` 传给 `execute_tool_calls`/`run_with_confirmation`（写确认等待 `await_confirmation` 一并改为 select 该 token，签名从 `&Notify` 改为 `&CancellationToken`，轮首取消检查加 `|| tool_cancel.is_cancelled()`）。`agent_tools.rs` 新增 `execute_registered_query`：执行前注册（execution_id 唯一、并发工具调用不冲突），executor 拿注册表 token（等价编辑器路径），并 select run token——取消时翻转查询 token 让 `do_execute` 走既有取消 teardown（PG 连接按 T02 附带修复废弃重建），随后取出 checkout 注册的后端 id 走 T02 `fire_server_cancel`（best-effort、5s 上界）真正停掉服务端语句，最后 `RegisteredQuery` drop 注销；无取消信号时除注册条目外行为与原 `cancel_token = None` 完全一致。三处 SQL 工具（execute_query/get_sample_data/explain_query）全部接入；agent 查询超时路径顺带获得 T02 的服务端停止（execution_id 就位后 `do_execute` 既有逻辑生效）。
 
 ### T13 启动并行加载 + 加载态 ⬜
 
