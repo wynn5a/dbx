@@ -34,7 +34,7 @@
 | T13 | 启动并行加载 + 加载态 | improvement-plan §3 B3 | S | ✅ 014307e0 |
 | T14 | DDL 后失效补全缓存 | improvement-plan §4 C4 | S | ✅ 9b9e361f |
 | T15 | 启动无暗色闪烁 | improvement-plan §6 E2 | S | ✅ 73011fe7 |
-| T16 | 全局错误处理器 | improvement-plan §6 E3 | S | ⬜ |
+| T16 | 全局错误处理器 | improvement-plan §6 E3 | S | ✅ 6609cd39 |
 | T17 | 可行动的连接错误提示 | improvement-plan §6 E4 | M | ⬜ |
 | T18 | 连接与 schema 加载可取消 | improvement-plan §6 E5 | M | ⬜ |
 | T19 | 高危 SQL 增加确认摩擦 | improvement-plan §5 D3 | S | ⬜ |
@@ -228,14 +228,15 @@
   - [x] 手工截图/录屏佐证 + `pnpm check`（无头浏览器截图见上；`pnpm check` 全绿：vitest 165 文件 1149 用例）
 - **实现说明**：`<head>` 内联脚本与 `useTheme.applyTheme` 同契约（同 key `dbx-theme`、同 `html.dark` class、同内联 `color-scheme`、非法/缺失值回退 system、system 走 matchMedia），onMounted 的 `applyTheme()` 仍是主题所有者、重复应用无视觉变化。**附带修复一处既有缺陷**：`#root:empty` 的样式原来写在 `#root` 内部——`:empty` 只匹配无任何子节点的元素，选择器从未命中，预挂载帧实际始终是浏览器白底（即暗色白闪的真正来源），"Loading…" 也从未显示；样式块移入 `<head>` 后加载帧真正生效，并新增三层着色：`html.dark`（引导脚本已解析）→ `@media (prefers-color-scheme: dark)` 无 JS 回退 → `html:not(.dark)` 钉死亮色（防暗系统上的显式 light 被误染）。深色取值对齐 `styles/globals.css` 的 `.dark` token（`--background` / `--muted-foreground` 回退值）。
 
-### T16 全局错误处理器 ⬜
+### T16 全局错误处理器 ✅ 6609cd39
 
 - **来源** improvement-plan-2026-09.md §6 E3（Track E）· **规模** S
 - **内容** 全项目无 `app.config.errorHandler` / `onErrorCaptured`。在 `main.ts` 注册一个：写入 debug-log 缓冲 + toast 指向"导出调试日志"。
 - **验收**
-  - [ ] 组件抛错被捕获：出现 toast，堆栈可从导出的调试日志看到
-  - [ ] 不吞掉 Vue 默认告警链路（console 仍可见或按设计降级）
-  - [ ] 新增用例；既有 debugLog 测试不回退
+  - [x] 组件抛错被捕获：出现 toast，堆栈可从导出的调试日志看到（`main.ts` 在 `app.mount` 前注册 `lib/globalErrorHandler.ts`；每个未处理错误格式化为单条日志——组件名 `$options.name`/`__name` 回退、失败钩子 info、含堆栈的错误——经新增 `appendErrorDebugLog` 写入缓冲并立即 flush；toast 走 App.vue 渲染的 `useToast` 单例，文案 `app.unhandledErrorTitle`/`app.unhandledErrorExportHint` 指向 设置 → 编辑器 的"下载日志"；以上均由 `globalErrorHandler.test.ts` 单测 + main.ts 挂载前注册的源码契约测试覆盖）
+  - [x] 不吞掉 Vue 默认告警链路（console 仍可见或按设计降级）（设置 errorHandler 后 Vue 不再自行打印，故 handler 内显式 `console.error(message, error)` 保留 console 可见性，debug 开启时同时进入既有 console 捕获；`warnHandler` 未动，dev 告警默认链路不变）
+  - [x] 新增用例；既有 debugLog 测试不回退（新增 `globalErrorHandler.test.ts` 7 例：格式化、逐错误记录 + toast 限频（10s 窗口内只弹一次、窗口后恢复）、真实 `installGlobalErrorHandler` 接线（调试日志关闭时仍入缓冲并同步持久化）、main.ts 契约；`debugLog.test.ts` 新增 `appendErrorDebugLog` 关闭态记录 + 立即 flush 一例；`pnpm check` 全绿：vitest 166 文件 1157 用例）
+- **实现说明**：错误日志写入不受"启用调试日志"开关限制（错误罕见且缓冲本身有 1500 条上限，保证用户没开开关时也能导出堆栈），并立即 flush 防止随后崩溃丢条目。toast 按 10s 限频，错误本身仍逐条记录/打印，渲染死循环不会刷屏。文案落六个 locale 原本空的 `app:` 段。
 
 ### T17 可行动的连接错误提示 ⬜
 
