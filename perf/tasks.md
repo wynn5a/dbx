@@ -49,7 +49,7 @@
 | T28 | 原生 DB socket TCP keepalive | improvement-plan §2 A6 | S | ✅ 7ffeb3ad |
 | T29 | idle_timeout 设置诚实化 | improvement-plan §2 A7 | S | ✅ ed3c4bae |
 | T30 | 展示 token 用量与成本 | improvement-plan §5 D7 | S | ✅ 96fbac3b |
-| T31 | AI 连接失败重试一次 | improvement-plan §5 D6 | S | ⬜ |
+| T31 | AI 连接失败重试一次 | improvement-plan §5 D6 | S | ✅ b051862a |
 | T32 | 聊天结果一键图表 | improvement-plan §5 D8 | S | ⬜ |
 | T33 | 关键字大小写跟随输入 | improvement-plan §4 C7-1 | S | ⬜ |
 | T34 | 标签页切换快捷键 | improvement-plan §6 E6-1 | S | ⬜ |
@@ -379,13 +379,13 @@
   - [x] 回答尾部显示 token 用量；历史消息中保留（agent_end 写入消息 → persistConversation 携带 usage → selectConversation 容错回读；`aiTokenUsage.test.ts` 断言新格式消息读出 usage、旧格式消息读出 undefined）
   - [x] 无 usage 的 provider 显示为空不报错；测试通过（text-only 回退路径 `AgentEnd{None,None}` 两字段省略 → 提取 undefined → 无行；畸形持久化值（字符串/负数/数组/Infinity）→ undefined 不抛错；`pnpm check` 全绿 format + lint + typecheck + vitest 174 文件 1268 用例；`cargo fmt --check` / `cargo check --workspace --locked` / `cargo test -p dbx-core`（854 通过）全绿）
 
-### T31 AI 连接失败重试一次 ⬜
+### T31 AI 连接失败重试一次 ✅ b051862a
 
 - **来源** improvement-plan-2026-09.md §5 D6（Track D）· **规模** S
-- **内容** `ai.rs` / `agent_loop.rs` 零重试。初始请求对 429 / 5xx / 连接错误退避重试一次，流式中途绝不重试。
+- **实现说明**：11 个聊天发送点（4 非流式 `call_*` + 4 普通流式 `stream_*` + 3 工具流式 `stream_*_with_tools`，覆盖 claude/openai/responses/gemini；`agent_loop.rs` 自身无发送点）统一收敛到 `ai.rs` 新增的 `send_with_retry_once`：`.send()` 报错（连接拒绝/DNS/TLS/等响应头的超时——`.send()` 只在响应头解析完成后才 resolve，其错误必然发生在任何响应字节之前）或响应为 HTTP 429/5xx 时，固定等 1s 后原样重发同一请求，**恰好一次**。口径按计划原文 "429 / 5xx / connect error"：500 含在内（`is_retryable_status` = 429 或 `is_server_error()`），不读 Retry-After、保持固定短退避。重试严格限定在"流开始前"：响应头到达后的任何错误一律按原状上抛——SSE 中途断开、body 解析失败、400/401 等确定性客户端错误、第二次 429/5xx——流中不重试，杜绝重复回答/重复计费。模型列表 GET 与 Ollama `/api/show` 能力探测维持无重试（探测本就 fail-closed 回退文本模式，加重试只会拖慢 opt-in 判定）。
 - **验收**
-  - [ ] 单测：mock 首响应 429/5xx → 重试成功；流中断不重试
-  - [ ] 全量回归通过
+  - [x] 单测：mock 首响应 429/5xx → 重试成功；流中断不重试（`ai.rs` 内嵌单测以 1ms 退避驱动 `send_with_retry_once` 打真实 loopback canned server：429→200 成功且请求恰 2 次、429→429 恰好 2 次即放弃、400 只发 1 次、连接拒绝首试→重试命中；另有 `is_retryable_status` 429/5xx 矩阵。`tests/ai_tool_stream.rs` 复用 T21 mock provider 走公开路径：`stream` 首响应 429 → 重试成功且两次请求体字节相同、Gemini 工具流 503 → 成功、非流式 `complete` 502 → 成功（各恰 2 次请求）、200 流中途断 body（Content-Length 虚高 + 提前关闭）→ 错误上抛且请求总数为 1、400 错误信息原样上抛只发 1 次）
+  - [x] 全量回归通过（`cargo fmt --check` + `cargo check --workspace --locked` + `cargo test -p dbx-core`：lib 859 过（基线 854 + 新增 5）+ 集成全绿（含 ai_tool_stream 9 例，新增 5）；未动前端）
 
 ### T32 聊天结果一键图表 ⬜
 
