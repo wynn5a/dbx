@@ -698,16 +698,55 @@ test("ranks exact table matches above prefix and fuzzy matches", () => {
   );
 });
 
-test("does not reuse table completion results across typed prefixes", () => {
+test("does not attach validFor to results with an empty prefix", () => {
   const validFor = getSqlCompletionResultValidFor("select * from ", "select * from ".length);
 
   assert.equal(validFor, undefined);
 });
 
-test("does not reuse keyword completion results across typed prefixes", () => {
+test("does not attach validFor to one-character prefixes", () => {
   const validFor = getSqlCompletionResultValidFor("select * f", "select * f".length);
 
   assert.equal(validFor, undefined);
+});
+
+test("reuses results for identifier continuations once the prefix is two characters or more", () => {
+  const keywordValidFor = getSqlCompletionResultValidFor("select * fr", "select * fr".length);
+
+  assert.ok(keywordValidFor instanceof RegExp);
+  // Growing the token with identifier characters only re-offers a superset of
+  // the same results, so the popup may reuse them instead of recomputing. Case
+  // flips reuse too: filtering is case-insensitive and inserted keyword casing
+  // follows the prefix's first letter, which a token extension cannot change.
+  for (const text of ["fro", "from", "FROM", "frOm", "from_2", "from$1"]) {
+    assert.equal(keywordValidFor.test(text), true, `expected ${JSON.stringify(text)} to keep the result valid`);
+  }
+
+  const columnValidFor = getSqlCompletionResultValidFor(
+    "select * from users where na",
+    "select * from users where na".length,
+  );
+  assert.ok(columnValidFor instanceof RegExp);
+  assert.equal(columnValidFor.test("name"), true);
+});
+
+test("stops reuse on characters that switch the completion context", () => {
+  const validFor = getSqlCompletionResultValidFor("select * from us", "select * from us".length);
+
+  assert.ok(validFor instanceof RegExp);
+  // The qualifier dot is the context switch: table/keyword results must not
+  // survive into qualified-column suggestions. Quotes, whitespace, and operators
+  // end the token just the same, and `@` (SQL Server variable tokens) starts
+  // outside the identifier charset, so those results always recompute.
+  for (const text of ["us.", "us ", "us(", "us'", 'us"', "us+", "us;", "@us"]) {
+    assert.equal(validFor.test(text), false, `expected ${JSON.stringify(text)} to invalidate the result`);
+  }
+});
+
+test("does not reuse results when the cursor sits in a comment", () => {
+  const sql = "-- select * from us";
+
+  assert.equal(getSqlCompletionResultValidFor(sql, sql.length), undefined);
 });
 
 test("auto-opens completion after ON whitespace for join conditions", () => {

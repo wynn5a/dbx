@@ -1700,10 +1700,50 @@ function currentLineBlockEnd(sql: string, cursor: number, start: number): number
   return null;
 }
 
+// Prefix-continuation regex for CodeMirror's CompletionResult.validFor. While the
+// text between a result's `from` and the cursor keeps matching it, the popup
+// reuses the already-built options instead of re-running the completion source —
+// typing further characters of the same identifier no longer re-parses the
+// statement and rebuilds the item list on every keystroke. `from` is
+// `position - prefix.length` (QueryEditor's buildCompletionResult), so the tested
+// text is exactly the bare trailing identifier token.
+//
+// Results computed for a prefix shorter than 2 characters never reuse:
+// `suggestRoutines` in getSqlCompletionContext turns on at exactly 2 characters,
+// so growing the token there legitimately ADDS function/routine items and reusing
+// the shorter result would hide them. From 2 characters on, the item set is
+// monotone under identifier growth — every candidate filter in
+// buildSqlCompletionItemsFromContext goes through matchesPrefix(), a
+// case-insensitive subsequence/substring test where matching a longer prefix
+// implies matching every shorter one — so a reused list stays a superset of the
+// correct one and no offered item can vanish by typing more letters. (The extra
+// getSqlCompletionContext scan this costs per result build is paid once per
+// popup, while reuse skips the whole source for the keystrokes in between.)
+//
+// Why exactly `[A-Za-z0-9_$]`, case-insensitive:
+// - `.` is excluded on purpose. It is the qualifier separator, and typing it
+//   (`users.`) is precisely where the result must switch from tables/keywords to
+//   qualified columns — breaking the match forces that recompute.
+// - Both letter cases are in the class (the `i` flag records the intent), so
+//   case flips mid-token reuse too: matchesPrefix lowercases both sides, and
+//   applyKeywordCasing derives an inserted keyword's case from the prefix's
+//   FIRST letter, which extending a token cannot change.
+// - `$` is a legal identifier character in this pipeline (`[\w$@]`). `@` is
+//   excluded: it only starts SQL Server variable tokens (`@var`), whose `from`
+//   lands on the `@`, so those results simply recompute every keystroke.
+// - Quoted identifiers eventually contain a quote character, which also breaks
+//   the match, so they recompute instead of reusing.
+//
+// Known trade-off (shared with the Elasticsearch completion's validFor): results
+// are built with `filter: false`, so a reused list is not re-narrowed against the
+// grown prefix — it stays the superset computed when the popup opened until a
+// non-identifier character (or backspacing over the token start) recomputes.
+// Freshly loaded schema metadata is not stuck behind reuse either: the background
+// refresh in QueryEditor re-issues an explicit startCompletion, which builds a
+// fresh result instead of reusing.
 export function getSqlCompletionResultValidFor(sql: string, cursor: number): RegExp | undefined {
-  void sql;
-  void cursor;
-  return undefined;
+  if (getSqlCompletionContext(sql, cursor).prefix.length < 2) return undefined;
+  return /^[A-Za-z0-9_$]*$/i;
 }
 
 // Dialect catalogs keep the engine's canonical spelling (e.g. ClickHouse's
