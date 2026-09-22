@@ -124,6 +124,10 @@ function formatArgs(args: unknown[]): string {
 
 export function appendDebugLog(level: DebugLogLevel, ...args: unknown[]) {
   if (!isDebugLoggingEnabled()) return;
+  writeDebugLogEntry(level, args);
+}
+
+function writeDebugLogEntry(level: DebugLogLevel, args: unknown[]) {
   const entries = loadEntries();
   entries.push({
     timestamp: new Date().toISOString(),
@@ -134,6 +138,14 @@ export function appendDebugLog(level: DebugLogLevel, ...args: unknown[]) {
     entries.splice(0, entries.length - MAX_DEBUG_LOG_ENTRIES);
   }
   scheduleFlush();
+}
+
+// Unhandled app errors are rare and always worth keeping for support: they are
+// recorded even when debug logging is off (the buffer is capped either way)
+// and flushed immediately in case the app dies right after.
+export function appendErrorDebugLog(...args: unknown[]) {
+  writeDebugLogEntry("error", args);
+  flushDebugLogs();
 }
 
 export function setDebugLoggingEnabled(enabled: boolean) {

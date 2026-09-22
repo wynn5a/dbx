@@ -1,5 +1,9 @@
 export default {
-  app: {},
+  app: {
+    unhandledErrorTitle: "Ocorreu um erro inesperado",
+    unhandledErrorExportHint:
+      "Os detalhes foram registrados no log de depuração. Você pode exportá-lo em Configurações → Editor ao reportar o problema.",
+  },
   toolbar: {
     cancelExecution: "Cancelar execução",
     newConnection: "Nova Conexão",

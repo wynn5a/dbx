@@ -1,5 +1,8 @@
 export default {
-  app: {},
+  app: {
+    unhandledErrorTitle: "發生未處理的錯誤",
+    unhandledErrorExportHint: "詳細資訊已記錄到除錯日誌，回報問題時可在 設定 → 編輯器 匯出除錯日誌。",
+  },
   toolbar: {
     cancelExecution: "取消執行",
     newConnection: "建立連線",

@@ -65,6 +65,17 @@ test("append writes nothing while debug logging is disabled", async () => {
   expect(storage.getItem(ENTRIES_KEY)).toBeNull();
 });
 
+test("appendErrorDebugLog records errors even when logging is disabled and flushes at once", async () => {
+  vi.useFakeTimers();
+  const debugLog = await loadModule();
+
+  debugLog.appendErrorDebugLog("[vue:error] component=Grid Error: boom\n    at render");
+  const persisted = JSON.parse(storage.getItem(ENTRIES_KEY)!) as Array<{ level: string; message: string }>;
+  expect(persisted).toHaveLength(1);
+  expect(persisted[0].level).toBe("error");
+  expect(persisted[0].message).toContain("Error: boom");
+});
+
 test("flushDebugLogs persists pending entries without waiting for the timer", async () => {
   vi.useFakeTimers();
   storage.setItem(ENABLED_KEY, "1");

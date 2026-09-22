@@ -1,5 +1,9 @@
 export default {
-  app: {},
+  app: {
+    unhandledErrorTitle: "Si è verificato un errore imprevisto",
+    unhandledErrorExportHint:
+      "I dettagli sono stati registrati nel log di debug. Puoi esportarlo da Impostazioni → Editor quando segnali il problema.",
+  },
   toolbar: {
     cancelExecution: "Annulla esecuzione",
     newConnection: "Nuova Connessione",

@@ -1,5 +1,8 @@
 export default {
-  app: {},
+  app: {
+    unhandledErrorTitle: "出现未处理的错误",
+    unhandledErrorExportHint: "详细信息已记录到调试日志，反馈问题时可在 设置 → 编辑器 中导出调试日志。",
+  },
   toolbar: {
     cancelExecution: "取消执行",
     newConnection: "新建连接",

@@ -4,6 +4,8 @@ import VueVirtualScroller from "vue-virtual-scroller";
 import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 import "./styles/globals.css";
 import { installDebugLogCapture } from "@/lib/debugLog";
+import { installGlobalErrorHandler } from "@/lib/globalErrorHandler";
+import { useToast } from "@/composables/useToast";
 
 function startupErrorMessage(error: unknown): string {
   if (error instanceof Error) {
@@ -72,6 +74,19 @@ function installStartupErrorHandlers() {
   });
 }
 
+function installAppErrorHandler(app: ReturnType<typeof createApp>, t: (key: string) => string) {
+  // Toast and i18n are module singletons, so showing the toast from here (before
+  // mount, to also catch mount-time errors) updates the DsToast rendered by App.vue.
+  const { toast } = useToast();
+  installGlobalErrorHandler(app, () => {
+    toast(t("app.unhandledErrorTitle"), {
+      variant: "error",
+      duration: 5000,
+      description: t("app.unhandledErrorExportHint"),
+    });
+  });
+}
+
 async function bootstrap() {
   console.log("[STARTUP] frontend bootstrap begin");
   const [{ default: i18n, loadSavedLocale }, { default: App }] = await Promise.all([
@@ -86,6 +101,7 @@ async function bootstrap() {
   app.use(createPinia());
   app.use(i18n);
   app.use(VueVirtualScroller);
+  installAppErrorHandler(app, i18n.global.t);
   app.mount("#root");
   console.log("[STARTUP] vue mounted");
 }

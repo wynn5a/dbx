@@ -1,5 +1,9 @@
 export default {
-  app: {},
+  app: {
+    unhandledErrorTitle: "An unexpected error occurred",
+    unhandledErrorExportHint:
+      "The details were recorded in the debug log. You can export it from Settings → Editor when reporting the issue.",
+  },
   toolbar: {
     cancelExecution: "Cancel execution",
     newConnection: "New Connection",
