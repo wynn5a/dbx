@@ -35,6 +35,7 @@ import {
   type H2ConnectionMode,
 } from "@/lib/h2Connection";
 import { mongodbAuthFailureHint, mongoUrlParam, setMongoUrlParam } from "@/lib/mongoConnectionOptions";
+import { formatConnectionError } from "@/i18n/backend-errors";
 import { copyToClipboard } from "@/lib/clipboard";
 import { showAgentDriverInstallHint, type AgentDriverInstallState } from "@/lib/agentDriverInstallHint";
 import {
@@ -957,6 +958,11 @@ const testResultMessage = computed(() => {
   if (!testResult.value) return "";
   return testResult.value.ok ? t("connection.testSuccess") : testResult.value.message;
 });
+// Test failures: raw error (with driver-specific Mongo hints) plus, when the
+// cross-driver classifier recognizes it, an actionable hint appended below.
+function testFailureMessage(raw: string): string {
+  return formatConnectionError(t, mongodbAuthFailureHint(raw), form.value.db_type);
+}
 const hasRequiredConnectionTarget = computed(() => {
   if (isH2FileMode.value) return !!(form.value.host.trim() || h2FilePathFromJdbcUrl(form.value.connection_string));
   return !!(
@@ -1012,7 +1018,7 @@ async function testConnection() {
     testResult.value = { ok: true, message: msg };
   } catch (e: any) {
     if (runId !== testRunId) return;
-    testResult.value = { ok: false, message: mongodbAuthFailureHint(String(e)) };
+    testResult.value = { ok: false, message: testFailureMessage(String(e)) };
   } finally {
     if (runId === testRunId) {
       isTesting.value = false;
@@ -1687,7 +1693,7 @@ async function save() {
     }
     open.value = false;
   } catch (e: any) {
-    testResult.value = { ok: false, message: mongodbAuthFailureHint(String(e?.message || e)) };
+    testResult.value = { ok: false, message: testFailureMessage(String(e?.message || e)) };
   } finally {
     isSaving.value = false;
   }

@@ -219,6 +219,11 @@ export default {
     customJavaPathEmpty: "La ruta de Java personalizada está vacía. Elija un ejecutable de Java.",
     jdbcPluginNotInstalled:
       "El plugin JDBC no está instalado. Instale el plugin JDBC opcional para usar esta conexión.",
+    errorHintNetwork:
+      "No se pudo conectar con el servidor. Comprueba el host y el puerto, y si una VPN o un cortafuegos bloquea la conexión.",
+    errorHintAuth: "Error de autenticación. Comprueba el usuario y la contraseña (credenciales) de esta conexión.",
+    errorHintTls:
+      "Error en el protocolo de enlace TLS/SSL o al verificar el certificado. Revisa la configuración TLS/SSL de esta conexión.",
     lastError: "Error de conexión",
     clearError: "Limpiar error de conexión",
     saveFailed: "Error al guardar la conexión: {message}",

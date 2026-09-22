@@ -221,6 +221,11 @@ export default {
       "System Java runtime was not found on PATH. Please install Java or choose a custom Java executable.",
     customJavaPathEmpty: "Custom Java runtime path is empty. Please choose a Java executable.",
     jdbcPluginNotInstalled: "JDBC plugin is not installed. Install the optional JDBC plugin to use this connection.",
+    errorHintNetwork:
+      "Could not reach the server. Check the host and port, and whether a VPN or firewall is blocking the connection.",
+    errorHintAuth: "Authentication failed. Check the username and password (credentials) for this connection.",
+    errorHintTls:
+      "TLS/SSL handshake or certificate verification failed. Check the TLS/SSL settings of this connection.",
     lastError: "Connection error",
     clearError: "Clear connection error",
     saveFailed: "Failed to save connection: {message}",

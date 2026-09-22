@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { uuid } from "@/lib/utils";
 import { useI18n } from "vue-i18n";
-import { translateBackendError } from "@/i18n/backend-errors";
+import { translateBackendError, presentConnectionError } from "@/i18n/backend-errors";
 import {
   ArrowUp,
   ArrowRightLeft,
@@ -286,7 +286,9 @@ async function changeConnection(connectionId: string) {
       queryStore.updateDatabase(tab.id, database);
     }
   } catch (e: any) {
-    toast(t("connection.connectFailed", { message: translateBackendError(t, e?.message || String(e)) }), 5000);
+    // Connection failures: raw error plus a classifier hint when recognized.
+    const present = presentConnectionError(t, e?.message || String(e), conn.db_type);
+    toast(present.title, { ...present, duration: 5000 });
   }
 }
 

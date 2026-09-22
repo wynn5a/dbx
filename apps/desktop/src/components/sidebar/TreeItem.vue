@@ -2,7 +2,7 @@
 import { ref, computed, nextTick, watch, onBeforeUnmount, inject } from "vue";
 import { useSqlHighlighter } from "@/composables/useSqlHighlighter";
 import { useI18n } from "vue-i18n";
-import { translateBackendError } from "@/i18n/backend-errors";
+import { translateBackendError, presentConnectionError } from "@/i18n/backend-errors";
 import {
   Database,
   Table,
@@ -172,6 +172,16 @@ const queryStore = useQueryStore();
 const savedSqlStore = useSavedSqlStore();
 const settingsStore = useSettingsStore();
 const { toast } = useToast();
+// Connection failures: shows the raw error plus, when the cross-driver
+// classifier recognizes it, an actionable hint in the toast description line.
+function toastConnectError(message: string, connectionId?: string | null) {
+  const present = presentConnectionError(
+    t,
+    message,
+    connectionId ? connectionStore.getConfig(connectionId)?.db_type : undefined,
+  );
+  toast(present.title, { ...present, duration: 5000 });
+}
 const { highlight } = useSqlHighlighter();
 
 type StructureCopyFormat = "tsv" | "markdown";
@@ -449,7 +459,7 @@ async function toggle() {
   } catch (e: any) {
     if (!wasExpanded) connectionStore.setTreeNodeExpanded(node, false);
     const errMsg = e?.message || String(e);
-    toast(t("connection.connectFailed", { message: translateBackendError(t, errMsg) }), 5000);
+    toastConnectError(errMsg, node.connectionId);
     if (errMsg.includes("driver is not installed") || errMsg.includes("is not installed")) {
       window.dispatchEvent(new Event("dbx-open-driver-store"));
     }
@@ -748,7 +758,7 @@ async function openObjectBrowser() {
       await toggle();
     }
   } catch (e: any) {
-    toast(t("connection.connectFailed", { message: translateBackendError(t, e?.message || String(e)) }), 5000);
+    toastConnectError(e?.message || String(e), node.connectionId);
     if (
       e?.message?.includes("driver is not installed") ||
       (e?.message?.includes("JRE") && e?.message?.includes("not installed"))
@@ -766,7 +776,7 @@ async function openUserAdmin() {
     connectionStore.activeConnectionId = node.connectionId;
     queryStore.openUserAdmin(node.connectionId);
   } catch (e: any) {
-    toast(t("connection.connectFailed", { message: translateBackendError(t, e?.message || String(e)) }), 5000);
+    toastConnectError(e?.message || String(e), node.connectionId);
   }
 }
 
@@ -899,7 +909,7 @@ async function newQuery() {
     const options = await getDatabaseOptions(node.connectionId);
     queryStore.createTab(node.connectionId, resolveDefaultDatabase(connection, options), undefined, "query");
   } catch (e: any) {
-    toast(t("connection.connectFailed", { message: translateBackendError(t, e?.message || String(e)) }), 5000);
+    toastConnectError(e?.message || String(e), node.connectionId);
     if (
       e?.message?.includes("driver is not installed") ||
       (e?.message?.includes("JRE") && e?.message?.includes("not installed"))
@@ -933,7 +943,7 @@ async function refresh() {
   try {
     await connectionStore.refreshTreeNode(props.node);
   } catch (e: any) {
-    toast(t("connection.connectFailed", { message: translateBackendError(t, e?.message || String(e)) }), 5000);
+    toastConnectError(e?.message || String(e), props.node.connectionId);
     if (
       e?.message?.includes("driver is not installed") ||
       (e?.message?.includes("JRE") && e?.message?.includes("not installed"))

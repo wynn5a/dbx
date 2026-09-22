@@ -29,7 +29,7 @@ import { useDataGridActions } from "@/composables/useDataGridActions";
 import { useTauriEvents } from "@/composables/useTauriEvents";
 import { useVisibilityChange } from "@/composables/useVisibilityChange";
 import "@/i18n";
-import { translateBackendError } from "@/i18n/backend-errors";
+import { presentConnectionError } from "@/i18n/backend-errors";
 import * as api from "@/lib/api";
 import { resolveDefaultDatabase } from "@/lib/defaultDatabase";
 import { findTreeNodeById, resolveNewQueryTarget } from "@/lib/newQueryContext";
@@ -637,6 +637,17 @@ function setConnectionDialogOpen(value: boolean) {
   if (!value) connectionDialogPrefill.value = null;
 }
 
+// Connection failures: shows the raw error plus, when the cross-driver
+// classifier recognizes it, an actionable hint in the toast description line.
+function toastConnectError(message: string, connectionId?: string | null) {
+  const present = presentConnectionError(
+    t,
+    message,
+    connectionId ? connectionStore.getConfig(connectionId)?.db_type : undefined,
+  );
+  toast(present.title, { ...present, duration: 5000 });
+}
+
 async function newQuery() {
   const target = resolveNewQueryTarget({
     activeTab: activeTab.value,
@@ -657,7 +668,7 @@ async function newQuery() {
       queryStore.updateDatabase(tabId, resolveDefaultDatabase(conn, options));
     }
   } catch (e: any) {
-    toast(t("connection.connectFailed", { message: translateBackendError(t, e?.message || String(e)) }), 5000);
+    toastConnectError(e?.message || String(e), target.connectionId);
   }
 }
 
@@ -671,7 +682,7 @@ async function openConnectionQuery(connectionId: string) {
     const options = await getDatabaseOptions(connectionId);
     queryStore.updateDatabase(tabId, resolveDefaultDatabase(connection, options));
   } catch (e: any) {
-    toast(t("connection.connectFailed", { message: translateBackendError(t, e?.message || String(e)) }), 5000);
+    toastConnectError(e?.message || String(e), connectionId);
   }
 }
 
@@ -708,7 +719,7 @@ async function changeActiveConnection(connectionId: string) {
     const options = await getDatabaseOptions(connectionId);
     queryStore.updateDatabase(tab.id, resolveDefaultDatabase(connection, options));
   } catch (e: any) {
-    toast(t("connection.connectFailed", { message: translateBackendError(t, e?.message || String(e)) }), 5000);
+    toastConnectError(e?.message || String(e), connectionId);
   }
 }
 
@@ -1203,9 +1214,7 @@ onUnmounted(() => {
           @danger-confirm="onDangerConfirm"
           @connect-started="(name: string) => toast(t('connection.connecting', { name }), 30000)"
           @connect-succeeded="(name: string) => toast(t('connection.connectSuccess', { name }), 2000)"
-          @connect-failed="
-            (msg: string) => toast(t('connection.connectFailed', { message: translateBackendError(t, msg) }), 5000)
-          "
+          @connect-failed="toastConnectError"
           @open-driver-store="
             setConnectionDialogOpen(false);
             showDriverStore = true;

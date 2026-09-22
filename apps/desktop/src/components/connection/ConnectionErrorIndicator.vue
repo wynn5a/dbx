@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { AlertTriangle, X } from "@lucide/vue";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { classifyConnectionError } from "@/lib/connectionErrorHints";
 
 const props = withDefaults(
   defineProps<{
@@ -20,6 +21,14 @@ const { t } = useI18n();
 const connectionStore = useConnectionStore();
 
 const errorMessage = computed(() => (props.connectionId ? connectionStore.connectionErrors[props.connectionId] : ""));
+
+// Actionable hint appended below the raw message when the cross-driver
+// classifier recognizes the error; null keeps the popover as-is.
+const hintKey = computed(() => {
+  if (!errorMessage.value || !props.connectionId) return null;
+  const driver = connectionStore.getConfig(props.connectionId)?.db_type;
+  return classifyConnectionError(errorMessage.value, driver)?.i18nKey ?? null;
+});
 
 function clearError() {
   if (props.connectionId) connectionStore.clearConnectionError(props.connectionId);
@@ -47,6 +56,9 @@ function clearError() {
           </div>
           <div class="mt-1 max-h-36 overflow-auto whitespace-pre-wrap break-words text-muted-foreground">
             {{ errorMessage }}
+          </div>
+          <div v-if="hintKey" class="mt-1.5 rounded bg-amber-500/10 px-2 py-1.5 text-amber-600 dark:text-amber-400">
+            {{ t(hintKey) }}
           </div>
         </div>
         <button

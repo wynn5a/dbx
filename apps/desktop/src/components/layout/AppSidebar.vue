@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { translateBackendError } from "@/i18n/backend-errors";
+import { presentConnectionError } from "@/i18n/backend-errors";
 import { Upload, Download, FolderPlus, RefreshCw, ChevronsLeft } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -67,7 +67,9 @@ async function refreshTree() {
   try {
     await connectionStore.refreshAllTree();
   } catch (e: any) {
-    toast(t("connection.connectFailed", { message: translateBackendError(t, e?.message || String(e)) }), 5000);
+    // Connection failures: raw error plus a classifier hint when recognized.
+    const present = presentConnectionError(t, e?.message || String(e));
+    toast(present.title, { ...present, duration: 5000 });
   }
 }
 
