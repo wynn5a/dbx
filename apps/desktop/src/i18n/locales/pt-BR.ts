@@ -230,6 +230,9 @@ export default {
     errorHintAuth: "Falha de autenticação. Verifique o usuário e a senha (credenciais) desta conexão.",
     errorHintTls:
       "Falha no handshake TLS/SSL ou na verificação do certificado. Verifique as configurações de TLS/SSL desta conexão.",
+    tunnelLost: "O túnel SSH para {name} foi perdido",
+    tunnelLostHint:
+      "Várias tentativas de reconexão a {host}:{port} falharam e foram interrompidas. Reconecte a conexão para tentar novamente.",
     lastError: "Erro de conexão",
     clearError: "Limpar erro de conexão",
     saveFailed: "Falha ao salvar a conexão: {message}",

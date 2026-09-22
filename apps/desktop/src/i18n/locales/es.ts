@@ -225,6 +225,9 @@ export default {
     errorHintAuth: "Error de autenticación. Comprueba el usuario y la contraseña (credenciales) de esta conexión.",
     errorHintTls:
       "Error en el protocolo de enlace TLS/SSL o al verificar el certificado. Revisa la configuración TLS/SSL de esta conexión.",
+    tunnelLost: "Se perdió el túnel SSH a {name}",
+    tunnelLostHint:
+      "Varios intentos de reconexión a {host}:{port} fallaron y se detuvieron. Vuelve a conectar la conexión para intentarlo de nuevo.",
     lastError: "Error de conexión",
     clearError: "Limpiar error de conexión",
     saveFailed: "Error al guardar la conexión: {message}",

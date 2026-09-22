@@ -227,6 +227,9 @@ export default {
     errorHintAuth: "Authentication failed. Check the username and password (credentials) for this connection.",
     errorHintTls:
       "TLS/SSL handshake or certificate verification failed. Check the TLS/SSL settings of this connection.",
+    tunnelLost: "SSH tunnel to {name} was lost",
+    tunnelLostHint:
+      "Reconnect attempts to {host}:{port} failed repeatedly and were stopped. Reconnect the connection to try again.",
     lastError: "Connection error",
     clearError: "Clear connection error",
     saveFailed: "Failed to save connection: {message}",

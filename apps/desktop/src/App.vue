@@ -31,6 +31,7 @@ import { useVisibilityChange } from "@/composables/useVisibilityChange";
 import "@/i18n";
 import { presentConnectionError } from "@/i18n/backend-errors";
 import * as api from "@/lib/api";
+import { createTunnelLostNotifier, presentTunnelLost, type SshTunnelLostPayload } from "@/lib/sshTunnelLost";
 import { resolveDefaultDatabase } from "@/lib/defaultDatabase";
 import { findTreeNodeById, resolveNewQueryTarget } from "@/lib/newQueryContext";
 import { buildExecutableObjectSourceStatements, objectSourceSaveExecutionMode } from "@/lib/objectSourceEditor";
@@ -225,11 +226,22 @@ const { getDatabaseOptions } = useDatabaseOptions();
 const { openLineageTarget, openDatabaseSearchTarget, onStructureEditorSaved, openTableTarget } =
   useNavigationTargets(dialogs);
 const { onExecuteSql, onReloadData, onPaginate, onSort } = useDataGridActions(activeTab);
+
+// Backend push: a connection's SSH tunnel gave up reconnecting (pools were
+// evicted backend-side). One toast per connection inside the dedupe window.
+const tunnelLostNotifier = createTunnelLostNotifier();
+function onSshTunnelLost(payload: SshTunnelLostPayload) {
+  if (!tunnelLostNotifier.shouldNotify(payload.connection_id, Date.now())) return;
+  const present = presentTunnelLost(t, payload, connectionStore.getConfig(payload.connection_id)?.name);
+  toast(present.title, { ...present, duration: 5000 });
+}
+
 const { setupTauriListeners, cleanupTauriListeners } = useTauriEvents({
   openTableTarget,
   openSqlFilePath,
   openDbFilePath,
   openConnectionDeepLink,
+  onSshTunnelLost,
 });
 useVisibilityChange();
 

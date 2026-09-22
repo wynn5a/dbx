@@ -220,6 +220,8 @@ export default {
     errorHintNetwork: "無法連線到伺服器。請檢查主機與連接埠是否正確，以及 VPN 或防火牆是否攔截了連線。",
     errorHintAuth: "驗證失敗。請檢查此連線的使用者名稱與密碼等憑據。",
     errorHintTls: "TLS/SSL 交握或憑證驗證失敗。請檢查此連線的 TLS/SSL 設定。",
+    tunnelLost: "到 {name} 的 SSH 通道已斷線",
+    tunnelLostHint: "到 {host}:{port} 的多次重連均失敗，已停止重試。請重新連線該連線以再次嘗試。",
     lastError: "連線錯誤",
     clearError: "清除連線錯誤",
     saveFailed: "儲存連線失敗：{message}",

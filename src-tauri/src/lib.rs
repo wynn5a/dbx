@@ -21,6 +21,48 @@ const DESKTOP_TRAY_ID: &str = "main-tray";
 const MACOS_TRAY_ICON: tauri::image::Image<'_> = tauri::include_image!("icons/tray-macos-template.png");
 const BLACK_APP_ICON: tauri::image::Image<'_> = tauri::include_image!("icons/icon-black.png");
 
+/// Pushed to the frontend when a connection's SSH tunnel gave up reconnecting.
+/// Field names are the payload contract of the `ssh-tunnel-lost` event (see
+/// `apps/desktop/src/lib/sshTunnelLost.ts`).
+#[derive(Clone, serde::Serialize)]
+struct SshTunnelLostEvent {
+    connection_id: String,
+    ssh_host: String,
+    ssh_port: u16,
+}
+
+/// Drains the tunnel give-up channel once (perf plan §2 A5): dbx-core notices
+/// when a tunnel exhausts its reconnect attempts; here the pools built on that
+/// tunnel get evicted (they only see the tunnel's dead local port) and the
+/// frontend receives one `ssh-tunnel-lost` event per tunnel lifetime.
+fn start_tunnel_give_up_relay(app: &tauri::AppHandle, state: &Arc<AppState>) {
+    let Some(mut give_ups) = state.take_tunnel_give_up_receiver() else {
+        return;
+    };
+    let app_handle = app.clone();
+    let relay_state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(give_up) = give_ups.recv().await {
+            log::warn!(
+                "[SSH] tunnel {} gave up reconnecting to {}:{}",
+                give_up.tunnel_id,
+                give_up.connect_host,
+                give_up.connect_port
+            );
+            if let Some(connection_id) = relay_state.evict_pools_for_tunnel(&give_up.tunnel_id).await {
+                let _ = app_handle.emit(
+                    "ssh-tunnel-lost",
+                    SshTunnelLostEvent {
+                        connection_id,
+                        ssh_host: give_up.connect_host,
+                        ssh_port: give_up.connect_port,
+                    },
+                );
+            }
+        }
+    });
+}
+
 pub(crate) fn apply_debug_log_level(debug_logging_enabled: bool) {
     // Debug logging on: capture everything. Off: still keep warnings and errors
     // (e.g. query timeout/connection diagnostics) so failures are recoverable
@@ -358,6 +400,7 @@ pub fn run() {
                 ))
             };
             app.manage(state.clone());
+            start_tunnel_give_up_relay(app.handle(), &state);
             app.manage(commands::external_sql::ExternalSqlOpenState::default());
             app.manage(commands::external_db::ExternalDbOpenState::default());
             app.manage(commands::deep_link::DeepLinkOpenState::default());

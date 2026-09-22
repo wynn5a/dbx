@@ -1007,10 +1007,48 @@ impl AppState {
         }
     }
 
+    /// Single-consumer handoff of the tunnel give-up channel. The desktop shell
+    /// drains it once at startup; see [`AppState::evict_pools_for_tunnel`].
+    pub fn take_tunnel_give_up_receiver(
+        &self,
+    ) -> Option<tokio::sync::mpsc::UnboundedReceiver<db::ssh_tunnel::TunnelGiveUp>> {
+        self.tunnels.take_give_up_receiver()
+    }
+
+    /// A tunnel exhausted its reconnect attempts and is gone: its local port no
+    /// longer listens, so every pool built on it would only answer
+    /// "connection refused". Evict them all — the next operation rebuilds the
+    /// transport and pool from scratch and, while the tunnel endpoint is still
+    /// down, fails fast with the clear SSH error instead of a refused socket.
+    ///
+    /// Returns the owning connection id so the caller can notify the frontend,
+    /// or `None` when the tunnel never serves pools (the connection dialog's
+    /// probe tunnel, `{id}:test`) and evicting its connection's live pools
+    /// would be wrong.
+    pub async fn evict_pools_for_tunnel(&self, tunnel_id: &str) -> Option<String> {
+        if tunnel_id.ends_with(":test") {
+            return None;
+        }
+        let connection_id = connection_id_from_tunnel_id(tunnel_id);
+        self.remove_connection_pools(connection_id).await;
+        Some(connection_id.to_string())
+    }
+
     async fn uses_forwarded_transport(&self, connection_id: &str) -> bool {
         let configs = self.configs.read().await;
         configs.get(connection_id).is_some_and(|config| config.has_effective_transport_layers())
     }
+}
+
+/// Maps a tunnel manager key to the owning connection id. Transport-layer
+/// tunnels are keyed `{connection_id}:transport:{n}`, the connection dialog's
+/// probe tunnel `{connection_id}:test`, and (currently unused) `start_chain`
+/// tunnels the bare connection id.
+fn connection_id_from_tunnel_id(tunnel_id: &str) -> &str {
+    if let Some((connection_id, _)) = tunnel_id.split_once(":transport:") {
+        return connection_id;
+    }
+    tunnel_id.strip_suffix(":test").unwrap_or(tunnel_id)
 }
 
 fn connection_remote_endpoint(config: &ConnectionConfig) -> (String, u16) {
@@ -1316,9 +1354,9 @@ async fn detect_ob_oracle_mode(config: &ConnectionConfig, pool: &db::mysql::MySq
 #[cfg(test)]
 mod tests {
     use super::{
-        connection_url_for_endpoint, database_connection_config, metadata_connection_config,
-        mysql_metadata_fallback_url, redacted_connection_url_for_endpoint, uses_tcp_probe, validate_h2_database_path,
-        AppState, PoolKind,
+        connection_id_from_tunnel_id, connection_url_for_endpoint, database_connection_config,
+        metadata_connection_config, mysql_metadata_fallback_url, redacted_connection_url_for_endpoint, uses_tcp_probe,
+        validate_h2_database_path, AppState, PoolKind,
     };
     use crate::agent_connection::{
         agent_connect_params, mongo_legacy_error_with_auth_hint, oracle_alternate_connect_config,
@@ -1673,6 +1711,53 @@ mod tests {
         config.host = path.to_string();
         config.database = None;
         config
+    }
+
+    #[test]
+    fn tunnel_ids_map_to_their_owning_connection_id() {
+        assert_eq!(connection_id_from_tunnel_id("conn:transport:0"), "conn");
+        assert_eq!(connection_id_from_tunnel_id("conn:transport:12"), "conn");
+        assert_eq!(connection_id_from_tunnel_id("conn:test"), "conn");
+        assert_eq!(connection_id_from_tunnel_id("conn"), "conn", "start_chain-style keys are the connection id");
+    }
+
+    /// A transport tunnel giving up must evict every pool the connection built
+    /// on it — base, per-database, and per-tab session pools — without touching
+    /// other connections. The connection dialog's probe tunnel (`:test`) never
+    /// serves pools, so it must not evict anything.
+    #[tokio::test]
+    async fn tunnel_give_up_evicts_only_the_owning_connection_pools() {
+        let (state, dir) = test_app_state().await;
+        async fn make_pool(dir: &std::path::Path, name: &str) -> PoolKind {
+            let path = dir.join(format!("{name}.db"));
+            std::fs::File::create(&path).unwrap();
+            PoolKind::Sqlite(db::sqlite::connect_path(&path.to_string_lossy()).await.unwrap())
+        }
+
+        {
+            let mut conns = state.connections.write().await;
+            conns.insert("conn".to_string(), make_pool(&dir, "conn").await);
+            conns.insert("conn:db1".to_string(), make_pool(&dir, "conn-db1").await);
+            conns.insert("conn:session:tab-1".to_string(), make_pool(&dir, "conn-session").await);
+            conns.insert("other".to_string(), make_pool(&dir, "other").await);
+        }
+
+        assert_eq!(state.evict_pools_for_tunnel("conn:test").await, None, "probe tunnels serve no pools");
+
+        assert_eq!(
+            state.evict_pools_for_tunnel("conn:transport:0").await.as_deref(),
+            Some("conn"),
+            "the notice carries the owning connection id for the frontend"
+        );
+
+        let conns = state.connections.read().await;
+        assert!(!conns.contains_key("conn"), "base pool must go with the dead tunnel");
+        assert!(!conns.contains_key("conn:db1"), "per-database pools must go with the dead tunnel");
+        assert!(!conns.contains_key("conn:session:tab-1"), "session pools must go with the dead tunnel");
+        assert!(conns.contains_key("other"), "other connections keep their pools");
+        drop(conns);
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -220,6 +220,8 @@ export default {
     errorHintNetwork: "无法连接到服务器。请检查主机与端口是否正确，以及 VPN 或防火墙是否拦截了连接。",
     errorHintAuth: "认证失败。请检查此连接的用户名与密码等凭据。",
     errorHintTls: "TLS/SSL 握手或证书校验失败。请检查此连接的 TLS/SSL 设置。",
+    tunnelLost: "到 {name} 的 SSH 隧道已断开",
+    tunnelLostHint: "到 {host}:{port} 的多次重连均失败，已停止重试。请重新连接该连接以再次尝试。",
     lastError: "连接错误",
     clearError: "清除连接错误",
     saveFailed: "保存连接失败：{message}",
