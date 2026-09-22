@@ -65,6 +65,10 @@ pub async fn ai_agent_stream(
     request: AgentStreamRequest,
 ) -> Result<(), String> {
     let cancelled = dbx_core::ai::register_stream(&session_id).await;
+    // Per-run token for agent tool SQL: `ai_cancel_stream` flips it together
+    // with `cancelled`, so a Chat Cancel also stops statements the tools
+    // already sent to the database.
+    let tool_cancel = dbx_core::ai::register_agent_cancel(&session_id).await;
     let ctx = request.loop_context(state.inner().clone());
     let is_agent_mode = request.is_agent_mode();
 
@@ -79,6 +83,7 @@ pub async fn ai_agent_stream(
             let _ = app.emit("ai-agent-event", AgentEventEnvelope { session_id: emit_session.clone(), event });
         },
         &cancelled,
+        tool_cancel,
         request.max_tokens,
         request.temperature,
         is_agent_mode,

@@ -8,6 +8,7 @@ use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use tokio::sync::{oneshot, Notify, RwLock};
+use tokio_util::sync::CancellationToken;
 
 use crate::agent_events::{ToolCall, ToolDefinition};
 
@@ -17,23 +18,47 @@ use crate::agent_events::{ToolCall, ToolDefinition};
 
 static AI_STREAMS: LazyLock<RwLock<HashMap<String, Arc<Notify>>>> = LazyLock::new(|| RwLock::new(HashMap::new()));
 
+/// Per-run cancellation for agent tool SQL (see `agent_tools`). Flipped by
+/// [`cancel_stream`] alongside the stream `Notify`, so a Chat Cancel also stops
+/// statements the agent already sent to the database. A separate token (rather
+/// than another `Notify` waiter) keeps `notify_one`'s single permit reserved
+/// for the LLM-stream waiters.
+static AI_AGENT_CANCELS: LazyLock<RwLock<HashMap<String, CancellationToken>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
 pub async fn register_stream(session_id: &str) -> Arc<Notify> {
     let notify = Arc::new(Notify::new());
     AI_STREAMS.write().await.insert(session_id.to_string(), notify.clone());
     notify
 }
 
+/// Mint and register the per-run tool-cancellation token for an agent run.
+/// Hand to `run_agent_loop`, which passes it to its SQL tools.
+pub async fn register_agent_cancel(session_id: &str) -> CancellationToken {
+    let token = CancellationToken::new();
+    AI_AGENT_CANCELS.write().await.insert(session_id.to_string(), token.clone());
+    token
+}
+
 pub async fn cancel_stream(session_id: &str) -> bool {
+    let mut canceled = false;
     if let Some(notify) = AI_STREAMS.read().await.get(session_id) {
         notify.notify_one();
-        true
-    } else {
-        false
+        canceled = true;
     }
+    // Stop any agent tool SQL already sent to the database: the tools race this
+    // token, abort their futures and fire the server-side cancel captured at
+    // pool checkout.
+    if let Some(token) = AI_AGENT_CANCELS.write().await.remove(session_id) {
+        token.cancel();
+        canceled = true;
+    }
+    canceled
 }
 
 pub async fn unregister_stream(session_id: &str) {
     AI_STREAMS.write().await.remove(session_id);
+    AI_AGENT_CANCELS.write().await.remove(session_id);
 }
 
 // ---------------------------------------------------------------------------
@@ -53,15 +78,15 @@ fn confirmation_key(session_id: &str, tool_call_id: &str) -> String {
 }
 
 /// Register a pending confirmation and block until the frontend resolves it or
-/// the stream is cancelled. Returns `true` only on explicit approval.
-pub async fn await_confirmation(session_id: &str, tool_call_id: &str, cancelled: &Notify) -> bool {
+/// the run is cancelled. Returns `true` only on explicit approval.
+pub async fn await_confirmation(session_id: &str, tool_call_id: &str, cancelled: &CancellationToken) -> bool {
     let key = confirmation_key(session_id, tool_call_id);
     let (tx, rx) = oneshot::channel();
     AI_CONFIRMATIONS.write().await.insert(key.clone(), tx);
 
     tokio::select! {
         result = rx => result.unwrap_or(false),
-        _ = cancelled.notified() => {
+        _ = cancelled.cancelled() => {
             AI_CONFIRMATIONS.write().await.remove(&key);
             false
         }
@@ -1617,10 +1642,11 @@ pub fn load_config(path: &Path) -> Result<Option<AiConfig>, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_ai_http_client, claude_system_blocks, drain_complete_lines, gemini_text, openai_response_text,
-        openai_stream_text, parse_model_list_response, provider_supports_function_calling, resolve_endpoint,
-        resolve_model_list_endpoint, responses_max_output_tokens, responses_text, validate_config, AiApiStyle,
-        AiConfig, AiModelInfo, AiProvider, AiStreamChunk, StreamToolEvent, StreamingToolCallAccumulator,
+        build_ai_http_client, cancel_stream, claude_system_blocks, drain_complete_lines, gemini_text,
+        openai_response_text, openai_stream_text, parse_model_list_response, provider_supports_function_calling,
+        register_agent_cancel, register_stream, resolve_endpoint, resolve_model_list_endpoint,
+        responses_max_output_tokens, responses_text, unregister_stream, validate_config, AiApiStyle, AiConfig,
+        AiModelInfo, AiProvider, AiStreamChunk, StreamToolEvent, StreamingToolCallAccumulator,
     };
 
     #[test]
@@ -1932,5 +1958,20 @@ mod tests {
         .unwrap();
 
         assert!(matches!(claude.provider, AiProvider::Claude));
+    }
+
+    #[tokio::test]
+    async fn cancel_stream_flips_the_agent_tool_token() {
+        let session = format!("agent-cancel-test-{}", uuid::Uuid::new_v4());
+        let _notify = register_stream(&session).await;
+        let tool_token = register_agent_cancel(&session).await;
+        assert!(!tool_token.is_cancelled());
+
+        assert!(cancel_stream(&session).await);
+        assert!(tool_token.is_cancelled(), "Chat Cancel must stop agent tool SQL via the token");
+
+        // Teardown clears the registry: a second cancel finds nothing to flip.
+        unregister_stream(&session).await;
+        assert!(!cancel_stream(&session).await);
     }
 }

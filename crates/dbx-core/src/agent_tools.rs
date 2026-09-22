@@ -5,9 +5,11 @@
 //! as LLM-facing text; `explain_query` additionally attaches a structured
 //! `QueryResult` (`explain_data`) for the frontend ExplainPlanViewer.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
+use tokio_util::sync::CancellationToken;
 
 use crate::agent_events::{ToolCall, ToolDefinition, ToolResult};
 use crate::connection::AppState;
@@ -136,15 +138,24 @@ fn explain_query_tool() -> ToolDefinition {
 
 /// Execute a single tool call and return its result. Errors are converted to a
 /// non-panicking `ToolResult { is_error: true }` so the model can recover.
+///
+/// `session_id` names the agent run and `cancel` is that run's cancellation
+/// token (flipped by `ai::cancel_stream` on Chat Cancel). SQL tools register
+/// their statement in `RunningQueries` and race the token, so an in-flight
+/// query aborts — and is stopped on the database server via the T02 checkout
+/// registration — instead of running to its 30s timeout in the background.
 pub async fn execute_tool(
     tool_call: &ToolCall,
     state: &Arc<AppState>,
     connection_id: &str,
     database: &str,
     db_type: &DatabaseType,
+    session_id: &str,
+    cancel: &CancellationToken,
 ) -> ToolResult {
     if tool_call.name == "explain_query" {
-        let (text, explain_data) = execute_explain_query(tool_call, state, connection_id, database, db_type).await;
+        let (text, explain_data) =
+            execute_explain_query(tool_call, state, connection_id, database, db_type, session_id, cancel).await;
         return match text {
             Ok(content) => ToolResult { explain_data, ..ToolResult::ok(tool_call, content) },
             Err(err) => ToolResult::error(tool_call, err),
@@ -154,8 +165,10 @@ pub async fn execute_tool(
     let result = match tool_call.name.as_str() {
         "list_tables" => execute_list_tables(tool_call, state, connection_id, database).await,
         "get_columns" => execute_get_columns(tool_call, state, connection_id, database).await,
-        "execute_query" => execute_execute_query(tool_call, state, connection_id, database).await,
-        "get_sample_data" => execute_get_sample_data(tool_call, state, connection_id, database, db_type).await,
+        "execute_query" => execute_execute_query(tool_call, state, connection_id, database, session_id, cancel).await,
+        "get_sample_data" => {
+            execute_get_sample_data(tool_call, state, connection_id, database, db_type, session_id, cancel).await
+        }
         other => Err(format!("Unknown tool: {other}")),
     };
 
@@ -260,17 +273,96 @@ async fn execute_get_columns(
     Ok(lines.join("\n"))
 }
 
+/// Unique `RunningQueries` key for one agent tool SQL execution: the session id
+/// plus the provider's tool-call id (unique within a run). Characters outside
+/// `[A-Za-z0-9._-]` are folded to `-` so unusual provider ids can't produce
+/// confusing registry keys.
+fn tool_execution_id(session_id: &str, tool_call: &ToolCall) -> String {
+    let sanitize = |value: &str| {
+        let mut out = String::with_capacity(value.len());
+        for c in value.chars() {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_') {
+                out.push(c);
+            } else if !out.ends_with('-') {
+                out.push('-');
+            }
+        }
+        out
+    };
+    format!("agent-{}-{}", sanitize(session_id), sanitize(&tool_call.id))
+}
+
+/// Execute one agent tool SQL statement with the run's cancellation and the
+/// query registry wired in (improvement-plan D2).
+///
+/// The statement runs under a `RunningQueries` registration keyed by
+/// `execution_id` — visible to the process list and cancellable through the
+/// usual `cancel_running_query` path — and is raced against the run's
+/// `cancel`, so cancelling the run behaves exactly like the editor's Cancel
+/// button: the executor returns promptly and `do_execute`'s normal teardown
+/// runs. When the run's token fires, the query's own registry token is flipped
+/// and the executor is awaited out, so its checkout either registered a backend
+/// id or never reached a statement; that registration is then used to stop the
+/// statement on the server too (best-effort, T02). `build` must pass the token
+/// it receives into the executor it builds, as the real call sites do.
+async fn execute_registered_query<F, Fut>(
+    state: &AppState,
+    execution_id: String,
+    cancel: &CancellationToken,
+    build: F,
+) -> Result<QueryResult, String>
+where
+    F: FnOnce(CancellationToken) -> Fut,
+    Fut: Future<Output = Result<QueryResult, String>>,
+{
+    let registered = state.running_queries.register(execution_id.clone());
+    let query_token = registered.token();
+
+    let mut query = std::pin::pin!(build(query_token.clone()));
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => {
+            query_token.cancel();
+            let _ = (&mut query).await;
+            if let Some(context) = state.running_queries.take_server_cancel(&execution_id) {
+                crate::process::fire_server_cancel(state, &context).await;
+            }
+            Err(query::canceled_error())
+        }
+        result = &mut query => result,
+    }
+    // `registered` drops here: the registry entry (token + backend id) is
+    // released whether the query completed, failed or was cancelled.
+}
+
 async fn execute_execute_query(
     tool_call: &ToolCall,
     state: &Arc<AppState>,
     connection_id: &str,
     database: &str,
+    session_id: &str,
+    cancel: &CancellationToken,
 ) -> Result<String, String> {
     let sql = arg_str(tool_call, "sql").ok_or("Missing required parameter: sql")?;
     let limit = requested_limit(tool_call, EXECUTE_QUERY_LIMIT);
-    let options = QueryExecutionOptions { max_rows: Some(limit), timeout_secs: Some(30), ..Default::default() };
-    let result =
-        query::execute_sql_statement_with_options(state, connection_id, database, sql, None, None, options).await?;
+    let execution_id = tool_execution_id(session_id, tool_call);
+    let result = execute_registered_query(state, execution_id.clone(), cancel, |query_token| {
+        query::execute_sql_statement_with_options(
+            state,
+            connection_id,
+            database,
+            sql,
+            None,
+            Some(query_token),
+            QueryExecutionOptions {
+                max_rows: Some(limit),
+                timeout_secs: Some(30),
+                execution_id: Some(execution_id.clone()),
+                ..Default::default()
+            },
+        )
+    })
+    .await?;
     Ok(format_query_result_as_text(&result, limit))
 }
 
@@ -280,6 +372,8 @@ async fn execute_get_sample_data(
     connection_id: &str,
     database: &str,
     db_type: &DatabaseType,
+    session_id: &str,
+    cancel: &CancellationToken,
 ) -> Result<String, String> {
     let table = arg_str(tool_call, "table").ok_or("Missing required parameter: table")?;
     validate_table_name(table)?;
@@ -294,9 +388,24 @@ async fn execute_get_sample_data(
         order_columns: &[],
         limit,
     });
-    let options = QueryExecutionOptions { max_rows: Some(limit), timeout_secs: Some(30), ..Default::default() };
-    let result =
-        query::execute_sql_statement_with_options(state, connection_id, database, &sql, None, None, options).await?;
+    let execution_id = tool_execution_id(session_id, tool_call);
+    let result = execute_registered_query(state, execution_id.clone(), cancel, |query_token| {
+        query::execute_sql_statement_with_options(
+            state,
+            connection_id,
+            database,
+            &sql,
+            None,
+            Some(query_token),
+            QueryExecutionOptions {
+                max_rows: Some(limit),
+                timeout_secs: Some(30),
+                execution_id: Some(execution_id.clone()),
+                ..Default::default()
+            },
+        )
+    })
+    .await?;
     Ok(format_query_result_as_text(&result, limit))
 }
 
@@ -307,6 +416,8 @@ async fn execute_explain_query(
     connection_id: &str,
     database: &str,
     db_type: &DatabaseType,
+    session_id: &str,
+    cancel: &CancellationToken,
 ) -> (Result<String, String>, Option<Value>) {
     let Some(sql) = arg_str(tool_call, "sql") else {
         return (Err("Missing required parameter: sql".to_string()), None);
@@ -325,25 +436,32 @@ async fn execute_explain_query(
         }
     };
 
-    let options =
-        QueryExecutionOptions { max_rows: Some(MAX_ALLOWED_ROWS), timeout_secs: Some(30), ..Default::default() };
-    let result = match query::execute_sql_statement_with_options(
-        state,
-        connection_id,
-        database,
-        &explain_sql,
-        None,
-        None,
-        options,
-    )
-    .await
-    {
-        Ok(r) => r,
-        Err(e) => return (Err(e), None),
-    };
+    let execution_id = tool_execution_id(session_id, tool_call);
+    let result = execute_registered_query(state, execution_id.clone(), cancel, |query_token| {
+        query::execute_sql_statement_with_options(
+            state,
+            connection_id,
+            database,
+            &explain_sql,
+            None,
+            Some(query_token),
+            QueryExecutionOptions {
+                max_rows: Some(MAX_ALLOWED_ROWS),
+                timeout_secs: Some(30),
+                execution_id: Some(execution_id.clone()),
+                ..Default::default()
+            },
+        )
+    })
+    .await;
 
-    let explain_data = serde_json::to_value(&result).ok();
-    (Ok(format_query_result_as_text(&result, MAX_ALLOWED_ROWS)), explain_data)
+    match result {
+        Ok(r) => {
+            let explain_data = serde_json::to_value(&r).ok();
+            (Ok(format_query_result_as_text(&r, MAX_ALLOWED_ROWS)), explain_data)
+        }
+        Err(e) => (Err(e), None),
+    }
 }
 
 /// Render a `QueryResult` as a compact Markdown table for the model.
@@ -397,6 +515,44 @@ fn truncate_cell(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    use crate::connection::PoolKind;
+    use crate::query_cancel::{KillEngine, ServerCancelBackend, ServerCancelContext, ServerCancelRoute};
+    use crate::storage::Storage;
+
+    const CONN_ID: &str = "agent-test-conn";
+
+    fn tool_call(id: &str, arguments: Value) -> ToolCall {
+        ToolCall { id: id.to_string(), name: "execute_query".to_string(), arguments }
+    }
+
+    fn sample_result() -> QueryResult {
+        QueryResult {
+            columns: vec!["one".to_string()],
+            column_types: vec![],
+            rows: vec![vec![json!(1)]],
+            affected_rows: 0,
+            execution_time_ms: 1,
+            truncated: false,
+            session_id: None,
+            has_more: false,
+        }
+    }
+
+    /// AppState with a SQLite pool pre-seeded under the connection id, so
+    /// `execute_sql_statement_with_options` finds the pool without a config.
+    async fn sqlite_state() -> (Arc<AppState>, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("dbx-agent-tools-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = Storage::open(&dir.join("storage.db")).await.unwrap();
+        let state = Arc::new(AppState::new(storage));
+        let pool =
+            crate::db::sqlite::connect_path_create_if_missing(&dir.join("tools.db").to_string_lossy()).await.unwrap();
+        state.connections.write().await.insert(CONN_ID.to_string(), PoolKind::Sqlite(pool));
+        (state, dir)
+    }
 
     #[test]
     fn ask_mode_tools_are_metadata_only() {
@@ -459,5 +615,120 @@ mod tests {
         let out = truncate_cell(&long);
         assert_eq!(out.chars().count(), MAX_CELL_CHARS + 1); // +1 for the ellipsis
         assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn tool_execution_ids_are_prefixed_sanitized_and_unique_per_call() {
+        let a = tool_call("call_1", json!({}));
+        let b = tool_call("call_2", json!({}));
+        let id_a = tool_execution_id("session/1", &a);
+        let id_b = tool_execution_id("session/1", &b);
+        assert!(id_a.starts_with("agent-session-1-"), "{id_a}");
+        assert_eq!(id_a, tool_execution_id("session/1", &a)); // deterministic
+        assert_ne!(id_a, id_b, "two tool calls must not collide in RunningQueries");
+    }
+
+    #[tokio::test]
+    async fn execute_query_tool_runs_sql_and_leaves_the_registry_clean() {
+        let (state, dir) = sqlite_state().await;
+        let tc = tool_call("call-1", json!({"sql": "SELECT 1 AS one"}));
+        let cancel = CancellationToken::new();
+
+        let result = execute_tool(&tc, &state, CONN_ID, "", &DatabaseType::Sqlite, "session-1", &cancel).await;
+
+        assert!(!result.is_error, "{}", result.content);
+        assert!(result.content.contains("| one |"), "{}", result.content);
+        assert!(!state.running_queries.has(&tool_execution_id("session-1", &tc)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn cancelled_run_aborts_tool_sql_without_executing_it() {
+        let (state, dir) = sqlite_state().await;
+        let tc = tool_call("call-2", json!({"sql": "SELECT 1 AS one"}));
+        let cancel = CancellationToken::new();
+        cancel.cancel(); // Chat Cancel arrived before the statement ran
+
+        let result = execute_tool(&tc, &state, CONN_ID, "", &DatabaseType::Sqlite, "session-1", &cancel).await;
+
+        assert!(result.is_error);
+        assert_eq!(result.content, format!("Error: {}", query::QUERY_CANCELED));
+        assert!(!state.running_queries.has(&tool_execution_id("session-1", &tc)));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn without_cancellation_the_query_result_passes_through_unchanged() {
+        let dir = std::env::temp_dir().join(format!("dbx-agent-tools-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = Storage::open(&dir.join("storage.db")).await.unwrap();
+        let state = Arc::new(AppState::new(storage));
+        let execution_id = "agent-sess-call-3".to_string();
+        let cancel = CancellationToken::new();
+
+        let result = execute_registered_query(&state, execution_id.clone(), &cancel, |_query_token| async {
+            Ok::<_, String>(sample_result())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result.columns, vec!["one"]);
+        assert!(!cancel.is_cancelled());
+        assert!(!state.running_queries.has(&execution_id), "registration must be released after completion");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn cancelling_the_run_aborts_the_query_and_fires_the_server_side_cancel() {
+        let dir = std::env::temp_dir().join(format!("dbx-agent-tools-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = Storage::open(&dir.join("storage.db")).await.unwrap();
+        let state = Arc::new(AppState::new(storage));
+        let execution_id = "agent-sess-call-4".to_string();
+        let cancel = CancellationToken::new();
+
+        let state_for_task = Arc::clone(&state);
+        let exec_for_task = execution_id.clone();
+        let cancel_for_task = cancel.clone();
+        let task = tokio::spawn(async move {
+            execute_registered_query(&state_for_task, exec_for_task, &cancel_for_task, |query_token| async move {
+                // Model the real executor: honors its token; the statement
+                // would otherwise keep running for a long time.
+                query_token.cancelled().await;
+                Err(query::canceled_error())
+            })
+            .await
+        });
+
+        for _ in 0..100 {
+            if state.running_queries.has(&execution_id) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(state.running_queries.has(&execution_id), "agent query must be visible in RunningQueries");
+
+        // Simulate the T02 checkout registration under the same id. The route
+        // points nowhere, so the best-effort fire below fails fast and quietly.
+        state.running_queries.register_server_cancel(
+            &execution_id,
+            ServerCancelContext {
+                backend: ServerCancelBackend::Kill { engine: KillEngine::Mysql, pid: "1".to_string() },
+                route: Some(ServerCancelRoute {
+                    connection_id: "no-such-connection".to_string(),
+                    database: String::new(),
+                }),
+            },
+        );
+
+        cancel.cancel();
+        let result = tokio::time::timeout(Duration::from_secs(5), task).await.unwrap().unwrap();
+        assert_eq!(result.unwrap_err(), query::QUERY_CANCELED);
+        assert!(!state.running_queries.has(&execution_id), "registration must be released after cancellation");
+        assert!(
+            state.running_queries.peek_server_cancel(&execution_id).is_none(),
+            "the server-side cancel must have been taken out to be fired"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

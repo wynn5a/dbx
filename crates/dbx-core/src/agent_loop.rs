@@ -17,6 +17,7 @@ use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 use crate::agent_events::{AgentEvent, ToolCall, ToolDefinition, ToolResult};
 use crate::agent_tools;
@@ -103,6 +104,12 @@ impl AgentStreamRequest {
 }
 
 /// Run the agent loop. Returns the model's final assistant text.
+///
+/// `cancelled` is the session stream's Notify (LLM-stream cancellation);
+/// `tool_cancel` is the run's tool-cancellation token from
+/// `ai::register_agent_cancel`, flipped by `ai::cancel_stream` together with
+/// `cancelled` so a Chat Cancel also stops any SQL the tools already sent to
+/// the database.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_agent_loop(
     config: &AiConfig,
@@ -112,6 +119,7 @@ pub async fn run_agent_loop(
     session_id: &str,
     on_event: impl Fn(AgentEvent) + Send + Sync + Clone + 'static,
     cancelled: &Notify,
+    tool_cancel: CancellationToken,
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     is_agent_mode: bool,
@@ -140,7 +148,7 @@ pub async fn run_agent_loop(
     let mut outcome = LoopOutcome::Exhausted;
 
     for turn in 0..MAX_AGENT_TURNS {
-        if cancelled.notified().now_or_never().is_some() {
+        if cancelled.notified().now_or_never().is_some() || tool_cancel.is_cancelled() {
             outcome = LoopOutcome::Cancelled;
             break;
         }
@@ -211,7 +219,7 @@ pub async fn run_agent_loop(
             });
         }
 
-        let results = execute_tool_calls(&tool_calls, &tools, ctx, session_id, &on_event, cancelled).await;
+        let results = execute_tool_calls(&tool_calls, &tools, ctx, session_id, &on_event, &tool_cancel).await;
 
         for (tc, result) in tool_calls.iter().zip(results) {
             let result_json = match &result.explain_data {
@@ -266,7 +274,7 @@ async fn execute_tool_calls(
     ctx: &AgentLoopContext,
     session_id: &str,
     on_event: &(impl Fn(AgentEvent) + Clone),
-    cancelled: &Notify,
+    tool_cancel: &CancellationToken,
 ) -> Vec<ToolResult> {
     let parallel_ok: HashMap<&str, bool> = tools.iter().map(|t| (t.name, t.parallel_ok)).collect();
     let (parallel_idx, sequential_idx): (Vec<usize>, Vec<usize>) = (0..tool_calls.len()).partition(|&i| {
@@ -279,13 +287,17 @@ async fn execute_tool_calls(
         let connection_id = ctx.connection_id.clone();
         let database = ctx.database.clone();
         let db_type = ctx.db_type;
-        async move { agent_tools::execute_tool(&tc, &state, &connection_id, &database, &db_type).await }
+        let session_id = session_id.to_string();
+        let tool_cancel = tool_cancel.clone();
+        async move {
+            agent_tools::execute_tool(&tc, &state, &connection_id, &database, &db_type, &session_id, &tool_cancel).await
+        }
     });
     let parallel_results = join_all(parallel_futures).await;
 
     let mut sequential_results = Vec::with_capacity(sequential_idx.len());
     for &i in &sequential_idx {
-        sequential_results.push(run_with_confirmation(&tool_calls[i], ctx, session_id, on_event, cancelled).await);
+        sequential_results.push(run_with_confirmation(&tool_calls[i], ctx, session_id, on_event, tool_cancel).await);
     }
 
     let mut merged: Vec<Option<ToolResult>> = (0..tool_calls.len()).map(|_| None).collect();
@@ -305,18 +317,19 @@ async fn run_with_confirmation(
     ctx: &AgentLoopContext,
     session_id: &str,
     on_event: &impl Fn(AgentEvent),
-    cancelled: &Notify,
+    tool_cancel: &CancellationToken,
 ) -> ToolResult {
     if tc.name == "execute_query" {
         let sql = tc.arguments.get("sql").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
         if !sql.is_empty() && !is_read_only_sql(&sql, ctx.db_type) {
             on_event(AgentEvent::ToolConfirmRequest { tool_call_id: tc.id.clone(), tool_name: tc.name.clone(), sql });
-            if !ai::await_confirmation(session_id, &tc.id, cancelled).await {
+            if !ai::await_confirmation(session_id, &tc.id, tool_cancel).await {
                 return ToolResult::error(tc, "User rejected execution of this statement.");
             }
         }
     }
-    agent_tools::execute_tool(tc, &ctx.state, &ctx.connection_id, &ctx.database, &ctx.db_type).await
+    agent_tools::execute_tool(tc, &ctx.state, &ctx.connection_id, &ctx.database, &ctx.db_type, session_id, tool_cancel)
+        .await
 }
 
 /// Fallback for providers without native function calling: a single completion
