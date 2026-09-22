@@ -1347,13 +1347,106 @@ function isCallRoutineContext(beforeToken: string): boolean {
   );
 }
 
+interface StrippedSql {
+  text: string;
+  /** True when `cursor` sits inside a comment — the user is editing prose, not SQL. */
+  cursorInComment: boolean;
+}
+
+// `$$…$$` or `$tag$…$tag$` (PostgreSQL dollar-quoted string). The tag starts with
+// a letter or underscore (never a digit, so bind placeholders like `$1` are safe).
+const DOLLAR_QUOTED_TAG = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/;
+const DOLLAR_TAG_LOOKAHEAD = 64;
+
+/**
+ * Blank out SQL comment bodies (`-- line` and `/* block *\/`) so commented-out
+ * SQL never leaks into context detection (referenced tables, statement kind,
+ * ...). Each body becomes same-length whitespace (newlines are kept) so every
+ * cursor offset in the result stays valid; the comment delimiters (`--`, `/*`
+ * and the block closer) stay visible so a fully commented line does not read
+ * as a blank line and terminate the current statement block. Quoted spans are
+ * skipped: a `--` or `/*` inside `'…'`, `"…"`, backticks or a dollar-quoted
+ * string is data, not a comment.
+ */
+function stripSqlComments(sql: string, cursor: number): StrippedSql {
+  const chars = sql.split("");
+  let cursorInComment = false;
+  const coversCursor = (from: number, to: number) => {
+    if (cursor >= from && cursor <= to) cursorInComment = true;
+  };
+  const blank = (from: number, to: number) => {
+    for (let i = from; i < to; i++) {
+      const ch = chars[i];
+      if (ch !== "\n" && ch !== "\r") chars[i] = " ";
+    }
+  };
+  let i = 0;
+  while (i < sql.length) {
+    const ch = sql[i];
+    if (ch === "'" || ch === '"' || ch === "`") {
+      i = skipQuotedSpan(sql, i, ch);
+    } else if (ch === "$") {
+      i = skipDollarQuotedSpan(sql, i);
+    } else if (ch === "-" && sql[i + 1] === "-") {
+      // A line comment runs to the newline; the newline itself stays visible.
+      const end = sql.indexOf("\n", i + 2);
+      const commentEnd = end < 0 ? sql.length : end;
+      coversCursor(i + 2, commentEnd);
+      blank(i + 2, commentEnd);
+      i = commentEnd;
+    } else if (ch === "/" && sql[i + 1] === "*") {
+      const close = sql.indexOf("*/", i + 2);
+      if (close < 0) {
+        coversCursor(i + 2, sql.length);
+        blank(i + 2, sql.length);
+        i = sql.length;
+      } else {
+        coversCursor(i + 2, close);
+        blank(i + 2, close);
+        i = close + 2;
+      }
+    } else {
+      i += 1;
+    }
+  }
+  return { text: chars.join(""), cursorInComment };
+}
+
+/** Position right after the quoted span opening at `start`; a doubled quote is an escape. */
+function skipQuotedSpan(sql: string, start: number, quote: string): number {
+  for (let i = start + 1; i < sql.length; i++) {
+    if (sql[i] !== quote) continue;
+    if (sql[i + 1] === quote) {
+      i += 1;
+      continue;
+    }
+    return i + 1;
+  }
+  return sql.length;
+}
+
+/** Position right after a dollar-quoted string opening at `start`, or `start + 1` when no tag matches. */
+function skipDollarQuotedSpan(sql: string, start: number): number {
+  const tag = DOLLAR_QUOTED_TAG.exec(sql.slice(start, start + DOLLAR_TAG_LOOKAHEAD))?.[0];
+  if (!tag) return start + 1;
+  const close = sql.indexOf(tag, start + tag.length);
+  return close < 0 ? sql.length : close + tag.length;
+}
+
 export function getSqlCompletionContext(sql: string, cursor: number): SqlCompletionContext {
+  // Commented-out SQL must not poison context detection (referenced tables,
+  // statement kind, ...): blank `--` / `/* */` comments once, up front. Bodies
+  // become same-length whitespace so every offset stays valid, and a cursor
+  // inside a comment gets the same neutral context as an empty document.
+  const stripped = stripSqlComments(sql, cursor);
+  if (stripped.cursorInComment) return getSqlCompletionContext("", 0);
+
   // Extract the full statement at cursor position for referenced tables
-  const fullStatement = extractStatementAt(sql, cursor);
+  const fullStatement = extractStatementAt(stripped.text, cursor);
 
   // Content before cursor within the current statement
-  const stmtStart = extractStatementStart(sql, cursor);
-  const beforeCursor = sql.slice(stmtStart, cursor);
+  const stmtStart = extractStatementStart(stripped.text, cursor);
+  const beforeCursor = stripped.text.slice(stmtStart, cursor);
 
   const trailingIdentifier = parseTrailingIdentifierContext(beforeCursor);
   const prefix = trailingIdentifier?.prefix ?? "";

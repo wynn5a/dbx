@@ -136,3 +136,95 @@ describe("sqlCompletion statement boundaries", () => {
     expect(context.referencedTables.map((table) => table.name)).toEqual(["Automations"]);
   });
 });
+
+describe("sqlCompletion comment stripping", () => {
+  const expectNeutral = (context: ReturnType<typeof getSqlCompletionContext>) => {
+    expect(context.prefix).toBe("");
+    expect(context.qualifier).toBeUndefined();
+    expect(context.referencedTables).toEqual([]);
+    expect(context.suggestTables).toBe(false);
+    expect(context.suggestColumns).toBe(false);
+    expect(context.statementKind).toBe("unknown");
+  };
+
+  it("returns a neutral context when the cursor is inside a line comment", () => {
+    const sql = "select * from users where id = 1 -- TODO: also filter by created_at";
+    const cursor = sql.indexOf("filter") + 2;
+    expectNeutral(getSqlCompletionContext(sql, cursor));
+  });
+
+  it("returns a neutral context when the cursor is inside a block comment", () => {
+    const sql = "select 1;\n/* select * from hidden_table where id = */";
+    const cursor = sql.indexOf("hidden_table") + 1;
+    expectNeutral(getSqlCompletionContext(sql, cursor));
+  });
+
+  it("gives code after a comment the correct context", () => {
+    const sql = [
+      "select *",
+      "-- join secret_table on secret_table.id = orders.id",
+      "from orders o join items i on i.order_id = o.id where o.",
+    ].join("\n");
+    const context = getSqlCompletionContext(sql, sql.length);
+
+    expect(context.qualifier).toBe("o");
+    expect(context.referencedTables.map((table) => table.name)).toEqual(["orders", "items"]);
+    expect(context.statementKind).toBe("select");
+  });
+
+  it("keeps a statement intact across a fully commented line", () => {
+    const sql = "select *\n-- only active rows below\nfrom users where";
+    const context = getSqlCompletionContext(sql, sql.length);
+
+    expect(context.referencedTables.map((table) => table.name)).toEqual(["users"]);
+    expect(context.statementKind).toBe("select");
+    expect(context.suggestColumns).toBe(true);
+  });
+
+  it("does not count commented-out tables as referenced", () => {
+    const sql = "select a from t1 -- , t2 from hidden_db join t3\nwhere a > 0";
+    const context = getSqlCompletionContext(sql, sql.length);
+
+    expect(context.referencedTables.map((table) => table.name)).toEqual(["t1"]);
+    expect(context.statementKind).toBe("select");
+  });
+
+  it("does not let a commented-out statement change the statement kind", () => {
+    const sql = "-- drop table secret_table;\nselect id from users";
+    const context = getSqlCompletionContext(sql, sql.length);
+
+    expect(context.statementKind).toBe("select");
+    expect(context.referencedTables.map((table) => table.name)).toEqual(["users"]);
+  });
+
+  it("does not treat comment openers inside dollar-quoted strings as comments", () => {
+    const untagged = "select x from logs where tags = $$-- not a comment$$ and logs.";
+    const untaggedContext = getSqlCompletionContext(untagged, untagged.length);
+    expect(untaggedContext.qualifier).toBe("logs");
+    expect(untaggedContext.referencedTables.map((table) => table.name)).toEqual(["logs"]);
+
+    const tagged = "select x from logs where tags = $note$/* still a string */$note$ and logs.";
+    const taggedContext = getSqlCompletionContext(tagged, tagged.length);
+    expect(taggedContext.qualifier).toBe("logs");
+    expect(taggedContext.referencedTables.map((table) => table.name)).toEqual(["logs"]);
+  });
+
+  it("does not treat comment openers inside string literals as comments", () => {
+    const sql = "select x from app_logs where msg = 'it''s -- not a comment /* really' and app_logs.";
+    const context = getSqlCompletionContext(sql, sql.length);
+
+    expect(context.qualifier).toBe("app_logs");
+    expect(context.referencedTables.map((table) => table.name)).toEqual(["app_logs"]);
+  });
+
+  it("keeps quoted qualifier parsing intact after a trailing comment", () => {
+    const sql = 'select *\nfrom events -- recent events only\njoin "my schema".';
+    const context = getSqlCompletionContext(sql, sql.length);
+
+    expect(context.qualifier).toBe("my schema");
+    expect(context.suggestTables).toBe(true);
+    const names = context.referencedTables.map((table) => table.name);
+    expect(names).toContain("events");
+    expect(names.some((name) => name === "recent" || name === "only")).toBe(false);
+  });
+});
