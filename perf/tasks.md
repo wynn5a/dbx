@@ -40,7 +40,7 @@
 | T19 | 高危 SQL 增加确认摩擦 | improvement-plan §5 D3 | S | ✅ 75cfc769 |
 | T20 | search_tables 工具 | improvement-plan §5 D4 | S | ✅ adf7a942 |
 | T21 | Gemini/Ollama 工具调用 | improvement-plan §5 D5 | M | ✅ ed844722 |
-| T22 | 置信门控未知列诊断 | improvement-plan §4 C5 | L | ⬜ |
+| T22 | 置信门控未知列诊断 | improvement-plan §4 C5 | L | ✅ 4d08758a |
 | T23 | 网格 FK 点击跳转 | improvement-plan §6 E7-1 | M | ⬜ |
 | T24 | 方言函数目录（CH/DuckDB/Oracle） | improvement-plan §4 C6 | M | ⬜ |
 | T25 | Leaflet 按需加载 | improvement-plan §3 B5 | S | ⬜ |
@@ -288,14 +288,15 @@
   - [x] 全量回归通过（`cargo fmt --check` + `cargo test -p dbx-core`：839 lib + 4 新集成 + 既有套件 0 失败；`cargo check --workspace --locked` 干净）
 - **实现说明**：两 provider 都并入既有 `stream_with_tools` 链路（`ai.rs`），复用 `StreamingToolCallAccumulator` 与 agent loop 的多轮管线，与 OpenAI/Claude 同一转换点。**Gemini**：请求体 `tools: [{ functionDeclarations: [...] }]`（`to_gemini_tool()` 即 declaration 条目，参数 schema 本就是 Gemini 接受的 OpenAPI 子集），function-calling mode 用 API 默认 AUTO，POST `:streamGenerateContent?alt=sse`；流解析把 `candidates[0].content.parts[]` 的 text part 流为文本 delta、`functionCall` part（完整到达、无参数分片）走 start+delta+complete 进 accumulator，`usageMetadata` 给 best-effort token 数；回传用 `gemini_contents_with_tools` 把 assistant tool_calls 转成 model 的 `functionCall` parts、tool 结果转成 `functionResponse` part（`{name, response:{result}}`）并归并到单个 user turn——Gemini 无 call id，function 名从最近一条声明该 id 的 assistant 轮解析。**Ollama**：走本仓库已有的 OpenAI 兼容 `/v1/chat/completions` 路径（其 `tools`/`tool_calls` JSON 与 `/api/chat` 同形，不新增 native 端点/解析器）；opt-in 选 `/api/show` 能力探测而非模型名清单/环境变量——`AiConfig` 无 per-model 能力字段，名字清单随 Ollama 发版过时，探测每次 run 一次、失败即安全回退，非 opt-in 流量与改动前逐字节一致。`provider_supports_function_calling` 变 async（唯一调用方 `agent_loop.rs`）；工具执行、写确认门控、事件发射零改动。
 
-### T22 置信门控未知列诊断 ⬜
+### T22 置信门控未知列诊断 ✅ 4d08758a
 
 - **来源** improvement-plan-2026-09.md §4 C5（Track C）· **规模** L
 - **内容** unknown-column 诊断被有意禁用（`QueryEditor.vue:818-822`，schema 缓存不全防误报）。仅当表可无歧义解析且全列已加载时启用，复用 `sql_analysis.rs` 的 spans。
 - **验收**
-  - [ ] 明确拼错的列名被标出
-  - [ ] 歧义表名/部分缓存场景零误报（测试锁定）
-  - [ ] 遵循既有 500ms 防抖 + run-id 守卫模式；`pnpm check` 通过
+  - [x] 明确拼错的列名被标出（`select usr_nme from users` 在 `users` 全列已加载且唯一解析时，对 `usr_nme` span 出 amber 波浪线警告，消息走 `editor.diagnostics.unknownColumn` 六语言；门控纯函数测试锁定）
+  - [x] 歧义表名/部分缓存场景零误报（测试锁定：同名多 schema → ambiguous、列缓存缺失/为空 → unresolved、CTE 同名遮蔽、SELECT 别名（ORDER BY alias 合法）、表别名列清单（`UNNEST(...) AS u(tag)`/`g(n)`）、join 多表非限定列不可归属、qualifier 匹配 0/2 个引用——任一不满足整批丢弃）
+  - [x] 遵循既有 500ms 防抖 + run-id 守卫模式（源码契约测试锁定 `scheduleSemanticDiagnostics(delay = 500)` 与两次 await 后各查一次 `semanticDiagnosticRunId`）；`pnpm check` 通过（format + lint + typecheck + vitest 169 文件 1204 测试）
+- **实现说明**：门控为**全局门**——本次 analyze 通过的所有置信检查缺一即整批不出 unknown-column 诊断（parser-error 诊断路径不受影响）。前端新增 `lib/sqlUnknownColumns.ts`：同步纯函数 `gateUnknownColumnDiagnostics`（穷举单测）+ 异步 `buildUnknownColumnDiagnostics`（按引用去重解析、resolver 异常按 unresolved 处理）。解析器用**不过滤不限量**的表清单（首次加载后走 B2 超集缓存）做精确名匹配——清单完备性是"唯一解析"可信的前提；命中列缓存（与补全/hover 共享 `ensureColumnsForTable`/`cachedColumnsByTable`）才视为全列已加载。大小写不敏感双向匹配（PG 小写折叠语义，漏报优于误报）。Rust 侧 `SqlReferenceAnalysis` 增补 `select_aliases`/`alias_columns`（作用域内可见但非 schema 列的标识符，前端免正则提取）；顺带修复 `table_reference_from_name` 在单段表名时把表名泄漏进 schema 槽位的 bug（该 bug 会使裸 `FROM users` 被当作 schema 限定引用，直接废掉主用例），并配集成测试锁定。
 
 ---
 
