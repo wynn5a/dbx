@@ -41,7 +41,7 @@
 | T20 | search_tables 工具 | improvement-plan §5 D4 | S | ✅ adf7a942 |
 | T21 | Gemini/Ollama 工具调用 | improvement-plan §5 D5 | M | ✅ ed844722 |
 | T22 | 置信门控未知列诊断 | improvement-plan §4 C5 | L | ✅ 4d08758a |
-| T23 | 网格 FK 点击跳转 | improvement-plan §6 E7-1 | M | ⬜ |
+| T23 | 网格 FK 点击跳转 | improvement-plan §6 E7-1 | M | ✅ 37fc558b |
 | T24 | 方言函数目录（CH/DuckDB/Oracle） | improvement-plan §4 C6 | M | ⬜ |
 | T25 | Leaflet 按需加载 | improvement-plan §3 B5 | S | ⬜ |
 | T26 | PG JSON 列免 parse-再序列化 | improvement-plan §3 B4 | S | ⬜ |
@@ -302,14 +302,15 @@
 
 ## P2 —— 能力增强与打磨
 
-### T23 网格 FK 点击跳转 ⬜
+### T23 网格 FK 点击跳转 ✅ 37fc558b
 
 - **来源** improvement-plan-2026-09.md §6 E7 第 1 项（Track E）· **规模** M
 - **内容** FK 元数据已取（`DataGrid.vue:5571`），`useNavigationTargets.ts:18` 已接受 `whereInput`，只差一个 click handler。
 - **验收**
-  - [ ] 点击 FK 单元格跳到目标表并定位到对应行
-  - [ ] 无 FK 元数据的列不可点、无误导
-  - [ ] 测试 + 手工验证
+  - [x] 点击 FK 单元格跳到目标表并定位到对应行（交互形式：**Cmd/Ctrl+点击**——普通点击保留选中/框选、双击保留编辑，沿用网格修饰键惯例；Cmd/Ctrl+点击 FK 单元格 → `openTableTarget` 打开 `ref_schema(ref_schema 缺省回落当前 schema).ref_table`，`whereInput` 为 `ref_column = <单元格值>`，复用页面大小/标签页复用逻辑定位到匹配行）
+  - [x] 无 FK 元数据的列不可点、无误导（列无 FK、或单元格值为 NULL/复合值（JSON/数组）时：无 pointer 光标、无 hover 下划线、无 title，点击退化为普通选中；`isForeignKeyCellValueNavigable` 拒绝 NULL/NaN/Infinity/非标量）
+  - [x] 测试 + 手工验证（手工点击验证在本环境不可行，以 20 项测试佐证接线链路每一环：`gridForeignKeyNavigation.test.ts` 覆盖 whereInput 构造纯函数（数字/布尔/字符串字面量、各方言标识符引用与转义——引号全方言双写、反斜杠仅 MySQL 系双写、SQL Server N 前缀）、可点判定矩阵（NULL/NaN/Infinity/对象/数组不可点、空串可点）、ref_schema 回落；源码契约测试锁定 DataGrid 接线（FK 预热拉取、修饰键守卫、DOM/Canvas 两种渲染模式的可点样式与点击 handler、emit 链 ContentArea→App.vue→`openTableTarget`、canvas 渲染器 hover 下划线选项）与六语言 tooltip；`pnpm check` 通过（format + lint + typecheck + vitest 170 文件 1224 测试）、`pnpm build` 通过）
+- **实现说明**：新增 `lib/gridForeignKeyNavigation.ts` 纯函数模块（FK 按列索引、可点判定、SQL 字面量/whereInput 构造、NavigationTarget 组装）。FK 元数据从"仅打开表信息抽屉才拉取"改为表格数据展示时预热（沿用 loaded/loading 守卫，失败静默=不可点，不影响 results 上下文——无 tableMeta 即不拉取）。两处渲染模式都接了交互：DOM 单元格 pointer 光标 + hover 下划线 + title（`grid.foreignKeyNavigateHint`，六语言，含平台修饰键 Cmd/Ctrl）；canvas 渲染器新增 `isForeignKeyCell` 选项绘制同样式 hover 下划线 + pointer 光标，canvas click 仅在落点 = mousedown 单元格时导航（拖拽框选不误触）。同列多 FK 取第一个；复合外键点击仅按所点列过滤（与主流工具一致）。
 
 ### T24 方言函数目录（ClickHouse/DuckDB/Oracle） ⬜
 
