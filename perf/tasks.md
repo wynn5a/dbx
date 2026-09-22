@@ -27,7 +27,7 @@
 | T06 | MySQL/SQL Server 标识符引号 | improvement-plan §4 C2 | S | ✅ db20604b |
 | T07 | 前后端方言映射统一 | improvement-plan §4 C3 | M | ✅ fccd9dcd |
 | T08 | 一次 IPC 取全部 schema 表 | improvement-plan §3 B1 | M | ✅ 879d2673 |
-| T09 | 补全缓存按超集缓存 | improvement-plan §3 B2 | M | ⬜ |
+| T09 | 补全缓存按超集缓存 | improvement-plan §3 B2 | M | ✅ 4025a0cc |
 | T10 | Redis 自动重连 | improvement-plan §2 A3 | S | ⬜ |
 | T11 | 健康扫描覆盖全部驱动 | improvement-plan §2 A4 | S | ⬜ |
 | T12 | Agent 工具查询可取消可见 | improvement-plan §5 D2 | M | ⬜ |
@@ -158,14 +158,15 @@
   - [x] PG/MySQL/SQLite 至少各一条测试；全量回归通过（`cargo fmt --check` + dbx-core 811 过 + `cargo check --workspace --locked` + `pnpm check` 全绿，vitest 162 文件 1133 用例）
 - **实现说明**：新增 `list_completion_metadata` 命令（`SchemaCompletionGroup { schema, tables, objects }` 按请求 schema 顺序分组）。PG 用 `n.nspname = ANY($1)`（表/例程两条 SQL，例程保留既有无时间戳回退并套 `filter_completion_objects`）；MySQL 用 `TABLE_SCHEMA IN (...)` + 例程/触发器 IN 查询（信息为空时回退逐 schema 以保留 SHOW 兜底）；SQLite 单条 `sqlite_master` 查询按请求 schema 复制分组；其余引擎（SQL Server/Agent/DuckDB/ClickHouse/外部驱动/Doris/OB-Oracle 等）在这一次 invoke 内循环既有 per-schema 调用。`filter`/`limit` 保持 `list_tables` 逐 schema 语义（含 yashandb 回收站过滤）。前端多 schema 补全加载（表+例程）一次 invoke，结果按 (connection, database) 缓存于 `completionMetadataCache`（进 `invalidateCompletionCache`）；击键过滤/宽松重试在客户端以与后端一致的 contains 语义完成，不再触发新 invoke；显式指定 schema 仍走单次 `list_tables`/`list_completion_objects`；bulk 失败回退逐 schema 调用（一轮取齐表+例程），不回归。附带效果：T09 的"按超集缓存"在此已具雏形（缓存不再随击键增长）。
 
-### T09 补全缓存按超集缓存 ⬜
+### T09 补全缓存按超集缓存 ✅ 4025a0cc
 
 - **来源** improvement-plan-2026-09.md §3 B2（Track B）· **规模** M
 - **内容** 缓存键含击键过滤（`connectionStore.ts:2269`），`u`/`us`/`use` 三条目三次往返，50 上限被击键冲刷。改为缓存无过滤 (schema, limit) 结果：未截断时客户端过滤排序，截断才回退服务端过滤。
 - **验收**
-  - [ ] 连续键入 `u`/`us`/`use`（未截断）只触发 1 次后端请求
-  - [ ] 客户端过滤的排序/前缀优先与原服务端过滤一致（对照测试）
-  - [ ] 缓存条目不再随击键增长；sqlCompletion/store 测试全过
+  - [x] 连续键入 `u`/`us`/`use`（未截断）只触发 1 次后端请求
+  - [x] 客户端过滤的排序/前缀优先与原服务端过滤一致（对照测试）
+  - [x] 缓存条目不再随击键增长；sqlCompletion/store 测试全过
+- **实现说明**：T08 只消除了多 schema 路径的 IPC 扇出（`completionMetadataCache` 按 (connection, database) 缓存、击键不再触发新 invoke），但 `completionTablesCache` 的键仍含击键过滤（每键一条目、50 上限被冲刷），且显式 schema 路径与非 schema-aware 引擎（MySQL/SQLite/mongo/es 等）仍按击键服务端过滤逐键 invoke——三条路径本次一并落地：`completionTablesCache` 替换为 `completionTablesSupersetCache`，按 (connection, database, schema, expanded-limit) 缓存无过滤超集（键永不含过滤词；上限取 `expandedCompletionLimit(limit)`，与宽松重试同界，覆盖 limit=200 的编辑器调用与 limit=20 的引用查找）；未截断时 `filterCompletionTablesFromSuperset` 客户端过滤，逐字对齐后端 `filter_table_infos` 语义（大小写不敏感 contains、保持列举顺序、末尾截断、零命中时宽松两字符重试），因此与原服务端过滤字节一致（"前缀优先"排序属编辑器本地索引层 `lookupLocalCompletionTables` 的 `tableMatchScore`，不在 store 对照范围、未改动）；仅"超集被截断 + 有过滤词"（可能存在截断窗外的命中）回退服务端过滤（in-flight 合并、不落缓存），超大 schema 保持 B2 前行为。表索引（`indexCompletionTables`）从每击键移入超集装载，编辑器 `tableNarrowCache` 不再被逐键清空。superset 缓存纳入 `invalidateCompletionCache`。行为差异一处：显式 schema 路径的超集装载失败由"吞错返回空"改为向上抛（全部调用方本就有 catch，行为等效为不出现补全）。测试新增 `packages/app-tests/connectionStoreCompletionSuperset.test.ts` 5 例：显式 schema 与单库引擎的客户端过滤 == 服务端过滤对照（过滤词 × limit × 宽松重试）、`u`/`us`/`use` 每 scope 恰 1 次 `list_tables`、截断回退（4 表 + limit 1）锁回退结果与其 invoke 计数、25 个不同过滤词双计数器不动 + `updateConnection` 失效后恰重取 1 次；T08 既有 4 例不改全过。`pnpm check` 全绿（vitest 163 文件 1138 用例）；未动 Rust。
 
 ### T10 Redis 自动重连 ⬜
 
