@@ -45,7 +45,7 @@
 | T24 | 方言函数目录（CH/DuckDB/Oracle） | improvement-plan §4 C6 | M | ✅ 9a8178b2 |
 | T25 | Leaflet 按需加载 | improvement-plan §3 B5 | S | ✅ b963ea14 |
 | T26 | PG JSON 列免 parse-再序列化 | improvement-plan §3 B4 | S | ✅ 057fa533 |
-| T27 | SSH 隧道放弃时驱逐连接池 | improvement-plan §2 A5 | S | ⬜ |
+| T27 | SSH 隧道放弃时驱逐连接池 | improvement-plan §2 A5 | S | ✅ 43e5c824 |
 | T28 | 原生 DB socket TCP keepalive | improvement-plan §2 A6 | S | ⬜ |
 | T29 | idle_timeout 设置诚实化 | improvement-plan §2 A7 | S | ⬜ |
 | T30 | 展示 token 用量与成本 | improvement-plan §5 D7 | S | ⬜ |
@@ -340,13 +340,14 @@
   - [x] 输出与数据库原文逐字节一致（语义修正见实现说明；对照测试 `tests/live_postgres_json.rs`：env 门控 `DBX_TEST_POSTGRES_URL`，Docker 临时 PG16 实测通过、用后弃容器；11 行覆盖嵌套对象/数组/unicode/转义/重复键/30 位大整数/38 位高精度小数/指数/顶层标量/空对象空数组/NULL/>50KB 大对象，逐格断言 json/jsonb 列 == 服务端 `::text` 原文（经驱动 TEXT 路径读取，同版本同服务器），另加精确钉子防 parse 路径回归：json 空白与重复键原文保留、30 位整数完整、jsonb 键序按长度+字典序）
 - **实现说明**：`pg_value_to_json` 的 JSON/JSONB 分支改为先 `PgJsonText` 直读（jsonb 仅剥一节版本字节；类型匹配按 OID 与名字双重判断，对齐 gaussdb fork 的 `is_json_type`，GaussDB 兼容端同样适用），`serde_json::Value` parse 仅作防御回退，NULL 仍为 Null；顺带删除本就不可达的 `try_get::<String>`（fork 的 `String::accepts` 不含 json/jsonb）。**行为契约（语义修正，经实验决定）**：输出不再与旧 serde_json 序列化逐字节一致——旧路径是 parse 后重排：规范化空白与数字字面量（`1.000`→`1.0`、`1e2`→`100.0`）、丢弃重复键、解转义、**超 f64 精度数字被静默改写（30 位整数显示为 `1.2345678901234568e+29`）**；直读产出 PG 自己的文本（psql 所见），才是"展示数据库真实内容"的正确结果，也是原实现想要的效果。网格仍收到 JSON 字符串，前端展示形态不变。验证：`cargo fmt --check` + `cargo test -p dbx-core` 全绿（873 通过）；live PG 实测 json/network/completion_metadata/query_cancel/transaction_recovery 全过；`live_postgres_transfer` 在本环境的 base 提交上同样失败（gaussdb fork `Row::get` 对 domain 类型列索引越界，与本任务无关，如实记录）。
 
-### T27 SSH 隧道放弃时驱逐连接池 ⬜
+### T27 SSH 隧道放弃时驱逐连接池 ✅ 43e5c824
 
 - **来源** improvement-plan-2026-09.md §2 A5（Track A）· **规模** S
 - **内容** `ssh_tunnel.rs:223-228` 10 次尝试后只记日志返回，上层 DB 池仍缓存并持续报 "connection refused"。放弃时调 `discard_pool` 并发一次事件，前端提示隧道断开。
 - **验收**
-  - [ ] 放弃后旧池不再缓存；后续操作得到明确错误而非 refused
-  - [ ] 前端收到事件并展示提示；测试通过
+  - [x] 放弃后旧池不再缓存；后续操作得到明确错误而非 refused（代码/测试断言：隧道任务放弃时向 manager 自有 channel 发一次 `TunnelGiveUp`（tunnel id + SSH 端点）；桌面壳启动时单消费者 drain——按 tunnel id 找到所属连接、`remove_connection_pools` 驱逐其全部池（base/按库/按 tab session），再 emit 一次事件。后续操作重建传输层：sshd 仍宕机时 `get_or_create_pool` 快速失败于 "SSH layer N failed: SSH connection failed: …"（明确指向隧道），不再是从缓存池漏出的裸 refused。连接对话框探针隧道（`{id}:test`）不服务池，只报告不驱逐。重连退避参数化为 `ReconnectPolicy`（生产默认 5s→60s/10 次不变），测试注入毫秒级策略观察放弃）
+  - [x] 前端收到事件并展示提示；测试通过（`useTauriEvents` 订阅 `ssh-tunnel-lost`，App.vue 在 10s 防重窗口内每连接至多一条 error toast（多跳连接同连多隧道只提示一次），文案 `connection.tunnelLost`/`tunnelLostHint` 进六 locale；`sshTunnelLost.test.ts` 7 例锁展示/防重/六语言/源码接线契约（含前后端事件名字面量一致））
+- **实现说明**：dbx-core 不依赖 Tauri，事件走 `tokio::mpsc::UnboundedSender<TunnelGiveUp>`——`TunnelManager::take_give_up_receiver()` 单次交付，`src-tauri/src/lib.rs` 的 `start_tunnel_give_up_relay` 在 setup 时 drain（evict + emit，模式对齐 `mcp_bridge::start`）；防重在源头（每隧道生命周期恰好一次通知）+ 前端（每连接 10s 窗口）两层保证。重试内循环抽为 `reconnect_with_backoff(policy, attempt)`（mock connect 可测放弃预算与指数退避封顶）。验证：`cargo fmt --check` + `cargo test -p dbx-core` 全绿（lib 846 过，新增 5：退避递进/放弃预算/单消费者/隧道 id 映射/驱逐范围）+ `cargo check --workspace --locked` + `pnpm check` 全绿（173 文件 1248 用例，含新增 7 例）；env 门控 live 测试 `tests/live_ssh_tunnel_giveup.rs`（Docker 临时 alpine sshd，密码认证，测试自行 stop/start 容器）实测通过：隧道建立 → kill sshd → 恰好一条 notice（字段正确）→ 池全部驱逐 → 宕机期间 `get_or_create_pool` 报明确 SSH 层错误 → sshd 恢复后传输层无重启自愈。
 
 ### T28 原生 DB socket TCP keepalive ⬜
 
