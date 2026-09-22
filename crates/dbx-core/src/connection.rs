@@ -425,15 +425,17 @@ impl AppState {
             }
             DatabaseType::Redis => {
                 let con = if db_config.uses_redis_cluster() {
-                    db::redis_driver::RedisConnection::Cluster(db::redis_driver::connect_cluster(&db_config).await?)
+                    db::redis_driver::RedisConnection::Cluster(Arc::new(
+                        db::redis_driver::connect_cluster(&db_config).await?,
+                    ))
                 } else if db_config.uses_redis_sentinel() {
-                    db::redis_driver::RedisConnection::Direct(tokio::sync::Mutex::new(
+                    db::redis_driver::RedisConnection::Direct(Arc::new(tokio::sync::Mutex::new(
                         db::redis_driver::connect_sentinel(&db_config).await?,
-                    ))
+                    )))
                 } else {
-                    db::redis_driver::RedisConnection::Direct(tokio::sync::Mutex::new(
+                    db::redis_driver::RedisConnection::Direct(Arc::new(tokio::sync::Mutex::new(
                         db::redis_driver::connect(&url, connect_timeout).await?,
-                    ))
+                    )))
                 };
                 PoolKind::Redis(con)
             }
@@ -851,7 +853,12 @@ impl AppState {
             let conns = self.connections.read().await;
             conns
                 .iter()
-                .filter(|(_, pool)| matches!(pool, PoolKind::Mysql(..) | PoolKind::Postgres(..)))
+                .filter(|(_, pool)| {
+                    matches!(
+                        pool,
+                        PoolKind::Mysql(..) | PoolKind::Postgres(..) | PoolKind::SqlServer(..) | PoolKind::Redis(..)
+                    )
+                })
                 .map(|(key, pool)| (key.clone(), clone_pool_kind(pool)))
                 .collect()
         };
@@ -869,6 +876,27 @@ impl AppState {
                         let client = p.get().await.map_err(|e| e.to_string())?;
                         client.simple_query("SELECT 1").await.map(|_| ()).map_err(|e| e.to_string())
                     }
+                    PoolKind::SqlServer(p) => {
+                        // The pool's own checked checkout health-probes the
+                        // socket (`SELECT @@SPID`) and sheds a stale one by
+                        // redialling, so a merely-stale idle socket is healed
+                        // here instead of reported dead. keep() returns the
+                        // healthy socket to the idle list rather than closing
+                        // it, so the sweep leaves no side effects behind.
+                        let (mut lease, _) = p.lease_checked().await?;
+                        lease.keep();
+                        Ok(())
+                    }
+                    PoolKind::Redis(con) => match con {
+                        db::redis_driver::RedisConnection::Direct(direct) => {
+                            let mut con = direct.lock().await;
+                            db::redis_driver::ping(&mut *con).await
+                        }
+                        db::redis_driver::RedisConnection::Cluster(cluster) => {
+                            let mut con = cluster.connection.lock().await;
+                            db::redis_driver::ping(&mut *con).await
+                        }
+                    },
                     _ => Ok(()),
                 }
             };
@@ -1007,6 +1035,8 @@ fn clone_pool_kind(pool: &PoolKind) -> PoolKind {
     match pool {
         PoolKind::Mysql(p, mode) => PoolKind::Mysql(p.clone(), *mode),
         PoolKind::Postgres(p) => PoolKind::Postgres(p.clone()),
+        PoolKind::SqlServer(p) => PoolKind::SqlServer(Arc::clone(p)),
+        PoolKind::Redis(con) => PoolKind::Redis(con.clone()),
         other => panic!("clone_pool_kind not supported for {:?}", std::mem::discriminant(other)),
     }
 }
@@ -2437,5 +2467,67 @@ mod tests {
             .unwrap_or_else(|err| panic!("failed to drop KWDB test schema: {err}"));
         pool.close();
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    // --- health sweep covers every pinged driver (T11) ---
+    //
+    // Pool kinds for SQL Server and Redis cannot be constructed without a live
+    // server (both open a socket eagerly), so the wiring is locked by source
+    // contracts here and the behavior by tests/live_health_refresh.rs.
+
+    #[test]
+    fn refresh_sweep_keeps_mysql_pg_probes_and_covers_sqlserver_redis() {
+        let source = include_str!("connection.rs");
+        let sweep = source.split("pub async fn refresh_connections").nth(1).unwrap();
+        let sweep = sweep.split("pub async fn remove_connection_pools").next().unwrap();
+
+        // MySQL/PG behavior must not change: pool checkout + ping, SELECT 1.
+        assert!(
+            sweep.contains("PoolKind::Mysql(p, _) => db::mysql::get_conn_with_health_check(p)"),
+            "MySQL sweep must keep the checkout+ping health check"
+        );
+        assert!(sweep.contains("client.simple_query(\"SELECT 1\")"), "PG sweep must keep the SELECT 1 probe");
+
+        // The sweep must collect SQL Server and Redis pools alongside MySQL/PG.
+        assert!(
+            sweep.contains(
+                "PoolKind::Mysql(..) | PoolKind::Postgres(..) | PoolKind::SqlServer(..) | PoolKind::Redis(..)"
+            ),
+            "the sweep filter must include SQL Server and Redis pools"
+        );
+
+        // SQL Server goes through the pool's own health-checking lease
+        // (`SELECT @@SPID`, stale sockets shed by redial) and a healthy lease
+        // is returned to the idle list instead of being closed.
+        assert!(
+            sweep.contains("lease_checked") && sweep.contains("lease.keep()"),
+            "the SQL Server arm must reuse SqlServerPool::lease_checked and keep() the healthy lease"
+        );
+
+        // Redis is probed with PING on both the direct and the cluster pool.
+        assert!(sweep.contains("db::redis_driver::ping"), "the Redis arm must PING through redis_driver");
+        let redis_arm = sweep.split("PoolKind::Redis(con) => match con").nth(1).unwrap();
+        let redis_arm = redis_arm.split("_ => Ok(())").next().unwrap();
+        assert!(
+            redis_arm.contains("RedisConnection::Direct") && redis_arm.contains("RedisConnection::Cluster"),
+            "both Redis pool variants must be swept, not just direct connections"
+        );
+    }
+
+    #[test]
+    fn clone_pool_kind_supports_every_swept_pool_kind() {
+        let source = include_str!("connection.rs");
+        let body = source.split("fn clone_pool_kind").nth(1).unwrap();
+        let body = body.split("pub async fn close_pool_kind").next().unwrap();
+
+        assert!(
+            body.contains("PoolKind::SqlServer(Arc::clone(p))") && body.contains("PoolKind::Redis(con.clone())"),
+            "clone_pool_kind must clone every kind the sweep filter collects, or the sweep \
+             panics on a window-focus refresh"
+        );
+        assert!(
+            !body.contains("PoolKind::Sqlite"),
+            "the panic arm must stay for kinds that are never swept (Sqlite is in-process and cannot go stale)"
+        );
     }
 }

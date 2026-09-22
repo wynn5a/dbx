@@ -468,17 +468,17 @@ pub async fn connect_db(state: State<'_, Arc<AppState>>, config: ConnectionConfi
         }
         DatabaseType::Redis => {
             let con = if db_config.uses_redis_cluster() {
-                PoolKind::Redis(db::redis_driver::RedisConnection::Cluster(
+                PoolKind::Redis(db::redis_driver::RedisConnection::Cluster(Arc::new(
                     db::redis_driver::connect_cluster(&db_config).await?,
-                ))
+                )))
             } else if db_config.uses_redis_sentinel() {
-                PoolKind::Redis(db::redis_driver::RedisConnection::Direct(tokio::sync::Mutex::new(
+                PoolKind::Redis(db::redis_driver::RedisConnection::Direct(Arc::new(tokio::sync::Mutex::new(
                     db::redis_driver::connect_sentinel(&db_config).await?,
-                )))
+                ))))
             } else {
-                PoolKind::Redis(db::redis_driver::RedisConnection::Direct(tokio::sync::Mutex::new(
+                PoolKind::Redis(db::redis_driver::RedisConnection::Direct(Arc::new(tokio::sync::Mutex::new(
                     db::redis_driver::connect(&url, connect_timeout).await?,
-                )))
+                ))))
             };
             con
         }

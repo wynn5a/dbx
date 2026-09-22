@@ -10,6 +10,7 @@ use redis::{
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 
 const STREAM_ENTRY_LIMIT: usize = 100;
@@ -85,9 +86,13 @@ pub struct RedisCommandResult {
     pub value: serde_json::Value,
 }
 
+/// An app-level Redis pool handle. Both variants are `Arc`-wrapped so the
+/// health sweep (`AppState::refresh_connections`) can clone the handle under
+/// the connections read lock and PING without holding that lock across I/O.
+#[derive(Clone)]
 pub enum RedisConnection {
-    Direct(Mutex<RedisDirectConnection>),
-    Cluster(RedisClusterPool),
+    Direct(Arc<Mutex<RedisDirectConnection>>),
+    Cluster(Arc<RedisClusterPool>),
 }
 
 /// A direct (standalone or Sentinel) Redis connection plus the session db it
@@ -505,6 +510,18 @@ pub fn ensure_cluster_db(db: u32) -> Result<(), String> {
     } else {
         Err("Redis Cluster only supports db0".to_string())
     }
+}
+
+/// Liveness probe for the pool sweep (`AppState::refresh_connections`): a
+/// successful PING proves the session is still serving commands. Generic over
+/// [`ConnectionLike`] so a direct connection keeps its tracked-db /
+/// auto-reconnect bookkeeping (see the `ConnectionLike` impl above) and a
+/// cluster connection goes through its own self-healing `ClusterConnection`.
+pub async fn ping<C>(con: &mut C) -> Result<(), String>
+where
+    C: ConnectionLike + Send + Sync + Unpin,
+{
+    redis::cmd("PING").query_async::<String>(con).await.map(|_| ()).map_err(|e| e.to_string())
 }
 
 pub fn encode_cluster_cursor(node_index: usize, cursor: u64) -> Result<u64, String> {
@@ -1964,5 +1981,60 @@ mod tests {
             "RedisClusterPool must still hold the cluster ClusterConnection, not a direct \
              ConnectionManager"
         );
+    }
+
+    // --- pool-sweep liveness probe (T11) ---
+
+    /// Minimal [`ConnectionLike`] fake so the sweep's PING probe can be tested
+    /// without a live server: `reply` is what the "server" answers with.
+    struct FakeRedisConnection {
+        reply: Result<RedisRawValue, String>,
+    }
+
+    impl redis::aio::ConnectionLike for FakeRedisConnection {
+        fn req_packed_command<'a>(&'a mut self, _cmd: &'a redis::Cmd) -> redis::RedisFuture<'a, RedisRawValue> {
+            Box::pin(async {
+                self.reply.clone().map_err(|message| {
+                    redis::RedisError::from(std::io::Error::new(std::io::ErrorKind::ConnectionReset, message))
+                })
+            })
+        }
+
+        fn req_packed_commands<'a>(
+            &'a mut self,
+            _cmd: &'a redis::Pipeline,
+            _offset: usize,
+            _count: usize,
+        ) -> redis::RedisFuture<'a, Vec<RedisRawValue>> {
+            Box::pin(async { Ok(vec![]) })
+        }
+
+        fn get_db(&self) -> i64 {
+            0
+        }
+    }
+
+    #[tokio::test]
+    async fn ping_probe_succeeds_on_pong() {
+        let mut con = FakeRedisConnection { reply: Ok(RedisRawValue::SimpleString("PONG".to_string())) };
+        super::ping(&mut con).await.expect("PONG means healthy");
+    }
+
+    #[tokio::test]
+    async fn ping_probe_surfaces_transport_errors() {
+        let mut con = FakeRedisConnection { reply: Err("connection reset by peer".to_string()) };
+        let err = super::ping(&mut con).await.expect_err("a dead transport must surface as unhealthy");
+        assert!(
+            err.to_lowercase().contains("reset"),
+            "the sweep logs this error; it must carry the transport failure, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn ping_probe_rejects_undecodable_replies() {
+        // redis's String decode accepts Int/Double/etc., so only replies that
+        // carry no decodable text (Nil) fail the probe.
+        let mut con = FakeRedisConnection { reply: Ok(RedisRawValue::Nil) };
+        assert!(super::ping(&mut con).await.is_err(), "a reply PING cannot decode is not a healthy session");
     }
 }
