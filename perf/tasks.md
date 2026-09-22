@@ -57,7 +57,7 @@
 | T36 | getSqlCompletionResultValidFor 落地 | improvement-plan §4 C7-2 | S | ✅ ad03e069 |
 | T37 | prefers-reduced-motion 支持 | improvement-plan §6 E9-1 | S | ✅ a92296bb |
 | T38 | 启动阶段 performance.mark | improvement-plan §6 E9-2 | S | ✅ f158bc2b |
-| T39 | QueryEditor 异步组件化 | improvement-plan §6 E9-3 | S | ⬜ |
+| T39 | QueryEditor 异步组件化 | improvement-plan §6 E9-3 | S | ✅ cfb367b9 |
 | T40 | 列固定 + 拖拽排序 | improvement-plan §6 E7-2 | M | ⬜ |
 | T41 | 侧栏拖表/列入编辑器 | improvement-plan §6 E7-3 | M | ⬜ |
 | T42 | 最终 SQL 结构化输出 | improvement-plan §5 D9 | M | ⬜ |
@@ -449,13 +449,14 @@
   - [x] 无残留 ad-hoc console 计时（main.ts/App.vue 的 8 处 `[STARTUP]` console 里程碑与 2 处 `console.log(performance.now())` 计时全部删除，信息（里程碑+耗时）由 12 个 `startup:*` 标记与摘要承载；启动失败 `console.error` 路径保留；DataGrid/ContentArea/TreeItem 运行期网格诊断日志非启动计时，不动。源码契约测试锁定：启动文件无 `console.log`+`performance.now()` 同行模式、无 `[STARTUP]` console 残留）
 - **实现说明**：新增框架无关 `lib/startupMarks.ts`（无 performance API 时 `Date.now()` 兜底、mark 发射尽力而为，测试环境安全）。阶段清单（12）：`bootstrap-begin → modules-loaded → locale-ready → app-created → on-mounted-begin → theme-applied → init-app-begin → on-mounted-sync-done → vue-mounted → first-frame`（onMounted 系列在 `app.mount()` 内先于 vue-mounted 触发，摘要按真实时间序呈现）+ 异步尾 `saved-sql-loaded → connections-loaded`（initFromDisk 三读并发，`connections-loaded` 后触发完整摘要 flush）。debugLog 仅新增 `onDebugLoggingEnabled` 监听注册（`setDebugLoggingEnabled(true)` 时通知），无循环依赖。测试：`packages/app-tests/startupMarks.test.ts` 10 例——mark 工具单测（stub performance API：时钟/步进/真实 mark 发射/幂等 first-wins/缺 API 降级/摘要格式/空 flush）、flush 行为断言（导出文本含摘要并落 localStorage；关→开后经钩子恰好落一次、重复开关不重复；迟到处标记产出一条更新后的完整摘要）、源码契约（启动文件无 ad-hoc 计时模式、12 阶段全部接线、两处 flush 触发点、debugLog 钩子与 appendDebugLog 接线在位）。`pnpm check` 全绿（format + lint + typecheck + vitest 180 文件 1346 用例）。
 
-### T39 QueryEditor 异步组件化 ⬜
+### T39 QueryEditor 异步组件化 ✅ cfb367b9
 
 - **来源** improvement-plan-2026-09.md §6 E9 第 3 项（Track E）· **规模** S
 - **内容** CodeMirror 经 `App.vue → ContentArea.vue → QueryEditor.vue:17` 启动即加载。`QueryEditor` 包 `defineAsyncComponent`（对齐 DataGrid 模式）。
 - **验收**
-  - [ ] 纯浏览会话首屏 chunk 不含 CodeMirror（构建产物对比记录）
-  - [ ] 编辑器打开与功能不回退
+  - [x] 纯浏览会话首屏 chunk 不含 CodeMirror（`pnpm build` 产物对比：首屏 chunk 闭包（index + App + i18n 入口及其全部传递静态依赖，构建产物图 BFS 实测）1720.4 kB → 1169.4 kB raw（543.0 → 368.6 kB gzip，-32%）；CodeMirror chunk 486.50 kB / gzip 155.91 kB 与 QueryEditor chunk 均只剩独立异步 chunk，从启动入口静态不可达。副作用一并消除：editorThemes chunk 此前因 QueryEditor 静态在环而被并入启动共享组（其 `lib/editorThemes.ts` 静态 import `@codemirror/language`），拆分后缩为 11.91 kB 纯样式主题 chunk）
+  - [x] 编辑器打开与功能不回退（`pnpm check` 全绿：format + lint + typecheck + vitest 181 文件 / 1351 用例；props/events 对 `defineAsyncComponent` 透明，模板未动；defineExpose 的 `openSearch`/`openReplace`/`scrollCursorIntoView` 由源码契约测试锁定接线；GUI 交互手工验证本环境不可行，以构建 + 类型检查 + 契约测试佐证）
+- **实现说明**：新增 `components/editor/queryEditorAsync.ts`——`defineAsyncComponent({ loader, loadingComponent })` 包装 `QueryEditor.vue`，对齐 ContentArea 既有 DataGrid 模式：`loadQueryEditorComponent()` 记忆化动态 import（并发挂载共享一次加载，附 `[DBX][QueryEditor:load:start/done]` 耗时日志），loading 占位为等面积 Loader2 旋转骨架（异步组件默认 200ms delay，本地快速加载不闪现，慢加载不塌陷/不跳动布局）。静态引用点两处全部改造：`ContentArea.vue:28` 与 `ObjectBrowser.vue:82`（对象侧源码查看/编辑）。ref 方法处理：`defineAsyncComponent` 对 props/events 透明但对实例 ref 不透明，`queryEditorRef` 由 `InstanceType<typeof QueryEditor>` 改为显式 `QueryEditorHandle`（镜像 DataGridHandle 先例）；三个调用点（`focusSearch`→`openSearch`、`handleModRTarget`→`openReplace`、执行结束 watch→`scrollCursorIntoView`）均已 `?.` 优雅降级——`openSearch` 在加载窗口内回落侧栏搜索（与今日非 query 模式行为一致），`openReplace` 仅可由编辑器自身 DOM（`[data-query-editor-root]`）触发、天然后置于加载完成。刻意不加 DataGrid 式 idle 预载：纯浏览会话不应拉取编辑器 chunk。防回退：`packages/app-tests/queryEditorAsync.test.ts` 5 例源码契约——包装器为记忆化动态 import 且自身无 `@codemirror`/静态 import；两个引用点无静态 `QueryEditor.vue` import 且经包装器挂载；defineExpose 清单与 handle 类型、三调用点接线在位。
 
 ### T40 列固定 + 拖拽排序 ⬜
 
