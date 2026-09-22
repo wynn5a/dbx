@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
     Expr, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr, Ident, JoinConstraint, JoinOperator,
-    ObjectName, ObjectNamePart, OrderByKind, Query, Select, SelectItem, SetExpr, Statement, TableFactor,
+    ObjectName, ObjectNamePart, OrderByKind, Query, Select, SelectItem, SetExpr, Statement, TableAlias, TableFactor,
     TableWithJoins,
 };
 use sqlparser::dialect::{
@@ -16,6 +16,14 @@ use crate::sql::{starts_with_duckdb_result_sql_keyword, starts_with_executable_s
 pub struct SqlReferenceAnalysis {
     pub tables: Vec<SqlTableReference>,
     pub columns: Vec<SqlColumnReference>,
+    /// Select-list aliases (`SELECT x AS name`): identifiers visible in the
+    /// result scope that are not schema columns. Consumers gating semantic
+    /// diagnostics on the schema must not flag them as unknown columns.
+    pub select_aliases: Vec<String>,
+    /// Column names from table-alias column lists
+    /// (`FROM generate_series(1,3) AS g(n)`, `UNNEST(...) AS u(tag)`): the
+    /// same "visible but not a schema column" class as `select_aliases`.
+    pub alias_columns: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,12 +64,19 @@ impl From<Span> for SqlTextSpan {
 struct Analyzer {
     tables: Vec<SqlTableReference>,
     columns: Vec<SqlColumnReference>,
+    select_aliases: Vec<String>,
+    alias_columns: Vec<String>,
 }
 
 pub fn analyze_sql_references(sql: &str, dialect: Option<&str>) -> Result<SqlReferenceAnalysis, String> {
     let normalized_dialect = normalize_dialect(dialect);
     if normalized_dialect == "duckdb" && starts_with_duckdb_parser_gap_sql(sql) {
-        return Ok(SqlReferenceAnalysis { tables: vec![], columns: vec![] });
+        return Ok(SqlReferenceAnalysis {
+            tables: vec![],
+            columns: vec![],
+            select_aliases: vec![],
+            alias_columns: vec![],
+        });
     }
 
     let statements = match normalized_dialect.as_str() {
@@ -83,7 +98,12 @@ pub fn analyze_sql_references(sql: &str, dialect: Option<&str>) -> Result<SqlRef
         analyzer.visit_statement(&statement);
     }
 
-    Ok(SqlReferenceAnalysis { tables: analyzer.tables, columns: analyzer.columns })
+    Ok(SqlReferenceAnalysis {
+        tables: analyzer.tables,
+        columns: analyzer.columns,
+        select_aliases: analyzer.select_aliases,
+        alias_columns: analyzer.alias_columns,
+    })
 }
 
 fn starts_with_duckdb_parser_gap_sql(sql: &str) -> bool {
@@ -150,9 +170,17 @@ impl Analyzer {
 
         for item in &select.projection {
             match item {
-                SelectItem::UnnamedExpr(expr)
-                | SelectItem::ExprWithAlias { expr, .. }
-                | SelectItem::ExprWithAliases { expr, .. } => self.visit_expr(expr),
+                SelectItem::UnnamedExpr(expr) => self.visit_expr(expr),
+                SelectItem::ExprWithAlias { expr, alias } => {
+                    self.visit_expr(expr);
+                    self.select_aliases.push(alias.value.clone());
+                }
+                SelectItem::ExprWithAliases { expr, aliases } => {
+                    self.visit_expr(expr);
+                    for alias in aliases {
+                        self.select_aliases.push(alias.value.clone());
+                    }
+                }
                 _ => {}
             }
         }
@@ -235,26 +263,45 @@ impl Analyzer {
     fn visit_table_factor(&mut self, factor: &TableFactor) {
         match factor {
             TableFactor::Table { name, alias, args, .. } => {
+                self.push_alias_columns(alias.as_ref());
                 if args.is_none() {
                     if let Some(table) = table_reference_from_name(name, alias.as_ref().map(|a| a.name.value.clone())) {
                         self.tables.push(table);
                     }
                 }
             }
-            TableFactor::Derived { subquery, .. } => self.visit_query(subquery),
+            TableFactor::Derived { subquery, alias, .. } => {
+                self.push_alias_columns(alias.as_ref());
+                self.visit_query(subquery);
+            }
             TableFactor::NestedJoin { table_with_joins, .. } => self.visit_table_with_joins(table_with_joins),
-            TableFactor::TableFunction { expr, .. } => self.visit_expr(expr),
-            TableFactor::Function { args, .. } => {
+            TableFactor::TableFunction { expr, alias, .. } => {
+                self.push_alias_columns(alias.as_ref());
+                self.visit_expr(expr);
+            }
+            TableFactor::Function { args, alias, .. } => {
+                self.push_alias_columns(alias.as_ref());
                 for arg in args {
                     self.visit_function_arg(arg);
                 }
             }
-            TableFactor::UNNEST { array_exprs, .. } => {
+            TableFactor::UNNEST { array_exprs, alias, .. } => {
+                self.push_alias_columns(alias.as_ref());
                 for expr in array_exprs {
                     self.visit_expr(expr);
                 }
             }
             _ => {}
+        }
+    }
+
+    // `FROM t AS t(a, b)`-style column lists expose names that are not schema
+    // columns; record them so confidence-gated consumers can skip them.
+    fn push_alias_columns(&mut self, alias: Option<&TableAlias>) {
+        if let Some(alias) = alias {
+            for column in &alias.columns {
+                self.alias_columns.push(column.name.value.clone());
+            }
         }
     }
 
@@ -389,7 +436,9 @@ impl Analyzer {
 fn table_reference_from_name(name: &ObjectName, alias: Option<String>) -> Option<SqlTableReference> {
     let parts: Vec<&Ident> = name.0.iter().filter_map(ObjectNamePart::as_ident).collect();
     let table = parts.last()?;
-    let schema = parts.get(parts.len().saturating_sub(2)).map(|ident| ident.value.clone());
+    // `schema.table` and `db.schema.table` carry a schema; a bare table name
+    // must not leak its own name into the schema slot.
+    let schema = parts.len().checked_sub(2).and_then(|index| parts.get(index)).map(|ident| ident.value.clone());
 
     Some(SqlTableReference { name: table.value.clone(), schema, alias, span: table.span.into() })
 }

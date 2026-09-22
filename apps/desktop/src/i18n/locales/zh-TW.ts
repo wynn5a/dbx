@@ -376,6 +376,9 @@ export default {
       close: "關閉 (Esc)",
       noResults: "無結果",
     },
+    diagnostics: {
+      unknownColumn: "資表 “{table}” 中不存在欄位 “{column}”",
+    },
   },
   tabs: {
     etcd: "etcd",

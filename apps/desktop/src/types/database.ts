@@ -304,6 +304,10 @@ export interface SqlColumnReference {
 export interface SqlReferenceAnalysis {
   tables: SqlTableReference[];
   columns: SqlColumnReference[];
+  /** Select-list aliases (`SELECT x AS name`): visible in scope, not schema columns. */
+  select_aliases: string[];
+  /** Table-alias column lists (`FROM t AS t(a, b)`): same class as select_aliases. */
+  alias_columns: string[];
 }
 
 export type TreeNodeType =

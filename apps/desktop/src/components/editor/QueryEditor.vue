@@ -79,6 +79,7 @@ import {
   shouldRunSqlSemanticDiagnostics,
   type SqlSemanticDiagnostic,
 } from "@/lib/sqlSemanticDiagnostics";
+import { buildUnknownColumnDiagnostics, type SqlTableResolution } from "@/lib/sqlUnknownColumns";
 import type {
   SqlCompletionColumn,
   SqlCompletionForeignKey,
@@ -502,6 +503,47 @@ async function ensureColumnsForTable(table: { name: string; schema?: string | nu
   cachedColumnsByTable.set(cacheKey, columns);
 }
 
+// Confidence for the unknown-column gate: a reference resolves only when the
+// loaded schema listing contains exactly one table with that name (and schema,
+// when qualified) and that table's full column list is in the completion cache.
+// Zero matches (unloaded/cross-database names), several matches (same name in
+// multiple schemas) and a missing column cache all refuse to vouch — the gate
+// then emits no diagnostics at all instead of risking false positives.
+async function resolveColumnDiagnosticTable(tableRef: {
+  name: string;
+  schema?: string | null;
+}): Promise<SqlTableResolution> {
+  if (!props.connectionId || props.database == null) return { status: "unresolved" };
+  // The unfiltered, uncapped listing is the completeness guarantee behind the
+  // uniqueness check: it is served from the cached superset (B2) after the
+  // first load, and matches are compared client-side with exact names.
+  const listing = await connectionStore.listCompletionTables(
+    props.connectionId,
+    props.database,
+    "",
+    undefined,
+    tableRef.schema ?? undefined,
+  );
+  const refName = tableRef.name.toLowerCase();
+  const refSchema = tableRef.schema?.toLowerCase() ?? null;
+  const matches = listing.filter((table) => {
+    if (table.name.toLowerCase() !== refName) return false;
+    return refSchema == null || (table.schema ?? "").toLowerCase() === refSchema;
+  });
+  if (matches.length === 0) return { status: "unresolved" };
+  if (matches.length > 1) return { status: "ambiguous" };
+  const matched = matches[0];
+  const schema = matched.schema ?? tableRef.schema ?? undefined;
+  const cacheKey = completionCacheKey({ name: matched.name, schema });
+  let columns = cachedColumnsByTable.get(cacheKey);
+  if (!columns || columns.length === 0) {
+    await ensureColumnsForTable({ name: matched.name, schema });
+    columns = cachedColumnsByTable.get(cacheKey);
+  }
+  if (!columns || columns.length === 0) return { status: "unresolved" };
+  return { status: "resolved", schema, columns: columns.map((column) => column.name) };
+}
+
 // A bare `from destinations` reference carries no schema, but its columns get
 // fetched and cached under the resolved schema (e.g. `public.destinations`).
 // Completion resolves that schema before loading columns; hover must do the
@@ -817,16 +859,24 @@ async function refreshSemanticDiagnostics() {
 
   try {
     // Parse the SQL so genuine syntax errors still surface as diagnostics.
-    // Semantic "unknown column" warnings are intentionally disabled for all
-    // databases: the editor's schema view is often incomplete (aliases,
-    // computed columns, cross-schema refs), producing false positives on SQL
-    // that runs fine.
+    // Semantic "unknown column" warnings run confidence-gated: they are only
+    // emitted when every referenced table resolves to exactly one table in the
+    // loaded schema listing and that table's full column list is loaded.
+    // Otherwise the editor's partial schema view (unloaded tables, aliases,
+    // computed columns, cross-schema refs) would flag SQL that runs fine, so
+    // the gate drops the whole batch instead.
     // The editor dialect uses the shared mapping in the backend's vocabulary
     // (duckdb/clickhouse/oracle included), so prefer it over the sql-formatter
     // dialect, whose vocabulary is limited to the formatter's languages.
-    await api.analyzeSqlReferences(sql, props.dialect ?? props.formatDialect ?? "generic");
+    const analysis = await api.analyzeSqlReferences(sql, props.dialect ?? props.formatDialect ?? "generic");
     if (runId !== semanticDiagnosticRunId) return;
-    setSemanticDiagnostics([]);
+    const unknownColumns = await buildUnknownColumnDiagnostics(analysis, {
+      cteNames: extractCteDefinitions(sql).map((cte) => cte.name),
+      resolveTable: (tableRef) => resolveColumnDiagnosticTable(tableRef),
+      formatMessage: (column, table) => t("editor.diagnostics.unknownColumn", { column, table }),
+    });
+    if (runId !== semanticDiagnosticRunId) return;
+    setSemanticDiagnostics(unknownColumns);
   } catch (error) {
     if (runId === semanticDiagnosticRunId) {
       const diagnostic = buildSqlParserErrorDiagnostic(error, sql);

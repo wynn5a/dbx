@@ -376,6 +376,9 @@ export default {
       close: "关闭 (Esc)",
       noResults: "无结果",
     },
+    diagnostics: {
+      unknownColumn: "表 “{table}” 中不存在列 “{column}”",
+    },
   },
   tabs: {
     sql: "SQL",

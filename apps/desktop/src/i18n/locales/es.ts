@@ -382,6 +382,9 @@ export default {
       close: "Cerrar (Esc)",
       noResults: "Sin resultados",
     },
+    diagnostics: {
+      unknownColumn: 'La columna "{column}" no existe en "{table}"',
+    },
   },
   tabs: {
     etcd: "etcd",

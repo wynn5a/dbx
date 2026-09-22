@@ -383,6 +383,9 @@ export default {
       close: "Close (Esc)",
       noResults: "No results",
     },
+    diagnostics: {
+      unknownColumn: 'Unknown column "{column}" in "{table}"',
+    },
   },
   tabs: {
     sql: "SQL",
