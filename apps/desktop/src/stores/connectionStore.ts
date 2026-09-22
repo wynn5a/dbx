@@ -182,7 +182,13 @@ export const useConnectionStore = defineStore("connection", () => {
   const connectionErrors = ref<Record<string, string>>({});
   const editingConnectionId = ref<string | null>(null);
   const newConnectionGroupId = ref<string | null>(null);
-  const completionTablesCache = ref<Record<string, SqlCompletionTable[]>>({});
+  // Unfiltered (schema, limit) table listings for completion (B2). The cache
+  // key carries the scope + limit but never the typed filter, so keystrokes are
+  // answered from one superset entry instead of growing the cache per key.
+  // `truncated` marks a listing capped at `limit` — the only case where a typed
+  // filter still repeats a server-side filtered call (a capped superset cannot
+  // prove it holds every match).
+  const completionTablesSupersetCache = ref<Record<string, { tables: SqlCompletionTable[]; truncated: boolean }>>({});
   const completionObjectsCache = ref<Record<string, SqlCompletionObject[]>>({});
   const completionColumnsCache = ref<Record<string, ColumnInfo[]>>({});
   // Unfiltered per-schema completion metadata (tables + routines), fetched with
@@ -806,8 +812,8 @@ export const useConnectionStore = defineStore("connection", () => {
   function invalidateCompletionCache(connectionId: string, database?: string) {
     const cachePrefix = database == null ? `${connectionId}:` : `${connectionId}:${database}:`;
     const exactCacheKey = database == null ? null : `${connectionId}:${database}`;
-    for (const key of Object.keys(completionTablesCache.value)) {
-      if (key === exactCacheKey || key.startsWith(cachePrefix)) delete completionTablesCache.value[key];
+    for (const key of Object.keys(completionTablesSupersetCache.value)) {
+      if (key === exactCacheKey || key.startsWith(cachePrefix)) delete completionTablesSupersetCache.value[key];
     }
     for (const key of Object.keys(completionObjectsCache.value)) {
       if (key === exactCacheKey || key.startsWith(cachePrefix)) delete completionObjectsCache.value[key];
@@ -2318,43 +2324,137 @@ export const useConnectionStore = defineStore("connection", () => {
   }
 
   /**
-   * All-schemas table listing via the bulk metadata fetch (B1). The bulk result
-   * is unfiltered, so the typed filter is applied here with exactly the
-   * backend's `contains` semantics (including the relaxed two-character retry);
-   * server-side per-schema filtering would return the same rows.
+   * Unfiltered (schema, capped) table listing for completion (B2), cached per
+   * scope. The cache key never contains the typed filter, so one entry serves
+   * every keystroke. Schema-aware databases without a pinned schema read the
+   * bulk metadata (B1) — a complete listing, never truncated. Anything else is
+   * a single unfiltered `list_tables` call capped at the expanded limit
+   * (`expandedCompletionLimit`, the same bound the relaxed retry uses);
+   * `truncated` marks that matches may exist beyond that cap.
    */
-  async function loadAllSchemaCompletionTables(
+  async function loadCompletionTablesSuperset(
     connectionId: string,
     database: string,
-    cacheKey: string,
-    normalizedFilter: string,
-    relaxedFilter: string | undefined,
-    limit?: number,
-  ): Promise<SqlCompletionTable[]> {
-    const groups = await loadCompletionMetadataGroups(connectionId, database);
-    let allTables: SqlCompletionTable[] = [];
-    for (const group of groups) {
-      const mapped = group.tables.map((table) => ({
-        name: table.name,
-        schema: group.schema,
-        type: table.table_type === "VIEW" ? ("view" as const) : ("table" as const),
-      }));
-      indexCompletionTables(connectionId, database, undefined, mapped);
-      allTables = allTables.concat(mapped);
-    }
-    let tables = normalizedFilter
-      ? allTables.filter((table) => table.name.toLowerCase().includes(normalizedFilter))
-      : allTables;
-    if (tables.length === 0 && relaxedFilter) {
-      tables = allTables.filter((table) => table.name.toLowerCase().includes(relaxedFilter));
-    }
-    const limitedTables = limit ? dedupeCompletionTables(tables).slice(0, limit) : tables;
-    completionTablesCache.value[cacheKey] = limitedTables;
-    indexCompletionTables(connectionId, database, undefined, completionTablesCache.value[cacheKey]);
-    evictOldestCacheEntries(completionTablesCache.value, COMPLETION_CACHE_MAX);
-    return completionTablesCache.value[cacheKey];
+    schema: string | undefined,
+    limit: number | undefined,
+  ): Promise<{ tables: SqlCompletionTable[]; truncated: boolean }> {
+    const supersetLimit = expandedCompletionLimit(limit);
+    const cacheKey = `${connectionId}:${database}:${schema ?? ""}:${supersetLimit ?? ""}`;
+    const cached = completionTablesSupersetCache.value[cacheKey];
+    if (cached) return cached;
+    return withCompletionInFlight(`${cacheKey}:superset`, async () => {
+      const cached = completionTablesSupersetCache.value[cacheKey];
+      if (cached) return cached;
+      await ensureConnected(connectionId);
+      const schemaAware = isSchemaAwareDatabase(connectionId);
+      let tables: SqlCompletionTable[];
+      let truncated: boolean;
+      if (schemaAware && !schema) {
+        const groups = await loadCompletionMetadataGroups(connectionId, database);
+        tables = groups.flatMap((group) =>
+          group.tables.map((table) => ({
+            name: table.name,
+            schema: group.schema,
+            type: table.table_type === "VIEW" ? ("view" as const) : ("table" as const),
+          })),
+        );
+        // The bulk metadata is the complete listing — never truncated, no
+        // matter how it compares to the cap.
+        truncated = false;
+      } else {
+        // Schema-aware listings take the pinned schema; single-database
+        // engines always list under the database itself (as before).
+        const scope = schemaAware && schema ? schema : database;
+        const listed = await api.listTables(connectionId, database, scope, undefined, supersetLimit);
+        tables = listed.map((table) => {
+          const mapped: SqlCompletionTable = {
+            name: table.name,
+            type: table.table_type === "VIEW" ? ("view" as const) : ("table" as const),
+          };
+          if (schemaAware) mapped.schema = scope;
+          return mapped;
+        });
+        truncated = supersetLimit != null && tables.length >= supersetLimit;
+      }
+      const superset = { tables, truncated };
+      completionTablesSupersetCache.value[cacheKey] = superset;
+      indexCompletionTables(connectionId, database, schema, superset.tables);
+      evictOldestCacheEntries(completionTablesSupersetCache.value, COMPLETION_CACHE_MAX);
+      return superset;
+    });
   }
 
+  /**
+   * Client-side mirror of the backend's table filtering (`filter_table_infos`):
+   * case-insensitive `contains` on the name, listing order preserved, cap
+   * applied last; a zero-match strict filter retries with the relaxed
+   * two-character filter exactly like the server round-trip did.
+   */
+  function filterCompletionTablesFromSuperset(
+    superset: SqlCompletionTable[],
+    normalizedFilter: string,
+    relaxedFilter: string | undefined,
+    limit: number | undefined,
+    dedupe: boolean,
+  ): SqlCompletionTable[] {
+    let tables = normalizedFilter
+      ? superset.filter((table) => table.name.toLowerCase().includes(normalizedFilter))
+      : superset;
+    if (tables.length === 0 && relaxedFilter) {
+      tables = superset.filter((table) => table.name.toLowerCase().includes(relaxedFilter));
+    }
+    if (!limit) return tables;
+    if (dedupe) tables = dedupeCompletionTables(tables);
+    return tables.slice(0, limit);
+  }
+
+  /**
+   * Server-side filtered listing, repeated only when the cached superset was
+   * capped at `limit` and a filter is typed (B2): matches may live beyond the
+   * cap, so only the backend can produce the exact top-N. Same per-path
+   * semantics as before (schema-aware tables carry their schema and dedupe;
+   * single-database engines return the raw listing).
+   */
+  async function listFilteredCompletionTablesFromServer(
+    connectionId: string,
+    database: string,
+    schema: string | undefined,
+    normalizedFilter: string,
+    relaxedFilter: string | undefined,
+    limit: number | undefined,
+  ): Promise<SqlCompletionTable[]> {
+    await ensureConnected(connectionId);
+    const schemaAware = isSchemaAwareDatabase(connectionId);
+    const scope = schemaAware && schema ? schema : database;
+    const toCompletionTables = (tables: Awaited<ReturnType<typeof api.listTables>>) =>
+      tables.map((table) => {
+        const mapped: SqlCompletionTable = {
+          name: table.name,
+          type: table.table_type === "VIEW" ? ("view" as const) : ("table" as const),
+        };
+        if (schemaAware) mapped.schema = scope;
+        return mapped;
+      });
+    let results = toCompletionTables(await api.listTables(connectionId, database, scope, normalizedFilter, limit));
+    if (results.length === 0 && relaxedFilter) {
+      results = toCompletionTables(
+        await api.listTables(connectionId, database, scope, relaxedFilter, expandedCompletionLimit(limit)),
+      );
+    }
+    indexCompletionTables(connectionId, database, schema, results);
+    if (limit) {
+      const deduped = schemaAware ? dedupeCompletionTables(results) : results;
+      return deduped.slice(0, limit);
+    }
+    return results;
+  }
+
+  /**
+   * Completion table listing (B2): one cached unfiltered (schema, capped)
+   * superset per scope, filtered and capped client-side with the backend's
+   * exact semantics. Only a capped superset with a typed filter — matches may
+   * exist beyond the cap — repeats a server-side filtered listing.
+   */
   async function listCompletionTables(
     connectionId: string,
     database: string,
@@ -2364,127 +2464,26 @@ export const useConnectionStore = defineStore("connection", () => {
   ): Promise<SqlCompletionTable[]> {
     const normalizedFilter = filter.trim().toLowerCase();
     const relaxedFilter = relaxedCompletionTableFilter(normalizedFilter);
-    const cacheKey = `${connectionId}:${database}:${normalizedFilter}:${limit ?? ""}:${schema ?? ""}`;
-    if (completionTablesCache.value[cacheKey]) {
-      return completionTablesCache.value[cacheKey];
+    const superset = await loadCompletionTablesSuperset(connectionId, database, schema, limit);
+
+    // Complete superset (or no typed filter): the client-side contains filter
+    // over the listing equals the backend's filtered + capped result, so
+    // keystrokes never re-invoke.
+    if (!superset.truncated || !normalizedFilter) {
+      return filterCompletionTablesFromSuperset(
+        superset.tables,
+        normalizedFilter,
+        relaxedFilter,
+        limit,
+        isSchemaAwareDatabase(connectionId),
+      );
     }
 
-    return withCompletionInFlight(`${cacheKey}:tables`, async () => {
-      await ensureConnected(connectionId);
-
-      if (isSchemaAwareDatabase(connectionId)) {
-        // No explicit schema: load every schema's tables with one bulk invoke
-        // (B1) instead of one `listTables` call per schema.
-        if (!schema) {
-          return await loadAllSchemaCompletionTables(
-            connectionId,
-            database,
-            cacheKey,
-            normalizedFilter,
-            relaxedFilter,
-            limit,
-          );
-        }
-
-        // An explicit schema was requested: a single targeted call per schema
-        // beats pulling the whole database's metadata for one hover.
-        const schemas = [schema];
-        if (normalizedFilter || limit) {
-          const batchSize = 5;
-          const results: SqlCompletionTable[] = [];
-          const maxResults = limit ?? Infinity;
-          for (let i = 0; i < schemas.length && results.length < maxResults; i += batchSize) {
-            const batch = schemas.slice(i, i + batchSize);
-            const batchResults = await Promise.all(
-              batch.map(async (s) => {
-                try {
-                  const tables = await api.listTables(connectionId, database, s, normalizedFilter, limit);
-                  return tables.map((table) => ({
-                    name: table.name,
-                    schema: s,
-                    type: table.table_type === "VIEW" ? ("view" as const) : ("table" as const),
-                  })) as SqlCompletionTable[];
-                } catch {
-                  return [] as SqlCompletionTable[];
-                }
-              }),
-            );
-            for (const group of batchResults) {
-              results.push(...group);
-              indexCompletionTables(connectionId, database, undefined, group);
-            }
-          }
-          if (results.length === 0 && relaxedFilter) {
-            for (let i = 0; i < schemas.length && results.length < maxResults; i += batchSize) {
-              const batch = schemas.slice(i, i + batchSize);
-              const batchResults = await Promise.all(
-                batch.map(async (s) => {
-                  try {
-                    const tables = await api.listTables(
-                      connectionId,
-                      database,
-                      s,
-                      relaxedFilter,
-                      expandedCompletionLimit(limit),
-                    );
-                    return tables.map((table) => ({
-                      name: table.name,
-                      schema: s,
-                      type: table.table_type === "VIEW" ? ("view" as const) : ("table" as const),
-                    })) as SqlCompletionTable[];
-                  } catch {
-                    return [] as SqlCompletionTable[];
-                  }
-                }),
-              );
-              for (const group of batchResults) {
-                results.push(...group);
-                indexCompletionTables(connectionId, database, undefined, group);
-              }
-            }
-          }
-          const limitedTables = limit ? dedupeCompletionTables(results).slice(0, limit) : results;
-          completionTablesCache.value[cacheKey] = limitedTables;
-          indexCompletionTables(connectionId, database, schema, limitedTables);
-          evictOldestCacheEntries(completionTablesCache.value, COMPLETION_CACHE_MAX);
-          return completionTablesCache.value[cacheKey];
-        }
-
-        const tableGroups = await Promise.all(
-          schemas.map(async (schema) => {
-            try {
-              const tables = await api.listTables(connectionId, database, schema);
-              return tables.map((table) => ({
-                name: table.name,
-                schema,
-                type: table.table_type === "VIEW" ? ("view" as const) : ("table" as const),
-              }));
-            } catch {
-              return [];
-            }
-          }),
-        );
-        completionTablesCache.value[cacheKey] = tableGroups.flat();
-        indexCompletionTables(connectionId, database, schema, completionTablesCache.value[cacheKey]);
-        evictOldestCacheEntries(completionTablesCache.value, COMPLETION_CACHE_MAX);
-        return completionTablesCache.value[cacheKey];
-      }
-
-      let tables = await api.listTables(connectionId, database, database, normalizedFilter, limit);
-      if (tables.length === 0 && relaxedFilter) {
-        tables = await api.listTables(connectionId, database, database, relaxedFilter, expandedCompletionLimit(limit));
-      }
-      completionTablesCache.value[cacheKey] = tables.map((table) => ({
-        name: table.name,
-        type: table.table_type === "VIEW" ? ("view" as const) : ("table" as const),
-      }));
-      completionTablesCache.value[cacheKey] = limit
-        ? completionTablesCache.value[cacheKey].slice(0, limit)
-        : completionTablesCache.value[cacheKey];
-      indexCompletionTables(connectionId, database, schema, completionTablesCache.value[cacheKey]);
-      evictOldestCacheEntries(completionTablesCache.value, COMPLETION_CACHE_MAX);
-      return completionTablesCache.value[cacheKey];
-    });
+    return withCompletionInFlight(
+      `${connectionId}:${database}:${schema ?? ""}:${limit ?? ""}:${normalizedFilter}:filtered`,
+      () =>
+        listFilteredCompletionTablesFromServer(connectionId, database, schema, normalizedFilter, relaxedFilter, limit),
+    );
   }
 
   function relaxedCompletionTableFilter(filter: string): string | undefined {
