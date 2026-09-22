@@ -24,7 +24,7 @@
 | T03 | SQL Server 连接池 | improvement-plan §2 A2 | M | ✅ b523ab5a |
 | T04 | 网格保存先展示 SQL | improvement-plan §6 E1 | M | ✅ 0dacdb2a |
 | T05 | 补全上下文剥离注释 | improvement-plan §4 C1 | M | ✅ fc95f900 |
-| T06 | MySQL/SQL Server 标识符引号 | improvement-plan §4 C2 | S | ⬜ |
+| T06 | MySQL/SQL Server 标识符引号 | improvement-plan §4 C2 | S | ✅ db20604b |
 | T07 | 前后端方言映射统一 | improvement-plan §4 C3 | M | ⬜ |
 | T08 | 一次 IPC 取全部 schema 表 | improvement-plan §3 B1 | M | ⬜ |
 | T09 | 补全缓存按超集缓存 | improvement-plan §3 B2 | M | ⬜ |
@@ -123,14 +123,15 @@
   - [x] `packages/app-tests/sqlCompletion*.test.ts` 全过，补全性能回归测试不劣化
 - **实现说明**：`getSqlCompletionContext` 入口一次 `stripSqlComments()`（私有、offset 保持）：`--` 行注释与 `/* */` 块注释体替换为等长空格（换行保留），分隔符 `--`/`/*`/块结束符保持可见，避免整行注释被当成空行而截断语句块；扫描时跳过 `'…'`/`"…"`/反引号（含 `''` 转义）与 PG dollar-quote（`$$…$$`、`$tag$…$tag$`，tag 首字符须为字母/下划线，`$1` 占位符不受影响）内的注释起始符。光标落在注释内时直接返回与空文档一致的中性上下文。测试加在 `sqlCompletion.context.test.ts`（9 例：行/块注释内中性、注释后代码上下文、跨注释行语句完整、注释表不进引用/语句类型、dollar-quote 体不误剥、字符串内 `--`/`/*` 不误剥、尾注释后引号限定符解析）；`pnpm check` 全绿（vitest 160 文件 1118 用例，含 sqlCompletionPerformance 回归）。
 
-### T06 MySQL/SQL Server 标识符引号 ⬜
+### T06 MySQL/SQL Server 标识符引号 ✅ db20604b
 
 - **来源** improvement-plan-2026-09.md §4 C2（Track C）· **规模** S
 - **内容** `quoteSqlIdentifier`（`sqlCompletion.ts:2080`）对非 Postgres 一律不加引号。增加 MySQL 反引号与 SQL Server `[...]` 分支，配各对方言保留字集合。
 - **验收**
-  - [ ] 测试：MySQL 保留字/特殊字符标识符插入反引号；SQL Server 插入 `[...]`；PG 行为不变；普通标识符不加引号
-  - [ ] 补全插入的标识符在对应方言语法合法
-  - [ ] sqlCompletion 测试全过
+  - [x] 测试：MySQL 保留字/特殊字符标识符插入反引号；SQL Server 插入 `[...]`；PG 行为不变；普通标识符不加引号
+  - [x] 补全插入的标识符在对应方言语法合法
+  - [x] sqlCompletion 测试全过
+- **实现说明**：`quoteSqlIdentifier` 改为按方言分支——postgres 保持原样（`"…"` + `""` 转义 + 小写正则 + 原关键字集）；新增 mysql 分支（反引号 + 反引号双写转义）与 sqlserver 分支（`[…]` + `]` 双写转义）。各方言配独立的"需要引号"判定：不匹配方言的普通标识符正则（MySQL `^[a-zA-Z_][a-zA-Z0-9_$]*$`、T-SQL `^[a-zA-Z_][a-zA-Z0-9_@$#]*$`）或命中对方言保留字集合（MySQL 8.0 保留字表 / T-SQL 保留关键字表，大小写不敏感比较）时才加引号，非保留字普通标识符在所有方言下仍裸插入。测试加在 `sqlCompletion.test.ts`（7 例：MySQL 保留字/特殊字符/反引号转义的表与列、SQL Server 保留字/特殊字符/`]` 转义的表、两侧普通标识符不引、`user` 一词跨 PG/MySQL/SQL Server 的方言差分契约）；`pnpm check` 全绿（vitest 160 文件 1124 用例）。
 
 ### T07 前后端方言映射统一 ⬜
 
