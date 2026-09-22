@@ -1935,7 +1935,11 @@ onMounted(async () => {
       // signature card: both are opaque body-mounted tooltips and otherwise stack
       // and visually collide when the cursor sits inside a call that's being hovered.
       if (hasHoverTooltips(state)) return null;
-      const signature = getSqlFunctionSignatureHelp(state.doc.toString(), state.selection.main.head);
+      const signature = getSqlFunctionSignatureHelp(
+        state.doc.toString(),
+        state.selection.main.head,
+        props.databaseType,
+      );
       if (!signature) return null;
       return {
         pos: state.selection.main.head,
