@@ -198,6 +198,135 @@ test("leaves safe PostgreSQL column identifiers unquoted when completion inserts
   assert.equal(column?.apply, "article");
 });
 
+const dialectQuotedTables: SqlCompletionTable[] = [
+  { name: "archive", schema: "app", type: "table" },
+  { name: "user", schema: "app", type: "table" },
+  { name: "order", schema: "app", type: "table" },
+  { name: "user-list", schema: "app", type: "table" },
+  { name: "has`tick", schema: "app", type: "table" },
+  { name: "has]bracket", schema: "app", type: "table" },
+];
+
+const dialectQuotedColumnsByTable = new Map<string, SqlCompletionColumn[]>([
+  [
+    "app.archive",
+    [
+      { name: "id", table: "archive", schema: "app", dataType: "int" },
+      { name: "rank", table: "archive", schema: "app", dataType: "int" },
+      { name: "user-name", table: "archive", schema: "app", dataType: "varchar" },
+      { name: "has`tick", table: "archive", schema: "app", dataType: "varchar" },
+      { name: "has]bracket", table: "archive", schema: "app", dataType: "varchar" },
+    ],
+  ],
+]);
+
+test("quotes MySQL reserved-word and special-character table identifiers when completion inserts them", () => {
+  const reservedItems = buildSqlCompletionItems("select * from ord", "select * from ord".length, {
+    tables: dialectQuotedTables,
+    columnsByTable: new Map(),
+    dialect: "mysql",
+  });
+  const specialItems = buildSqlCompletionItems("select * from user", "select * from user".length, {
+    tables: dialectQuotedTables,
+    columnsByTable: new Map(),
+    dialect: "mysql",
+  });
+  const escapedItems = buildSqlCompletionItems("select * from has", "select * from has".length, {
+    tables: dialectQuotedTables,
+    columnsByTable: new Map(),
+    dialect: "mysql",
+  });
+
+  assert.equal(reservedItems.find((item) => item.label === "order")?.apply, "`order`");
+  assert.equal(specialItems.find((item) => item.label === "user-list")?.apply, "`user-list`");
+  assert.equal(escapedItems.find((item) => item.label === "has`tick")?.apply, "`has``tick`");
+});
+
+test("leaves plain MySQL table identifiers unquoted when completion inserts them", () => {
+  const sql = "select * from arc";
+  const items = buildSqlCompletionItems(sql, sql.length, {
+    tables: dialectQuotedTables,
+    columnsByTable: new Map(),
+    dialect: "mysql",
+  });
+
+  const table = items.find((item) => item.type === "table" && item.label === "archive");
+  assert.equal(table?.apply, "archive");
+});
+
+test("quotes MySQL column identifiers when completion inserts them", () => {
+  const build = (prefix: string) => {
+    const sql = `select ${prefix} from app.archive`;
+    return buildSqlCompletionItems(sql, `select ${prefix}`.length, {
+      tables: dialectQuotedTables,
+      columnsByTable: dialectQuotedColumnsByTable,
+      dialect: "mysql",
+    });
+  };
+
+  assert.equal(build("ran").find((item) => item.type === "column" && item.label === "rank")?.apply, "`rank`");
+  assert.equal(build("user").find((item) => item.type === "column" && item.label === "user-name")?.apply, "`user-name`");
+  assert.equal(build("has").find((item) => item.type === "column" && item.label === "has`tick")?.apply, "`has``tick`");
+  assert.equal(build("id").find((item) => item.type === "column" && item.label === "id")?.apply, "id");
+});
+
+test("quotes SQL Server reserved-word and special-character table identifiers when completion inserts them", () => {
+  const reservedItems = buildSqlCompletionItems("select * from ord", "select * from ord".length, {
+    tables: dialectQuotedTables,
+    columnsByTable: new Map(),
+    dialect: "sqlserver",
+  });
+  const reservedUserItems = buildSqlCompletionItems("select * from use", "select * from use".length, {
+    tables: dialectQuotedTables,
+    columnsByTable: new Map(),
+    dialect: "sqlserver",
+  });
+  const specialItems = buildSqlCompletionItems("select * from user", "select * from user".length, {
+    tables: dialectQuotedTables,
+    columnsByTable: new Map(),
+    dialect: "sqlserver",
+  });
+  const escapedItems = buildSqlCompletionItems("select * from has", "select * from has".length, {
+    tables: dialectQuotedTables,
+    columnsByTable: new Map(),
+    dialect: "sqlserver",
+  });
+
+  assert.equal(reservedItems.find((item) => item.label === "order")?.apply, "[order]");
+  assert.equal(reservedUserItems.find((item) => item.label === "user")?.apply, "[user]");
+  assert.equal(specialItems.find((item) => item.label === "user-list")?.apply, "[user-list]");
+  assert.equal(escapedItems.find((item) => item.label === "has]bracket")?.apply, "[has]]bracket]");
+});
+
+test("leaves plain SQL Server table identifiers unquoted when completion inserts them", () => {
+  const sql = "select * from arc";
+  const items = buildSqlCompletionItems(sql, sql.length, {
+    tables: dialectQuotedTables,
+    columnsByTable: new Map(),
+    dialect: "sqlserver",
+  });
+
+  const table = items.find((item) => item.type === "table" && item.label === "archive");
+  assert.equal(table?.apply, "archive");
+});
+
+test("keeps Postgres quoting independent of the MySQL and SQL Server identifier rules", () => {
+  const build = (dialect: "mysql" | "postgres" | "sqlserver") => {
+    const sql = "select * from use";
+    return buildSqlCompletionItems(sql, sql.length, {
+      tables: dialectQuotedTables,
+      columnsByTable: new Map(),
+      dialect,
+    });
+  };
+
+  assert.equal(build("postgres").find((item) => item.label === "user")?.apply, '"user"');
+  // `user` is a non-reserved keyword in MySQL, so it stays unquoted there.
+  assert.equal(build("mysql").find((item) => item.label === "user")?.apply, "user");
+  // ...but a T-SQL reserved keyword, so it gets brackets on SQL Server.
+  assert.equal(build("sqlserver").find((item) => item.label === "user")?.apply, "[user]");
+});
+
 test("suggests matching table names after FROM", () => {
   const sql = "select * from us";
   const items = buildSqlCompletionItems(sql, sql.length, {
