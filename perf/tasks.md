@@ -28,7 +28,7 @@
 | T07 | 前后端方言映射统一 | improvement-plan §4 C3 | M | ✅ fccd9dcd |
 | T08 | 一次 IPC 取全部 schema 表 | improvement-plan §3 B1 | M | ✅ 879d2673 |
 | T09 | 补全缓存按超集缓存 | improvement-plan §3 B2 | M | ✅ 4025a0cc |
-| T10 | Redis 自动重连 | improvement-plan §2 A3 | S | ⬜ |
+| T10 | Redis 自动重连 | improvement-plan §2 A3 | S | ✅ 4c8c98e2 |
 | T11 | 健康扫描覆盖全部驱动 | improvement-plan §2 A4 | S | ⬜ |
 | T12 | Agent 工具查询可取消可见 | improvement-plan §5 D2 | M | ⬜ |
 | T13 | 启动并行加载 + 加载态 | improvement-plan §3 B3 | S | ⬜ |
@@ -168,14 +168,15 @@
   - [x] 缓存条目不再随击键增长；sqlCompletion/store 测试全过
 - **实现说明**：T08 只消除了多 schema 路径的 IPC 扇出（`completionMetadataCache` 按 (connection, database) 缓存、击键不再触发新 invoke），但 `completionTablesCache` 的键仍含击键过滤（每键一条目、50 上限被冲刷），且显式 schema 路径与非 schema-aware 引擎（MySQL/SQLite/mongo/es 等）仍按击键服务端过滤逐键 invoke——三条路径本次一并落地：`completionTablesCache` 替换为 `completionTablesSupersetCache`，按 (connection, database, schema, expanded-limit) 缓存无过滤超集（键永不含过滤词；上限取 `expandedCompletionLimit(limit)`，与宽松重试同界，覆盖 limit=200 的编辑器调用与 limit=20 的引用查找）；未截断时 `filterCompletionTablesFromSuperset` 客户端过滤，逐字对齐后端 `filter_table_infos` 语义（大小写不敏感 contains、保持列举顺序、末尾截断、零命中时宽松两字符重试），因此与原服务端过滤字节一致（"前缀优先"排序属编辑器本地索引层 `lookupLocalCompletionTables` 的 `tableMatchScore`，不在 store 对照范围、未改动）；仅"超集被截断 + 有过滤词"（可能存在截断窗外的命中）回退服务端过滤（in-flight 合并、不落缓存），超大 schema 保持 B2 前行为。表索引（`indexCompletionTables`）从每击键移入超集装载，编辑器 `tableNarrowCache` 不再被逐键清空。superset 缓存纳入 `invalidateCompletionCache`。行为差异一处：显式 schema 路径的超集装载失败由"吞错返回空"改为向上抛（全部调用方本就有 catch，行为等效为不出现补全）。测试新增 `packages/app-tests/connectionStoreCompletionSuperset.test.ts` 5 例：显式 schema 与单库引擎的客户端过滤 == 服务端过滤对照（过滤词 × limit × 宽松重试）、`u`/`us`/`use` 每 scope 恰 1 次 `list_tables`、截断回退（4 表 + limit 1）锁回退结果与其 invoke 计数、25 个不同过滤词双计数器不动 + `updateConnection` 失效后恰重取 1 次；T08 既有 4 例不改全过。`pnpm check` 全绿（vitest 163 文件 1138 用例）；未动 Rust。
 
-### T10 Redis 自动重连 ⬜
+### T10 Redis 自动重连 ✅ 4c8c98e2
 
 - **来源** improvement-plan-2026-09.md §2 A3（Track A）· **规模** S
 - **内容** `redis_driver.rs:98` 包装的 `MultiplexedConnection` 永不重连。内层换 `redis::aio::ConnectionManager`（内置退避），Sentinel 同样处理；cluster 已自带重连保持现状。
 - **验收**
-  - [ ] 测试/手工：Redis 重启后下一命令自动成功，无需用户手动重连
-  - [ ] Sentinel 路径同样自动重连；cluster 行为不变
-  - [ ] 全量回归通过
+  - [x] 测试：Redis 重启后下一命令自动成功，无需用户手动重连（`tests/live_redis_reconnect.rs`，Docker 临时容器实测：重启后同一池第 2 条命令恢复，首条错误即触发重连的契约行为）
+  - [x] Sentinel 路径同样自动重连（同型 live 测试，单容器 master+sentinel 实测通过；重连拨向连接时已解析的 master 地址——master 漂移到新地址的 failover 仍需手动重连，代码注释如实标注）；cluster 行为不变（连接池仍是 redis cluster 自愈的 `ClusterConnection`，由 `redis_driver.rs` 源码契约单测锁定，不回退）
+  - [x] 全量回归通过（`cargo fmt --check` + dbx-core 837 过 + `cargo check --workspace --locked` 全绿；未动前端）
+- **实现说明**：`RedisDirectConnection` 内层 `MultiplexedConnection` → `ConnectionManager`（standalone `connect` 与 Sentinel 复用的 `connect_client` 同换；cluster 每节点一次性连接的 `connect_direct_node` 顺带受益，主 cluster 池不动）。命令签名与既有 `ConnectionLike` 泛型 helper 全部不变；SCAN 的 TYPE pipeline 无 MULTI/EXEC 事务，与 ConnectionManager 兼容。新增行为契约：重连后的新会话回到配置 db，会使既有的"已 SELECT db 跳过"追踪失效——`ConnectionLike` 实现在恰好触发重连的错误上（I/O error / unrecoverable error，普通服务端错误如 WRONGTYPE 不在其列）将追踪 db 置空，下一条浏览命令重发 SELECT，杜绝重连后静默读错 db（live 测试断言 db0/db3 隔离）。开启 redis `connection-manager` feature（新增传递依赖 arc-swap、backon；redis 仍 0.32.7 未升未降）。
 
 ### T11 健康扫描覆盖全部驱动 ⬜
 
