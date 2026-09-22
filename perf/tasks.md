@@ -52,7 +52,7 @@
 | T31 | AI 连接失败重试一次 | improvement-plan §5 D6 | S | ✅ b051862a |
 | T32 | 聊天结果一键图表 | improvement-plan §5 D8 | S | ✅ b7ad137e |
 | T33 | 关键字大小写跟随输入 | improvement-plan §4 C7-1 | S | ✅ b4588cba |
-| T34 | 标签页切换快捷键 | improvement-plan §6 E6-1 | S | ⬜ |
+| T34 | 标签页切换快捷键 | improvement-plan §6 E6-1 | S | ✅ e66e03dc |
 | T35 | Format SQL 快捷键 | improvement-plan §6 E6-2 | S | ⬜ |
 | T36 | getSqlCompletionResultValidFor 落地 | improvement-plan §4 C7-2 | S | ⬜ |
 | T37 | prefers-reduced-motion 支持 | improvement-plan §6 E9-1 | S | ⬜ |
@@ -405,13 +405,14 @@
   - [x] 测试通过
 - **实现说明**：选"跟随前缀"方案（无设置面）。新增纯函数 `applyKeywordCasing(keyword, prefix)`（`sqlCompletion.ts`）：以前缀首个字母的大小写决策——小写插入 `select`、大写插入 `SELECT`、空前缀/无字母前缀（未键入单词即唤起补全）保持规范大写；混合输入（`Sel`/`sEL`）按首字母确定性归入大/小写。按首字母（而非全大写/全小写/混合三分规则）决策使选择随前缀增长保持稳定（`se`→`sel` 已弹出的补全不会中途翻转大小写，对未来 T36 的 case-insensitive `validFor` 正则同样成立）。接线全部在 `sqlCompletion.ts` 内：关键字 item 无 `apply`（编辑器插入 `apply ?? label`），label 即弹出文本即插入文本，编辑器零改动；内置语句 snippet 体硬编码大写，新增 `applySnippetBodyCasing` 仅对命中关键字目录的单词重设大小写，`{name}`/`${name}`/`#{name}` 占位符、数字、标点与非关键字单词（用户自写的标识符）原样保留，`detail` 预览与插入同大小写；比较值提示（NULL/IS NULL/IS NOT NULL/TRUE/FALSE）同为 keyword 类型且按 label 去重，一并跟随同一规则，避免与目录项分裂成两条不同大小写的条目。函数目录补全（`COUNT(`、`DATE_FORMAT(...)`）不在范围——其规范拼写即方言文档（如 ClickHouse camelCase）。已知取舍：历史加权的 key 是 item label，`select` 与 `SELECT` 的选择统计分开累计。测试：新增 `packages/app-tests/sqlCompletion.keywordCasing.test.ts`（纯函数矩阵 + 端到端：小写/大写/混合/空前缀、前缀增长稳定性、占位符不重写、方言关键字、NULL 值提示、内置 snippet apply 模板）；既有断言大写插入的用例更新为新契约（`sqlCompletion.test.ts` 的 SELECT/jsonb/SERIAL/USING 标签与 `select *`/CASE WHEN snippet apply/detail、`sqlCompletion.snippet.test.ts` 两处 apply/detail），函数项断言未动。`pnpm check` 全绿（format + lint + typecheck + vitest 176 文件 1304 用例，含补全性能回归测试）。
 
-### T34 标签页切换快捷键 ⬜
+### T34 标签页切换快捷键 ✅ e66e03dc
 
 - **来源** improvement-plan-2026-09.md §6 E6 第 1 项（Track E）· **规模** S
 - **内容** `shortcutRegistry.ts` 缺 next/prev tab 与 `Cmd+1-9`。注册进 registry。
 - **验收**
-  - [ ] 快捷键生效且在快捷键面板可见
-  - [ ] 与既有绑定无冲突（清单断言/测试）
+  - [x] 快捷键生效且在快捷键面板可见
+  - [x] 与既有绑定无冲突（清单断言/测试）
+- **实现说明**：三组绑定注册进 `shortcutRegistry.ts`（scope 均为 global），经既有 App.vue 全局 keydown 路径生效。键位选择：next tab `Mod+Alt+ArrowRight`（macOS Cmd+Alt+→，其余 Ctrl+Alt+→）、prev tab `Mod+Alt+ArrowLeft`——跟随 Chrome/VS Code 的编辑器循环惯例，且与 CodeMirror 不冲突（mac 上 CM 只绑不带 Cmd 的 Alt-Arrow 词移动）；弃选 Ctrl+Tab（webview 可能吞键不送达页面）。`Mod+1..Mod+9` 跳第 N 个，跟随浏览器惯例：`Mod+9` = 最后一个标签页，`Mod+1..8` 直映射位置 1..8，位置超界（打开数不足 N）为 no-op——已知取舍：恰好开 10 个标签页时第 9 个无键可达（与 Chrome 相同）。next/prev 首尾环绕；无活动标签（仅驱动商店打开）时 next 进第一个、prev 进最后一个。解析逻辑在新增纯模块 `lib/tabSwitch.ts`（`resolveTabSwitchTarget`）；App.vue 的 `switchTab` 仅赋值 `queryStore.activeTabId`，既有 activeTabId watcher 照常触发 `dbx:before-tab-switch`（网格待存快照）、关闭驱动商店标签并复位分标签 UI 状态——与标签点击/closeTab 同一路径。面板可见性零改动即得（面板逐行渲染 registry）；`gotoTab1..8` 共享 `settings.shortcutGotoTabN` 标签，为此给 `ShortcutDefinition` 增加可选 `labelParams`（vue-i18n 命名参数），面板 label 渲染/搜索统一走带参 helper，`gotoTab9` 用 `settings.shortcutGotoLastTab`；六个 locale 均补 4 个标签 key。老用户快捷键设置无需迁移：`normalizeShortcutSettings` 以默认值回填新 id；默认值在 global scope 内两两不同。测试：新增 `packages/app-tests/tabSwitch.test.ts`（相邻移动、环绕、单/零标签、活动 id 缺失、goto 位置与超界、10 标签下 9=末尾 vs 8=第 8）；新增 `packages/app-tests/shortcutRegistry.test.ts`（三组绑定 id/scope/默认键清单断言、逐 scope 默认键唯一性 + `findShortcutConflict` 全默认零冲突、面板可见性契约——每条 labelKey 在六个 locale 均为字符串且 labelParams 占位符存在）；`keyboardShortcuts.test.ts` 增 matcher 用例（Mod+Alt+方向键的修饰键缺失/多余/自定义重绑、`gotoTabNumberFromShortcut` 1..9 解析与 0/Shift/Alt/无修饰键拒绝、自定义重绑）。`pnpm check` 全绿（format + lint + typecheck + vitest 178 文件 1323 用例）。
 
 ### T35 Format SQL 快捷键 ⬜
 
