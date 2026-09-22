@@ -1242,6 +1242,146 @@ pub async fn list_completion_objects(pool: &MySqlPool, database: &str) -> Result
     Ok(objects)
 }
 
+/// [`list_tables`] for several schemas (databases) at once: one `IN (...)`
+/// predicate over `information_schema.TABLES`, ordered by schema then name so
+/// the caller can group rows per schema without changing the per-schema order.
+pub(crate) fn list_tables_bulk_sql(schemas: &[String]) -> String {
+    let schemas = schemas.iter().map(|schema| quote_value(schema)).collect::<Vec<_>>().join(", ");
+    format!(
+        "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE, TABLE_COMMENT FROM information_schema.TABLES \
+         WHERE TABLE_SCHEMA IN ({schemas}) ORDER BY TABLE_SCHEMA, TABLE_NAME",
+    )
+}
+
+/// Lists the tables of several schemas in one pool checkout and one query.
+/// Returns one vec per requested schema (input order); per-schema rows match
+/// [`list_tables`] exactly. Errors when the lookup fails or comes back empty so
+/// the caller can repeat the per-schema calls, which keep the `SHOW TABLES`
+/// fallback for servers where information_schema is unavailable or lying.
+pub async fn list_tables_bulk(pool: &MySqlPool, schemas: &[String]) -> Result<Vec<(String, Vec<TableInfo>)>, String> {
+    if schemas.is_empty() {
+        return Ok(Vec::new());
+    }
+    let sql = list_tables_bulk_sql(schemas);
+    let mut conn = pool.get_conn().await.map_err(|e| e.to_string())?;
+    let result = match conn.query_iter(&sql).await {
+        Ok(result) => result,
+        Err(err) => {
+            log::debug!("Bulk information_schema.TABLES lookup failed for {} schemas: {err}", schemas.len());
+            return Err(err.to_string());
+        }
+    };
+    let rows: Vec<mysql_async::Row> = result.collect_and_drop().await.map_err(|e| e.to_string())?;
+
+    let grouped_rows = rows
+        .iter()
+        .filter_map(|row| {
+            let schema = get_str_by_name(row, "TABLE_SCHEMA");
+            let name = get_str_by_name(row, "TABLE_NAME").trim().to_string();
+            (!name.is_empty()).then_some({
+                (
+                    schema,
+                    TableInfo {
+                        name,
+                        table_type: get_str_by_name(row, "TABLE_TYPE"),
+                        comment: get_opt_str(row, "TABLE_COMMENT").filter(|s| !s.is_empty()),
+                        parent_schema: None,
+                        parent_name: None,
+                    },
+                )
+            })
+        })
+        .collect();
+    let grouped = super::group_rows_by_schema(schemas, grouped_rows);
+    if grouped.iter().all(|(_, tables)| tables.is_empty()) {
+        return Err("information_schema.TABLES returned no tables for the requested schemas".to_string());
+    }
+    Ok(grouped)
+}
+
+/// [`list_routines_sql`] for several schemas at once; `object_schema` becomes an
+/// output column and leads the ordering so rows group per schema.
+fn list_routines_bulk_sql(schemas: &[String]) -> String {
+    let schemas = schemas.iter().map(|schema| quote_value(schema)).collect::<Vec<_>>().join(", ");
+    format!(
+        "SELECT ROUTINE_SCHEMA AS object_schema, ROUTINE_NAME AS object_name, ROUTINE_TYPE AS object_type, \
+           NULL AS object_comment, \
+           NULL AS created_at, NULL AS updated_at, \
+           NULL AS parent_schema, NULL AS parent_name, \
+           CASE WHEN ROUTINE_TYPE = 'PROCEDURE' THEN 2 ELSE 3 END AS sort_order \
+         FROM information_schema.ROUTINES \
+         WHERE ROUTINE_SCHEMA IN ({schemas}) AND ROUTINE_TYPE IN ('PROCEDURE', 'FUNCTION') \
+         ORDER BY object_schema, sort_order, object_name",
+    )
+}
+
+/// [`list_completion_triggers_sql`] for several schemas at once.
+fn list_completion_triggers_bulk_sql(schemas: &[String]) -> String {
+    let schemas = schemas.iter().map(|schema| quote_value(schema)).collect::<Vec<_>>().join(", ");
+    format!(
+        "SELECT TRIGGER_SCHEMA AS object_schema, TRIGGER_NAME AS object_name, 'TRIGGER' AS object_type, \
+           NULL AS object_comment, \
+           CREATED AS created_at, NULL AS updated_at, \
+           TRIGGER_SCHEMA AS parent_schema, EVENT_OBJECT_TABLE AS parent_name, \
+           4 AS sort_order \
+         FROM information_schema.TRIGGERS \
+         WHERE TRIGGER_SCHEMA IN ({schemas}) \
+         ORDER BY object_schema, object_name",
+    )
+}
+
+fn row_to_object_bulk(row: &mysql_async::Row) -> ObjectInfo {
+    ObjectInfo {
+        name: get_str_by_name(row, "object_name"),
+        object_type: get_str_by_name(row, "object_type"),
+        schema: Some(get_str_by_name(row, "object_schema")),
+        comment: get_opt_str(row, "object_comment").filter(|s| !s.is_empty()),
+        created_at: get_opt_str(row, "created_at"),
+        updated_at: get_opt_str(row, "updated_at"),
+        parent_schema: get_opt_str(row, "parent_schema"),
+        parent_name: get_opt_str(row, "parent_name"),
+    }
+}
+
+/// [`list_completion_objects`] for several schemas in one pool checkout: one
+/// routines query plus one triggers query, both with an `IN (...)` predicate.
+/// Routine/trigger failures are skipped per query exactly like the per-schema
+/// call; only checkout errors surface to the caller.
+pub async fn list_completion_objects_bulk(
+    pool: &MySqlPool,
+    schemas: &[String],
+) -> Result<Vec<(String, Vec<ObjectInfo>)>, String> {
+    if schemas.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut conn = pool.get_conn().await.map_err(|e| e.to_string())?;
+    let mut rows: Vec<(String, ObjectInfo)> = Vec::new();
+
+    match conn.query_iter(list_routines_bulk_sql(schemas)).await {
+        Ok(result) => match result.collect_and_drop::<mysql_async::Row>().await {
+            Ok(routine_rows) => rows.extend(routine_rows.iter().map(|row| {
+                let object = row_to_object_bulk(row);
+                (object.schema.clone().unwrap_or_default(), object)
+            })),
+            Err(e) => log::warn!("Skipping routines for bulk completion: {}", e),
+        },
+        Err(e) => log::warn!("Skipping routines for bulk completion: {}", e),
+    }
+
+    match conn.query_iter(list_completion_triggers_bulk_sql(schemas)).await {
+        Ok(result) => match result.collect_and_drop::<mysql_async::Row>().await {
+            Ok(trigger_rows) => rows.extend(trigger_rows.iter().map(|row| {
+                let object = row_to_object_bulk(row);
+                (object.schema.clone().unwrap_or_default(), object)
+            })),
+            Err(e) => log::warn!("Skipping triggers for bulk completion: {}", e),
+        },
+        Err(e) => log::warn!("Skipping triggers for bulk completion: {}", e),
+    }
+
+    Ok(super::group_rows_by_schema(schemas, rows))
+}
+
 fn columns_sql(database: &str, table: &str) -> String {
     format!(
         "SELECT c.COLUMN_NAME, c.COLUMN_TYPE, c.IS_NULLABLE, c.COLUMN_DEFAULT, c.EXTRA, \
@@ -1890,6 +2030,44 @@ pub async fn list_triggers(pool: &MySqlPool, database: &str, table: &str) -> Res
 mod tests {
     use super::*;
     use mysql_async::consts::ColumnFlags;
+
+    // --- bulk completion metadata (B1) ---
+
+    #[test]
+    fn mysql_bulk_tables_sql_filters_all_schemas_with_in_list() {
+        let sql = list_tables_bulk_sql(&["shop".to_string(), "it's".to_string()]);
+
+        assert!(sql.contains("SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE, TABLE_COMMENT"));
+        assert!(sql.contains("FROM information_schema.TABLES"));
+        // Same escaping as the per-schema equality predicate (quote_value).
+        assert!(sql.contains("WHERE TABLE_SCHEMA IN ('shop', 'it\\'s')"));
+        // The leading schema key keeps each group in per-schema order.
+        assert!(sql.contains("ORDER BY TABLE_SCHEMA, TABLE_NAME"));
+    }
+
+    #[test]
+    fn mysql_bulk_tables_sql_single_schema_still_uses_in_list() {
+        let sql = list_tables_bulk_sql(&["shop".to_string()]);
+        assert!(sql.contains("WHERE TABLE_SCHEMA IN ('shop')"));
+    }
+
+    #[test]
+    fn mysql_bulk_routines_and_triggers_sql_cover_every_schema() {
+        let schemas = vec!["shop".to_string(), "billing".to_string()];
+
+        let routines = list_routines_bulk_sql(&schemas);
+        assert!(routines.contains("SELECT ROUTINE_SCHEMA AS object_schema"));
+        assert!(routines.contains("FROM information_schema.ROUTINES"));
+        assert!(routines
+            .contains("WHERE ROUTINE_SCHEMA IN ('shop', 'billing') AND ROUTINE_TYPE IN ('PROCEDURE', 'FUNCTION')"));
+        assert!(routines.contains("ORDER BY object_schema, sort_order, object_name"));
+
+        let triggers = list_completion_triggers_bulk_sql(&schemas);
+        assert!(triggers.contains("SELECT TRIGGER_SCHEMA AS object_schema"));
+        assert!(triggers.contains("FROM information_schema.TRIGGERS"));
+        assert!(triggers.contains("WHERE TRIGGER_SCHEMA IN ('shop', 'billing')"));
+        assert!(triggers.contains("ORDER BY object_schema, object_name"));
+    }
 
     #[test]
     fn mysql_column_type_names_map_to_friendly_names() {

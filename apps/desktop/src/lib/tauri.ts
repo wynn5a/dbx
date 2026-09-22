@@ -4,6 +4,7 @@ import type {
   ConnectionConfig,
   DatabaseInfo,
   TableInfo,
+  SchemaCompletionGroup,
   ObjectInfo,
   ObjectSource,
   ObjectSourceKind,
@@ -501,6 +502,21 @@ export async function listTables(
   limit?: number,
 ): Promise<TableInfo[]> {
   return invoke("list_tables", { connectionId, database, schema, filter, limit });
+}
+
+/**
+ * Tables + completion routines for several schemas in one invoke (B1). Groups
+ * come back in the requested schema order; per-schema contents match
+ * `listTables` / `listCompletionObjects` exactly.
+ */
+export async function listCompletionMetadata(
+  connectionId: string,
+  database: string,
+  schemas: string[],
+  filter?: string,
+  limit?: number,
+): Promise<SchemaCompletionGroup[]> {
+  return invoke("list_completion_metadata", { connectionId, database, schemas, filter, limit });
 }
 
 export async function listObjects(

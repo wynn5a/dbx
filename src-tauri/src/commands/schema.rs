@@ -33,6 +33,29 @@ pub async fn list_tables(
     dbx_core::schema::list_tables_core(&state, &connection_id, &database, &schema, filter.as_deref(), limit).await
 }
 
+/// Bulk completion metadata: tables + routines for several schemas in one
+/// invoke / one pool checkout (improvement-plan B1). `filter`/`limit` keep the
+/// per-schema `list_tables` semantics.
+#[tauri::command]
+pub async fn list_completion_metadata(
+    state: State<'_, Arc<AppState>>,
+    connection_id: String,
+    database: String,
+    schemas: Vec<String>,
+    filter: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<db::SchemaCompletionGroup>, String> {
+    dbx_core::schema::list_completion_metadata_core(
+        &state,
+        &connection_id,
+        &database,
+        &schemas,
+        filter.as_deref(),
+        limit,
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn list_objects(
     state: State<'_, Arc<AppState>>,

@@ -16,12 +16,31 @@ pub mod sqlserver;
 pub mod ssh_tunnel;
 pub mod transport_layer_tunnel;
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::time::Duration;
 
 // Re-export types so that `db::QueryResult` etc. work within dbx-core
 pub use crate::types::*;
 pub use file_validator::validate_file_path;
+
+/// Groups `(schema, value)` rows into one vec per requested schema, preserving
+/// the requested schema order. Schemas with no rows get an empty vec, matching
+/// what the per-schema queries return for them. Used by the bulk metadata
+/// listing so one server round trip can still be addressed per schema.
+pub(crate) fn group_rows_by_schema<T>(schemas: &[String], rows: Vec<(String, T)>) -> Vec<(String, Vec<T>)> {
+    let mut grouped: HashMap<String, Vec<T>> = HashMap::new();
+    for (schema, row) in rows {
+        grouped.entry(schema).or_default().push(row);
+    }
+    schemas
+        .iter()
+        .map(|schema| {
+            let rows = grouped.remove(schema).unwrap_or_default();
+            (schema.clone(), rows)
+        })
+        .collect()
+}
 
 pub const CONNECTION_TIMEOUT_SECS: u64 = 5;
 pub const TCP_PROBE_TIMEOUT_SECS: u64 = 3;

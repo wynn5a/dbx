@@ -1,7 +1,14 @@
 import { defineStore } from "pinia";
 import { uuid } from "@/lib/utils";
 import { ref, shallowRef, computed, watch } from "vue";
-import type { ColumnInfo, ConnectionConfig, ObjectInfo, SidebarLayout, TreeNode } from "@/types/database";
+import type {
+  ColumnInfo,
+  ConnectionConfig,
+  ObjectInfo,
+  SchemaCompletionGroup,
+  SidebarLayout,
+  TreeNode,
+} from "@/types/database";
 import { applyPinnedTreeNodeState, orderPinnedFirst } from "@/lib/pinnedItems";
 import {
   reconcileLayout,
@@ -178,6 +185,9 @@ export const useConnectionStore = defineStore("connection", () => {
   const completionTablesCache = ref<Record<string, SqlCompletionTable[]>>({});
   const completionObjectsCache = ref<Record<string, SqlCompletionObject[]>>({});
   const completionColumnsCache = ref<Record<string, ColumnInfo[]>>({});
+  // Unfiltered per-schema completion metadata (tables + routines), fetched with
+  // one invoke per (connection, database) instead of one per schema (B1).
+  const completionMetadataCache = ref<Record<string, SchemaCompletionGroup[]>>({});
   const elasticsearchCompletionIndicesCache = ref<Record<string, string[]>>({});
   const schemaListCache = ref<Record<string, string[]>>({});
   const completionTableIndex = new Map<string, { touched: number; tables: IndexedCompletionTable[] }>();
@@ -804,6 +814,9 @@ export const useConnectionStore = defineStore("connection", () => {
     }
     for (const key of Object.keys(completionColumnsCache.value)) {
       if (key === exactCacheKey || key.startsWith(cachePrefix)) delete completionColumnsCache.value[key];
+    }
+    for (const key of Object.keys(completionMetadataCache.value)) {
+      if (key === exactCacheKey || key.startsWith(cachePrefix)) delete completionMetadataCache.value[key];
     }
     for (const key of Object.keys(schemaListCache.value)) {
       if (key === exactCacheKey || key.startsWith(cachePrefix)) delete schemaListCache.value[key];
@@ -2257,6 +2270,91 @@ export const useConnectionStore = defineStore("connection", () => {
     return elasticsearchCompletionIndicesCache.value[cacheKey];
   }
 
+  /**
+   * Bulk completion metadata for schema-aware databases (B1): one
+   * `list_completion_metadata` invoke returns tables + routines for every
+   * schema, cached per (connection, database). Falls back to repeating the
+   * per-schema calls when the bulk invoke fails, so engines/drivers without
+   * bulk support behave exactly as before.
+   */
+  async function loadCompletionMetadataGroups(
+    connectionId: string,
+    database: string,
+  ): Promise<SchemaCompletionGroup[]> {
+    const cacheKey = `${connectionId}:${database}`;
+    if (completionMetadataCache.value[cacheKey]) {
+      return completionMetadataCache.value[cacheKey];
+    }
+    return withCompletionInFlight(`${cacheKey}:metadata`, async () => {
+      const cached = completionMetadataCache.value[cacheKey];
+      if (cached) return cached;
+      await ensureConnected(connectionId);
+      const schemas = await listCompletionSchemas(connectionId, database);
+      let groups: SchemaCompletionGroup[] = [];
+      try {
+        groups = await api.listCompletionMetadata(connectionId, database, schemas);
+      } catch {
+        groups = [];
+      }
+      if (groups.length === 0 && schemas.length > 0) {
+        groups = await Promise.all(
+          schemas.map(async (schema) => {
+            try {
+              const [tables, objects] = await Promise.all([
+                api.listTables(connectionId, database, schema),
+                api.listCompletionObjects(connectionId, database, schema),
+              ]);
+              return { schema, tables, objects };
+            } catch {
+              return { schema, tables: [], objects: [] };
+            }
+          }),
+        );
+      }
+      completionMetadataCache.value[cacheKey] = groups;
+      evictOldestCacheEntries(completionMetadataCache.value, COMPLETION_CACHE_MAX);
+      return groups;
+    });
+  }
+
+  /**
+   * All-schemas table listing via the bulk metadata fetch (B1). The bulk result
+   * is unfiltered, so the typed filter is applied here with exactly the
+   * backend's `contains` semantics (including the relaxed two-character retry);
+   * server-side per-schema filtering would return the same rows.
+   */
+  async function loadAllSchemaCompletionTables(
+    connectionId: string,
+    database: string,
+    cacheKey: string,
+    normalizedFilter: string,
+    relaxedFilter: string | undefined,
+    limit?: number,
+  ): Promise<SqlCompletionTable[]> {
+    const groups = await loadCompletionMetadataGroups(connectionId, database);
+    let allTables: SqlCompletionTable[] = [];
+    for (const group of groups) {
+      const mapped = group.tables.map((table) => ({
+        name: table.name,
+        schema: group.schema,
+        type: table.table_type === "VIEW" ? ("view" as const) : ("table" as const),
+      }));
+      indexCompletionTables(connectionId, database, undefined, mapped);
+      allTables = allTables.concat(mapped);
+    }
+    let tables = normalizedFilter
+      ? allTables.filter((table) => table.name.toLowerCase().includes(normalizedFilter))
+      : allTables;
+    if (tables.length === 0 && relaxedFilter) {
+      tables = allTables.filter((table) => table.name.toLowerCase().includes(relaxedFilter));
+    }
+    const limitedTables = limit ? dedupeCompletionTables(tables).slice(0, limit) : tables;
+    completionTablesCache.value[cacheKey] = limitedTables;
+    indexCompletionTables(connectionId, database, undefined, completionTablesCache.value[cacheKey]);
+    evictOldestCacheEntries(completionTablesCache.value, COMPLETION_CACHE_MAX);
+    return completionTablesCache.value[cacheKey];
+  }
+
   async function listCompletionTables(
     connectionId: string,
     database: string,
@@ -2275,7 +2373,22 @@ export const useConnectionStore = defineStore("connection", () => {
       await ensureConnected(connectionId);
 
       if (isSchemaAwareDatabase(connectionId)) {
-        const schemas = schema ? [schema] : await listCompletionSchemas(connectionId, database);
+        // No explicit schema: load every schema's tables with one bulk invoke
+        // (B1) instead of one `listTables` call per schema.
+        if (!schema) {
+          return await loadAllSchemaCompletionTables(
+            connectionId,
+            database,
+            cacheKey,
+            normalizedFilter,
+            relaxedFilter,
+            limit,
+          );
+        }
+
+        // An explicit schema was requested: a single targeted call per schema
+        // beats pulling the whole database's metadata for one hover.
+        const schemas = [schema];
         if (normalizedFilter || limit) {
           const batchSize = 5;
           const results: SqlCompletionTable[] = [];
@@ -2431,23 +2544,19 @@ export const useConnectionStore = defineStore("connection", () => {
     database: string,
     schema?: string,
   ): Promise<ObjectInfo[]> {
-    const schemas = schema ? [schema] : await listCompletionSchemas(connectionId, database);
-    const batchSize = 5;
-    const results: ObjectInfo[] = [];
-    for (let i = 0; i < schemas.length; i += batchSize) {
-      const batch = schemas.slice(i, i + batchSize);
-      const groups = await Promise.all(
-        batch.map(async (s) => {
-          try {
-            return await api.listCompletionObjects(connectionId, database, s);
-          } catch {
-            return [] as ObjectInfo[];
-          }
-        }),
-      );
-      for (const group of groups) results.push(...group);
+    // Explicit schema: keep the single per-schema call (already one invoke).
+    if (schema) {
+      try {
+        return await api.listCompletionObjects(connectionId, database, schema);
+      } catch {
+        return [];
+      }
     }
-    return results;
+    // No explicit schema: one bulk invoke for every schema (B1) instead of one
+    // `listCompletionObjects` call per schema; the bulk loader owns the
+    // per-schema fallback.
+    const groups = await loadCompletionMetadataGroups(connectionId, database);
+    return groups.flatMap((group) => group.objects);
   }
 
   function toSqlCompletionObject(object: ObjectInfo): SqlCompletionObject | null {

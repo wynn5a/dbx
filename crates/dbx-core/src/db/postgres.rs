@@ -18,6 +18,7 @@ use tokio_postgres::types::{FromSql, Type};
 use tokio_postgres::Row;
 
 use super::file_validator::validate_file_path;
+use super::group_rows_by_schema;
 use crate::sql::starts_with_executable_sql_keyword;
 use crate::types::{
     ColumnInfo, DatabaseInfo, ForeignKeyInfo, IndexInfo, ObjectInfo, QueryResult, TableInfo, TriggerInfo,
@@ -1525,6 +1526,57 @@ fn postgres_tables_sql() -> &'static str {
          ORDER BY c.relname"
 }
 
+/// Same listing as [`postgres_tables_sql`] for several schemas at once: one
+/// `ANY($1)` predicate, ordered by schema then name so the caller can group the
+/// rows per schema without changing the per-schema ordering.
+fn postgres_tables_sql_bulk() -> &'static str {
+    "SELECT n.nspname AS table_schema, \
+         c.relname AS table_name, \
+         CASE c.relkind WHEN 'r' THEN 'BASE TABLE' WHEN 'v' THEN 'VIEW' \
+           WHEN 'm' THEN 'MATERIALIZED VIEW' WHEN 'f' THEN 'FOREIGN TABLE' \
+           WHEN 'p' THEN 'BASE TABLE' END AS table_type, \
+         obj_description(c.oid) AS table_comment, \
+         CASE WHEN pc.relkind = 'p' THEN pn.nspname ELSE NULL END AS parent_schema, \
+         CASE WHEN pc.relkind = 'p' THEN pc.relname ELSE NULL END AS parent_name \
+         FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         LEFT JOIN pg_catalog.pg_inherits i ON i.inhrelid = c.oid \
+         LEFT JOIN pg_catalog.pg_class pc ON pc.oid = i.inhparent \
+         LEFT JOIN pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace \
+         WHERE n.nspname = ANY($1) AND c.relkind IN ('r','v','m','f','p') \
+         ORDER BY n.nspname, c.relname"
+}
+
+/// Lists the tables of several schemas in one pool checkout and one query.
+/// Returns one vec per requested schema (input order); a schema without tables
+/// maps to an empty vec. Per-schema rows match [`list_tables`] exactly.
+pub async fn list_tables_bulk(pool: &Pool, schemas: &[String]) -> Result<Vec<(String, Vec<TableInfo>)>, String> {
+    if schemas.is_empty() {
+        return Ok(Vec::new());
+    }
+    let client = pool.get().await.map_err(|e| e.to_string())?;
+    let stmt = client.prepare_cached(postgres_tables_sql_bulk()).await.map_err(|e| e.to_string())?;
+    let schema_param = schemas.to_vec();
+    let rows = client.query(&stmt, &[&schema_param]).await.map_err(|e| e.to_string())?;
+
+    let grouped = rows
+        .iter()
+        .map(|row| {
+            (
+                row.get::<_, String>(0),
+                TableInfo {
+                    name: row.get::<_, String>(1),
+                    table_type: row.get::<_, String>(2),
+                    comment: row.try_get::<_, Option<String>>(3).ok().flatten().filter(|s| !s.is_empty()),
+                    parent_schema: row.try_get::<_, Option<String>>(4).ok().flatten().filter(|s| !s.is_empty()),
+                    parent_name: row.try_get::<_, Option<String>>(5).ok().flatten().filter(|s| !s.is_empty()),
+                },
+            )
+        })
+        .collect();
+    Ok(group_rows_by_schema(schemas, grouped))
+}
+
 fn list_objects_sql(include_timestamps: bool) -> &'static str {
     if include_timestamps {
         return "SELECT c.relname AS object_name, \
@@ -1627,6 +1679,137 @@ pub async fn list_objects(pool: &Pool, schema: &str) -> Result<Vec<ObjectInfo>, 
             parent_name: row.try_get::<_, Option<String>>(6).ok().flatten().filter(|s| !s.is_empty()),
         })
         .collect())
+}
+
+/// Same listing as [`list_objects`] for several schemas in one pool checkout
+/// and one query (`ANY($1)` in both UNION branches). Falls back to the
+/// no-timestamp variant exactly like the per-schema call when the server
+/// rejects `pg_stat_file`-based timestamps.
+pub async fn list_objects_bulk(pool: &Pool, schemas: &[String]) -> Result<Vec<(String, Vec<ObjectInfo>)>, String> {
+    if schemas.is_empty() {
+        return Ok(Vec::new());
+    }
+    let client = pool.get().await.map_err(|e| e.to_string())?;
+    let schema_param = schemas.to_vec();
+    let rows = match client.prepare_cached(postgres_objects_sql_bulk(true)).await {
+        Ok(stmt) => match client.query(&stmt, &[&schema_param]).await {
+            Ok(rows) => rows,
+            Err(_) => {
+                let stmt = client.prepare_cached(postgres_objects_sql_bulk(false)).await.map_err(|e| e.to_string())?;
+                client.query(&stmt, &[&schema_param]).await.map_err(|e| e.to_string())?
+            }
+        },
+        Err(_) => {
+            let stmt = client.prepare_cached(postgres_objects_sql_bulk(false)).await.map_err(|e| e.to_string())?;
+            client.query(&stmt, &[&schema_param]).await.map_err(|e| e.to_string())?
+        }
+    };
+
+    let grouped = rows
+        .iter()
+        .map(|row| {
+            (
+                row.get::<_, String>(0),
+                ObjectInfo {
+                    name: row.get::<_, String>(1),
+                    object_type: row.get::<_, String>(2),
+                    schema: Some(row.get::<_, String>(0)),
+                    comment: row.try_get::<_, Option<String>>(3).ok().flatten().filter(|s| !s.is_empty()),
+                    created_at: row.try_get::<_, Option<String>>(4).ok().flatten().filter(|s| !s.is_empty()),
+                    updated_at: row.try_get::<_, Option<String>>(5).ok().flatten().filter(|s| !s.is_empty()),
+                    parent_schema: row.try_get::<_, Option<String>>(6).ok().flatten().filter(|s| !s.is_empty()),
+                    parent_name: row.try_get::<_, Option<String>>(7).ok().flatten().filter(|s| !s.is_empty()),
+                },
+            )
+        })
+        .collect();
+    Ok(group_rows_by_schema(schemas, grouped))
+}
+
+/// [`list_objects_sql`] for several schemas at once: the schema name becomes an
+/// output column so rows can be grouped per schema, both UNION branches filter
+/// with `ANY($1)`, and the ordering gains the schema as its leading key so each
+/// schema's rows keep the per-schema `(sort_order, object_name)` order.
+fn postgres_objects_sql_bulk(include_timestamps: bool) -> &'static str {
+    if include_timestamps {
+        return "SELECT n.nspname AS object_schema, \
+       c.relname AS object_name, \
+       CASE c.relkind \
+         WHEN 'v' THEN 'VIEW' \
+         WHEN 'm' THEN 'MATERIALIZED VIEW' \
+         WHEN 'S' THEN 'SEQUENCE' \
+         ELSE 'TABLE' \
+       END AS object_type, \
+       obj_description(c.oid) AS object_comment, \
+       stat.creation::text AS created_at, \
+       COALESCE( \
+         CASE WHEN current_setting('track_commit_timestamp', true) = 'on' \
+           THEN pg_xact_commit_timestamp(c.xmin)::text END, \
+         stat.modification::text \
+       ) AS updated_at, \
+       CASE WHEN pc.relkind = 'p' THEN pn.nspname ELSE NULL END AS parent_schema, \
+       CASE WHEN pc.relkind = 'p' THEN pc.relname ELSE NULL END AS parent_name, \
+       CASE c.relkind WHEN 'v' THEN 1 WHEN 'm' THEN 1 WHEN 'S' THEN 4 ELSE 0 END AS sort_order \
+     FROM pg_catalog.pg_class c \
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+     LEFT JOIN pg_catalog.pg_inherits i ON i.inhrelid = c.oid \
+     LEFT JOIN pg_catalog.pg_class pc ON pc.oid = i.inhparent \
+     LEFT JOIN pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace \
+     LEFT JOIN LATERAL pg_stat_file( \
+       CASE WHEN c.relkind IN ('r','m','f','p') THEN pg_relation_filepath(c.oid) END, true \
+     ) stat ON true \
+     WHERE n.nspname = ANY($1) AND c.relkind IN ('r','v','m','f','p','S') \
+     UNION ALL \
+     SELECT n.nspname AS object_schema, \
+       p.proname AS object_name, \
+       CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END AS object_type, \
+       obj_description(p.oid) AS object_comment, \
+       NULL::text AS created_at, \
+       CASE WHEN current_setting('track_commit_timestamp', true) = 'on' \
+         THEN pg_xact_commit_timestamp(p.xmin)::text END AS updated_at, \
+       NULL::text AS parent_schema, \
+       NULL::text AS parent_name, \
+       CASE p.prokind WHEN 'p' THEN 2 ELSE 3 END AS sort_order \
+     FROM pg_catalog.pg_proc p \
+     JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
+     WHERE n.nspname = ANY($1) AND p.prokind IN ('p','f') \
+     ORDER BY object_schema, sort_order, object_name";
+    }
+
+    "SELECT n.nspname AS object_schema, \
+       c.relname AS object_name, \
+       CASE c.relkind \
+         WHEN 'v' THEN 'VIEW' \
+         WHEN 'm' THEN 'MATERIALIZED VIEW' \
+         WHEN 'S' THEN 'SEQUENCE' \
+         ELSE 'TABLE' \
+       END AS object_type, \
+       obj_description(c.oid) AS object_comment, \
+       NULL::text AS created_at, \
+       NULL::text AS updated_at, \
+       CASE WHEN pc.relkind = 'p' THEN pn.nspname ELSE NULL END AS parent_schema, \
+       CASE WHEN pc.relkind = 'p' THEN pc.relname ELSE NULL END AS parent_name, \
+       CASE c.relkind WHEN 'v' THEN 1 WHEN 'm' THEN 1 WHEN 'S' THEN 4 ELSE 0 END AS sort_order \
+     FROM pg_catalog.pg_class c \
+     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+     LEFT JOIN pg_catalog.pg_inherits i ON i.inhrelid = c.oid \
+     LEFT JOIN pg_catalog.pg_class pc ON pc.oid = i.inhparent \
+     LEFT JOIN pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace \
+     WHERE n.nspname = ANY($1) AND c.relkind IN ('r','v','m','f','p','S') \
+     UNION ALL \
+     SELECT n.nspname AS object_schema, \
+       p.proname AS object_name, \
+       CASE p.prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END AS object_type, \
+       obj_description(p.oid) AS object_comment, \
+       NULL::text AS created_at, \
+       NULL::text AS updated_at, \
+       NULL::text AS parent_schema, \
+       NULL::text AS parent_name, \
+       CASE p.prokind WHEN 'p' THEN 2 ELSE 3 END AS sort_order \
+     FROM pg_catalog.pg_proc p \
+     JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
+     WHERE n.nspname = ANY($1) AND p.prokind IN ('p','f') \
+     ORDER BY object_schema, sort_order, object_name"
 }
 
 pub async fn list_schemas(pool: &Pool) -> Result<Vec<String>, String> {
@@ -2147,6 +2330,82 @@ pub async fn copy_in(pool: &Pool, sql: &str, data: &[u8]) -> Result<(), String> 
 mod tests {
     use super::*;
     use tokio_postgres::types::FromSql;
+
+    // --- bulk completion metadata (B1) ---
+
+    #[test]
+    fn postgres_bulk_tables_sql_covers_all_schemas_in_one_predicate() {
+        let single = postgres_tables_sql();
+        let bulk = postgres_tables_sql_bulk();
+
+        // The whole schema list goes through one ANY($1) predicate...
+        assert!(bulk.contains("n.nspname = ANY($1)"));
+        assert!(!bulk.contains("n.nspname = $1"), "must not keep the single-schema equality");
+        // ...with the schema as an output column so rows group per schema...
+        assert!(bulk.contains("n.nspname AS table_schema"));
+        // ...and the leading schema key keeps each group in per-schema order.
+        assert!(bulk.contains("ORDER BY n.nspname, c.relname"));
+
+        // Same relation set, relkind filter and columns as the per-schema query,
+        // so bulk results are row-for-row identical to `list_tables`.
+        assert!(single.contains("c.relkind IN ('r','v','m','f','p')"));
+        assert!(bulk.contains("c.relkind IN ('r','v','m','f','p')"));
+        for column in ["c.relname AS table_name", "AS table_type", "obj_description(c.oid) AS table_comment"] {
+            assert!(single.contains(column) && bulk.contains(column), "missing: {column}");
+        }
+        assert_eq!(
+            single.matches("LEFT JOIN pg_catalog.pg_class pc").count(),
+            bulk.matches("LEFT JOIN pg_catalog.pg_class pc").count()
+        );
+    }
+
+    #[test]
+    fn postgres_bulk_objects_sql_covers_all_schemas_in_both_union_branches() {
+        for include_timestamps in [true, false] {
+            let sql = postgres_objects_sql_bulk(include_timestamps);
+            assert_eq!(
+                sql.matches("n.nspname = ANY($1)").count(),
+                2,
+                "both UNION branches must use the bulk predicate"
+            );
+            assert!(!sql.contains("n.nspname = $1"));
+            assert_eq!(sql.matches("n.nspname AS object_schema").count(), 2);
+            assert!(sql.contains("ORDER BY object_schema, sort_order, object_name"));
+            assert!(sql.contains("p.prokind IN ('p','f')"));
+            assert!(sql.contains("c.relkind IN ('r','v','m','f','p','S')"));
+        }
+        // The timestamps/no-timestamps fallback pair mirrors `list_objects_sql`.
+        assert!(postgres_objects_sql_bulk(true).contains("stat.creation::text AS created_at"));
+        assert!(postgres_objects_sql_bulk(false).contains("NULL::text AS created_at"));
+    }
+
+    #[test]
+    fn group_rows_by_schema_keeps_requested_order_and_empty_groups() {
+        let schemas = vec!["public".to_string(), "tenant".to_string(), "empty".to_string()];
+        let rows = vec![
+            ("tenant".to_string(), 2_i32),
+            ("public".to_string(), 1_i32),
+            ("tenant".to_string(), 3_i32),
+            ("public".to_string(), 11_i32),
+        ];
+
+        let grouped = group_rows_by_schema(&schemas, rows);
+
+        assert_eq!(
+            grouped,
+            vec![
+                ("public".to_string(), vec![1_i32, 11]),
+                ("tenant".to_string(), vec![2_i32, 3]),
+                ("empty".to_string(), Vec::new()),
+            ]
+        );
+    }
+
+    #[test]
+    fn group_rows_by_schema_with_no_schemas_is_empty() {
+        let grouped = group_rows_by_schema(&[], vec![("public".to_string(), 1_i32)]);
+        assert!(grouped.is_empty());
+    }
 
     // --- pg_quote_ident ---
 

@@ -26,6 +26,19 @@ pub struct ObjectInfo {
     pub parent_name: Option<String>,
 }
 
+/// One schema's slice of the bulk completion-metadata listing
+/// (`list_completion_metadata`): the per-schema `list_tables` result plus the
+/// per-schema `list_completion_objects` routines, fetched in a single IPC so a
+/// multi-schema database costs one pool checkout instead of one per schema.
+/// Schemas appear in the order they were requested; a schema with no objects
+/// or no tables gets an empty vec, matching the per-schema calls.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchemaCompletionGroup {
+    pub schema: String,
+    pub tables: Vec<TableInfo>,
+    pub objects: Vec<ObjectInfo>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ObjectSourceKind {

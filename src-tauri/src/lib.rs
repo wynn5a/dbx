@@ -444,6 +444,7 @@ pub fn run() {
             commands::plugins::uninstall_jdbc_plugin,
             commands::schema::list_databases,
             commands::schema::list_tables,
+            commands::schema::list_completion_metadata,
             commands::schema::list_objects,
             commands::schema::list_completion_objects,
             commands::schema::get_object_source,

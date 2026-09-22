@@ -2,7 +2,7 @@ use crate::connection::{connection_url_for_endpoint, database_connection_config,
 use crate::db;
 use crate::models::connection::{ConnectionConfig, DatabaseType};
 use crate::query::{agent_execute_query_params, QueryExecutionOptions};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
@@ -527,6 +527,126 @@ async fn list_tables_once(
             .map(|tables| filter_table_infos_for_config(tables, filter, limit, db_config.as_ref())),
         _ => Ok(vec![]),
     }
+}
+
+/// One listing of tables + completion routines for several schemas at once —
+/// the backend half of improvement-plan B1 (one IPC for the completion metadata
+/// of a multi-schema database instead of one `list_tables` invoke per schema).
+/// Native engines do a single pool checkout with one grouped query (PG
+/// `n.nspname = ANY($1)`, MySQL `TABLE_SCHEMA IN (...)`, SQLite's
+/// schema-agnostic `sqlite_master`); every other engine repeats its per-schema
+/// listing inside this one call, so callers always pay exactly one invoke.
+/// `filter`/`limit` keep the exact `list_tables` semantics, applied per schema.
+pub async fn list_completion_metadata_core(
+    state: &AppState,
+    connection_id: &str,
+    database: &str,
+    schemas: &[String],
+    filter: Option<&str>,
+    limit: Option<usize>,
+) -> Result<Vec<db::SchemaCompletionGroup>, String> {
+    if schemas.is_empty() {
+        return Ok(Vec::new());
+    }
+    retry_metadata_connection(state, connection_id, Some(database), || {
+        list_completion_metadata_once(state, connection_id, database, schemas, filter, limit)
+    })
+    .await
+}
+
+async fn list_completion_metadata_once(
+    state: &AppState,
+    connection_id: &str,
+    database: &str,
+    schemas: &[String],
+    filter: Option<&str>,
+    limit: Option<usize>,
+) -> Result<Vec<db::SchemaCompletionGroup>, String> {
+    let pool_key = state.get_or_create_pool(connection_id, Some(database)).await?;
+    let db_config = connection_config(state, connection_id).await;
+
+    {
+        let connections = state.connections.read().await;
+        if let Some(PoolKind::Postgres(p)) = connections.get(&pool_key) {
+            let p = p.clone();
+            drop(connections);
+            // The per-schema PG path wraps `list_objects` in
+            // `filter_completion_objects` (routines only); keep that contract.
+            let objects = db::postgres::list_objects_bulk(&p, schemas).await;
+            let objects = objects.map(|groups| {
+                groups.into_iter().map(|(schema, objects)| (schema, filter_completion_objects(objects))).collect()
+            });
+            if let (Ok(tables), Ok(objects)) = (db::postgres::list_tables_bulk(&p, schemas).await, objects) {
+                return Ok(schema_groups_from_bulk(schemas, tables, objects, filter, limit, db_config.as_ref()));
+            }
+            // Bulk failed (stale pool, permissions…): fall through to the
+            // per-schema calls below, which keep their own fallbacks.
+        } else if let Some(PoolKind::Mysql(p, mode)) = connections.get(&pool_key) {
+            if *mode != MysqlMode::OceanBaseOracle && !db_config.as_ref().is_some_and(is_doris_family_config) {
+                let p = p.clone();
+                drop(connections);
+                if let (Ok(tables), Ok(objects)) = (
+                    db::mysql::list_tables_bulk(&p, schemas).await,
+                    db::mysql::list_completion_objects_bulk(&p, schemas).await,
+                ) {
+                    return Ok(schema_groups_from_bulk(schemas, tables, objects, filter, limit, db_config.as_ref()));
+                }
+            }
+        } else if let Some(PoolKind::Sqlite(p)) = connections.get(&pool_key) {
+            let p = p.clone();
+            drop(connections);
+            if let Ok(tables) = db::sqlite::list_tables_bulk(&p, schemas).await {
+                // SQLite has no routines listing (the per-schema
+                // `list_completion_objects` call returns empty), so the bulk
+                // groups carry empty objects directly.
+                let objects = schemas.iter().map(|schema| (schema.clone(), Vec::new())).collect();
+                return Ok(schema_groups_from_bulk(schemas, tables, objects, filter, limit, db_config.as_ref()));
+            }
+        }
+    }
+
+    // Engines without a native bulk listing: repeat the per-schema calls within
+    // this single invoke. A failing schema yields an empty group, matching the
+    // completion store's per-schema error handling.
+    let mut groups = Vec::with_capacity(schemas.len());
+    for schema in schemas {
+        let tables = list_tables_core(state, connection_id, database, schema, filter, limit).await.unwrap_or_default();
+        let objects = list_completion_objects_core(state, connection_id, database, schema).await.unwrap_or_default();
+        groups.push(db::SchemaCompletionGroup { schema: schema.clone(), tables, objects });
+    }
+    Ok(groups)
+}
+
+/// Re-indexes the two bulk listings (already grouped per schema in the
+/// requested order by the drivers) into one group per requested schema, with
+/// the exact per-schema `list_tables` filter/limit semantics applied to the
+/// table groups.
+fn schema_groups_from_bulk(
+    schemas: &[String],
+    tables: Vec<(String, Vec<db::TableInfo>)>,
+    objects: Vec<(String, Vec<db::ObjectInfo>)>,
+    filter: Option<&str>,
+    limit: Option<usize>,
+    db_config: Option<&ConnectionConfig>,
+) -> Vec<db::SchemaCompletionGroup> {
+    let mut tables_by_schema: HashMap<String, Vec<db::TableInfo>> = tables.into_iter().collect();
+    let mut objects_by_schema: HashMap<String, Vec<db::ObjectInfo>> = objects.into_iter().collect();
+    schemas
+        .iter()
+        .map(|schema| {
+            let tables = filter_table_infos_for_config(
+                tables_by_schema.remove(schema).unwrap_or_default(),
+                filter,
+                limit,
+                db_config,
+            );
+            db::SchemaCompletionGroup {
+                schema: schema.clone(),
+                tables,
+                objects: objects_by_schema.remove(schema).unwrap_or_default(),
+            }
+        })
+        .collect()
 }
 
 pub async fn get_table_comment_core(
@@ -1926,6 +2046,186 @@ async fn postgres_object_source(
                 .map_err(|fallback_err| format!("{primary_err}; fallback failed: {fallback_err}"))
         }
         Err(err) => Err(err),
+    }
+}
+
+#[cfg(test)]
+mod completion_metadata_tests {
+    use super::*;
+    use crate::storage::Storage;
+
+    fn bulk_test_config(id: &str, host: &str) -> ConnectionConfig {
+        ConnectionConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            db_type: DatabaseType::Sqlite,
+            driver_profile: None,
+            driver_label: None,
+            url_params: None,
+            host: host.to_string(),
+            port: 0,
+            username: String::new(),
+            password: String::new(),
+            database: None,
+            visible_databases: None,
+            attached_databases: Vec::new(),
+            color: None,
+            transport_layers: Vec::new(),
+            connect_timeout_secs: 5,
+            query_timeout_secs: 30,
+            idle_timeout_secs: 60,
+            ssl: false,
+            ca_cert_path: String::new(),
+            client_cert_path: String::new(),
+            client_key_path: String::new(),
+            sysdba: false,
+            oracle_connection_type: None,
+            connection_string: None,
+            redis_connection_mode: None,
+            redis_sentinel_master: String::new(),
+            redis_sentinel_nodes: String::new(),
+            redis_sentinel_username: String::new(),
+            redis_sentinel_password: String::new(),
+            redis_sentinel_tls: false,
+            redis_cluster_nodes: String::new(),
+            etcd_endpoints: String::new(),
+            external_config: None,
+            jdbc_driver_class: None,
+            jdbc_driver_paths: Vec::new(),
+            one_time: false,
+        }
+    }
+
+    async fn sqlite_app_state(db_path: &std::path::Path) -> AppState {
+        let dir = std::env::temp_dir().join(format!("dbx-core-bulk-meta-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = Storage::open(&dir.join("storage.db")).await.unwrap();
+        let state = AppState::new(storage);
+        state.configs.write().await.insert("conn".to_string(), bulk_test_config("conn", &db_path.to_string_lossy()));
+        state
+    }
+
+    fn json_of<T: serde::Serialize>(value: &T) -> serde_json::Value {
+        serde_json::to_value(value).expect("serialize for comparison")
+    }
+
+    #[test]
+    fn assembles_bulk_metadata_groups_in_requested_schema_order() {
+        let schemas = vec!["public".to_string(), "sales".to_string(), "empty".to_string()];
+        let tables = vec![(
+            "public".to_string(),
+            vec![db::TableInfo {
+                name: "users".to_string(),
+                table_type: "BASE TABLE".to_string(),
+                comment: None,
+                parent_schema: None,
+                parent_name: None,
+            }],
+        )];
+        let objects = vec![(
+            "sales".to_string(),
+            vec![db::ObjectInfo {
+                name: "refresh_sales_summary".to_string(),
+                object_type: "PROCEDURE".to_string(),
+                schema: Some("sales".to_string()),
+                comment: None,
+                created_at: None,
+                updated_at: None,
+                parent_schema: None,
+                parent_name: None,
+            }],
+        )];
+
+        let groups = schema_groups_from_bulk(&schemas, tables, objects, None, None, None);
+
+        assert_eq!(groups.len(), 3, "one group per requested schema, in request order");
+        assert_eq!(groups[0].schema, "public");
+        assert_eq!(groups[0].tables.len(), 1);
+        assert!(groups[0].objects.is_empty());
+        assert_eq!(groups[1].schema, "sales");
+        assert!(groups[1].tables.is_empty());
+        assert_eq!(groups[1].objects.len(), 1);
+        assert_eq!(groups[2].schema, "empty");
+        assert!(groups[2].tables.is_empty() && groups[2].objects.is_empty());
+    }
+
+    #[tokio::test]
+    async fn sqlite_bulk_metadata_matches_per_schema_queries() {
+        // 对照测试 for B1: the one-invoke bulk listing must return exactly what
+        // the per-schema `list_tables` + `list_completion_objects` calls return.
+        let dir = std::env::temp_dir().join(format!("dbx-core-bulk-meta-db-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("bulk.db");
+        std::fs::File::create(&db_path).unwrap();
+        let pool = db::sqlite::connect_path(&db_path.to_string_lossy()).await.expect("connect sqlite");
+        db::sqlite::execute_query(
+            &pool,
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT); \
+             CREATE TABLE user_settings (user_id INTEGER, key TEXT); \
+             CREATE VIEW active_users AS SELECT id, name FROM users;",
+        )
+        .await
+        .expect("create fixtures");
+
+        let state = sqlite_app_state(&db_path).await;
+        state.connections.write().await.insert("conn".to_string(), PoolKind::Sqlite(pool));
+
+        let schemas = vec!["main".to_string(), "attached".to_string()];
+        let bulk =
+            list_completion_metadata_core(&state, "conn", "main", &schemas, None, None).await.expect("bulk metadata");
+
+        assert_eq!(bulk.len(), schemas.len(), "one group per requested schema");
+        for (index, group) in bulk.iter().enumerate() {
+            assert_eq!(group.schema, schemas[index]);
+            let per_schema_tables =
+                list_tables_core(&state, "conn", "main", &schemas[index], None, None).await.expect("list_tables");
+            let per_schema_objects = list_completion_objects_core(&state, "conn", "main", &schemas[index])
+                .await
+                .expect("list_completion_objects");
+            assert_eq!(json_of(&group.tables), json_of(&per_schema_tables), "tables must match for {}", group.schema);
+            assert_eq!(
+                json_of(&group.objects),
+                json_of(&per_schema_objects),
+                "objects must match for {}",
+                group.schema
+            );
+        }
+
+        let users = &bulk[0].tables;
+        assert!(users.iter().any(|table| table.name == "users" && table.table_type == "BASE TABLE"));
+        assert!(users.iter().any(|table| table.name == "active_users" && table.table_type == "VIEW"));
+    }
+
+    #[tokio::test]
+    async fn sqlite_bulk_metadata_applies_list_tables_filter_and_limit_semantics() {
+        let dir = std::env::temp_dir().join(format!("dbx-core-bulk-meta-db-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("bulk-filter.db");
+        std::fs::File::create(&db_path).unwrap();
+        let pool = db::sqlite::connect_path(&db_path.to_string_lossy()).await.expect("connect sqlite");
+        db::sqlite::execute_query(
+            &pool,
+            "CREATE TABLE account (id INTEGER PRIMARY KEY); \
+             CREATE TABLE account_notes (id INTEGER PRIMARY KEY); \
+             CREATE TABLE orders (id INTEGER PRIMARY KEY);",
+        )
+        .await
+        .expect("create fixtures");
+
+        let state = sqlite_app_state(&db_path).await;
+        state.connections.write().await.insert("conn".to_string(), PoolKind::Sqlite(pool));
+
+        let schemas = vec!["main".to_string()];
+        let filtered = list_completion_metadata_core(&state, "conn", "main", &schemas, Some("ACC"), Some(1))
+            .await
+            .expect("bulk metadata with filter");
+        let per_schema =
+            list_tables_core(&state, "conn", "main", "main", Some("ACC"), Some(1)).await.expect("filtered list_tables");
+
+        // `filter`/`limit` must keep the exact `list_tables` semantics per schema.
+        assert_eq!(json_of(&filtered[0].tables), json_of(&per_schema));
+        let names: Vec<&str> = filtered[0].tables.iter().map(|table| table.name.as_str()).collect();
+        assert_eq!(names, vec!["account"], "contains-filter + limit applied per schema");
     }
 }
 

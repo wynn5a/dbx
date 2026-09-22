@@ -200,6 +200,13 @@ export interface ObjectInfo {
   parent_name?: string | null;
 }
 
+/** One schema's slice of the bulk `list_completion_metadata` listing (B1). */
+export interface SchemaCompletionGroup {
+  schema: string;
+  tables: TableInfo[];
+  objects: ObjectInfo[];
+}
+
 export type ObjectSourceKind = "VIEW" | "PROCEDURE" | "FUNCTION" | "SEQUENCE" | "PACKAGE" | "PACKAGE_BODY";
 
 export interface ObjectSource {

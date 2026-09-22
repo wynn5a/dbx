@@ -172,6 +172,48 @@ mod tests {
         assert_eq!(result.rows[0][0], serde_json::json!("Ada"));
     }
 
+    // --- bulk completion metadata (B1) ---
+
+    #[tokio::test]
+    async fn bulk_table_listing_matches_per_schema_queries() {
+        // 对照测试: the one-query bulk listing must return exactly what the
+        // per-schema `list_tables` call returns for every requested schema.
+        let pool = connect_path(":memory:").await.expect("connect in-memory SQLite");
+        execute_query(
+            &pool,
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT); \
+             CREATE TABLE user_settings (user_id INTEGER, key TEXT); \
+             CREATE VIEW active_users AS SELECT id, name FROM users; \
+             CREATE INDEX idx_user_settings ON user_settings(user_id);",
+        )
+        .await
+        .expect("create fixtures");
+
+        let schemas = vec!["main".to_string(), "attached".to_string()];
+        let bulk = list_tables_bulk(&pool, &schemas).await.expect("bulk listing");
+
+        assert_eq!(bulk.len(), schemas.len(), "one group per requested schema, in request order");
+        for (index, (schema, tables)) in bulk.iter().enumerate() {
+            assert_eq!(schema, &schemas[index]);
+            let per_schema = list_tables(&pool, schema).await.expect("per-schema listing");
+            assert_eq!(
+                serde_json::to_value(tables).unwrap(),
+                serde_json::to_value(&per_schema).unwrap(),
+                "bulk group must match the per-schema query for `{schema}`"
+            );
+        }
+
+        let names: Vec<&str> = bulk[0].1.iter().map(|table| table.name.as_str()).collect();
+        assert_eq!(names, vec!["active_users", "user_settings", "users"], "name-ordered, indexes excluded");
+        assert!(bulk[0].1.iter().any(|table| table.table_type == "VIEW"));
+    }
+
+    #[tokio::test]
+    async fn bulk_table_listing_with_no_schemas_is_empty() {
+        let pool = connect_path(":memory:").await.expect("connect in-memory SQLite");
+        assert!(list_tables_bulk(&pool, &[]).await.expect("bulk listing").is_empty());
+    }
+
     #[test]
     fn sqlite_extension_specs_parse_repeated_and_multiline_url_params() {
         let params = "cache=shared&sqlite_extension=%2Fopt%2Fregexp.dylib&sqlite_extensions=%2Fopt%2Ftext.dylib%7Csqlite3_text_init%0A%2Fopt%2Fcrypto.dylib";
@@ -354,6 +396,22 @@ pub async fn list_tables(pool: &SqliteHandle, _schema: &str) -> Result<Vec<Table
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// [`list_tables`] for several schemas in one checkout: SQLite resolves every
+/// schema to the same `sqlite_master` listing (schema names other than `main`
+/// only exist through ATTACH, which the per-schema call ignores too), so the
+/// single query's rows are reported once per requested schema, exactly like
+/// calling [`list_tables`] for each schema in a row.
+pub async fn list_tables_bulk(
+    pool: &SqliteHandle,
+    schemas: &[String],
+) -> Result<Vec<(String, Vec<TableInfo>)>, String> {
+    if schemas.is_empty() {
+        return Ok(Vec::new());
+    }
+    let tables = list_tables(pool, "").await?;
+    Ok(schemas.iter().map(|schema| (schema.clone(), tables.clone())).collect())
 }
 
 pub async fn get_columns(pool: &SqliteHandle, _schema: &str, table: &str) -> Result<Vec<ColumnInfo>, String> {
