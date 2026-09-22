@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import QueryEditor from "@/components/editor/QueryEditor.vue";
+import { QueryEditor } from "@/components/editor/queryEditorAsync";
 import ColumnInfoPanel from "@/components/editor/ColumnInfoPanel.vue";
 import type { ColumnInfo } from "@/components/editor/ColumnInfoPanel.vue";
 let dataGridComponentPromise: Promise<typeof import("@/components/grid/DataGrid.vue")> | undefined;
@@ -93,6 +93,16 @@ type SearchableBrowserHandle = {
   focusSearch: () => boolean;
 };
 
+// QueryEditor mounts through defineAsyncComponent, so the ref resolves only
+// after the chunk loads; type the handle explicitly (like DataGridHandle) and
+// every call site degrades through ?. until then. openReplace is reached via
+// the editor's own DOM ([data-query-editor-root]) so it only fires post-load.
+type QueryEditorHandle = {
+  openSearch: () => boolean;
+  openReplace: () => boolean;
+  scrollCursorIntoView: () => void;
+};
+
 const props = defineProps<{
   activeTab: QueryTab;
   activeConnection?: ConnectionConfig;
@@ -152,7 +162,7 @@ const columnInfoColumns = ref<ColumnInfo[]>([]);
 const columnInfoLoading = ref(false);
 const columnInfoError = ref<string | undefined>(undefined);
 const dataGridRef = ref<DataGridHandle>();
-const queryEditorRef = ref<InstanceType<typeof QueryEditor>>();
+const queryEditorRef = ref<QueryEditorHandle>();
 const columnVisibilitySearch = ref("");
 const columnVisibilityOptions = computed(
   () => dataGridRef.value?.filteredColumnVisibilityOptions(columnVisibilitySearch.value) ?? [],

@@ -79,7 +79,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useExportTracker, type ExportTask } from "@/composables/useExportTracker";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useQueryStore } from "@/stores/queryStore";
-import QueryEditor from "@/components/editor/QueryEditor.vue";
+import { QueryEditor } from "@/components/editor/queryEditorAsync";
 import type { SqlFormatDialect } from "@/lib/sqlFormatter";
 import { sqlDialectForDatabaseType, type SqlDialect } from "@/lib/sqlDialect";
 import { isCancelSearchShortcut } from "@/lib/keyboardShortcuts";
