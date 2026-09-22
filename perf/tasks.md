@@ -50,7 +50,7 @@
 | T29 | idle_timeout 设置诚实化 | improvement-plan §2 A7 | S | ✅ ed3c4bae |
 | T30 | 展示 token 用量与成本 | improvement-plan §5 D7 | S | ✅ 96fbac3b |
 | T31 | AI 连接失败重试一次 | improvement-plan §5 D6 | S | ✅ b051862a |
-| T32 | 聊天结果一键图表 | improvement-plan §5 D8 | S | ⬜ |
+| T32 | 聊天结果一键图表 | improvement-plan §5 D8 | S | ✅ b7ad137e |
 | T33 | 关键字大小写跟随输入 | improvement-plan §4 C7-1 | S | ⬜ |
 | T34 | 标签页切换快捷键 | improvement-plan §6 E6-1 | S | ⬜ |
 | T35 | Format SQL 快捷键 | improvement-plan §6 E6-2 | S | ⬜ |
@@ -387,13 +387,14 @@
   - [x] 单测：mock 首响应 429/5xx → 重试成功；流中断不重试（`ai.rs` 内嵌单测以 1ms 退避驱动 `send_with_retry_once` 打真实 loopback canned server：429→200 成功且请求恰 2 次、429→429 恰好 2 次即放弃、400 只发 1 次、连接拒绝首试→重试命中；另有 `is_retryable_status` 429/5xx 矩阵。`tests/ai_tool_stream.rs` 复用 T21 mock provider 走公开路径：`stream` 首响应 429 → 重试成功且两次请求体字节相同、Gemini 工具流 503 → 成功、非流式 `complete` 502 → 成功（各恰 2 次请求）、200 流中途断 body（Content-Length 虚高 + 提前关闭）→ 错误上抛且请求总数为 1、400 错误信息原样上抛只发 1 次）
   - [x] 全量回归通过（`cargo fmt --check` + `cargo check --workspace --locked` + `cargo test -p dbx-core`：lib 859 过（基线 854 + 新增 5）+ 集成全绿（含 ai_tool_stream 9 例，新增 5）；未动前端）
 
-### T32 聊天结果一键图表 ⬜
+### T32 聊天结果一键图表 ✅ b7ad137e
 
 - **来源** improvement-plan-2026-09.md §5 D8（Track D）· **规模** S
 - **内容** `QueryChart.vue` 已存在，无入口把工具结果接进去。在结果卡加一个"生成图表"动作，不写新图表代码。
+- **实现说明**：`execute_query`/`get_sample_data` 的结果没有结构化旁路（与 `explain_query` 携带 `explain_data` 不同），到达前端的是后端 `format_query_result_as_text` 渲染的 markdown 表格文本。新增纯函数模块 `lib/aiChartResult.ts` 把该表格解析回 `QueryResult` 形状（剥离 `(N rows, Xms)` 脚注、还原 `\|` 转义、去分隔符填充、`NULL`→null、数字样文本→number 以命中 QueryChart 的数值列检测；日期与截断单元格保持文本）。`AiAssistant.vue` 查询工具步骤卡在既有"立即执行"按钮旁新增"生成图表"动作，点击后在卡内嵌展开 `QueryChart`（`defineAsyncComponent` 按需加载，与 ContentArea 同款懒加载模式，ECharts 不进聊天 chunk）。动作仅对执行成功、表格可解析且存在数值列的 `execute_query`/`get_sample_data` 步骤显示（镜像 QueryChart 自身 `hasData`，不会打开到空态）；每次仅展开一张图（按 tool_call_id 记键），再点收起。行数上限 100——即后端 markdown 表格自身的 `MAX_ALLOWED_ROWS`——在解析侧镜像设防，图表不会扩到无界结果；零行/无列/纯文本结果不显示动作。未新增图表组件、未新增依赖。
 - **验收**
-  - [ ] 查询结果卡可打开图表并正确渲染
-  - [ ] 无新增图表组件/依赖；手工验证
+  - [x] 查询结果卡可打开图表并正确渲染（数据/列经 `chartResultFromToolText` 从结果卡文本直接映射为 QueryChart 的 `result` prop；本环境无 Tauri 运行时无法手工点验，以测试+构建佐证：解析器/映射/接线契约测试 + `pnpm check` 全绿 + `pnpm build` 通过，echarts 走既有异步 chunk）
+  - [x] 无新增图表组件/依赖；手工验证（手工不可行，如上以 `packages/app-tests/aiChartResult.test.ts` —— 解析、映射、可图表化判定、AiAssistant 源码契约（懒加载引入/谓词门控/prop 透传）、六 locale i18n —— 及 typecheck/lint/test/build 全绿佐证并如实标注）
 
 ### T33 关键字大小写跟随输入 ⬜
 
