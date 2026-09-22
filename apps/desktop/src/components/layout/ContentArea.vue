@@ -62,6 +62,7 @@ import { isTableDataEditable } from "@/lib/tableEditing";
 import { tableMetaForDataTab } from "@/lib/tableDataTabMeta";
 import { formatShortcut } from "@/lib/shortcutRegistry";
 import { effectiveDatabaseTypeForConnection } from "@/lib/jdbcDialect";
+import { sqlDialectForDatabaseType, type SqlDialect } from "@/lib/sqlDialect";
 import type { QueryTab, ConnectionConfig } from "@/types/database";
 import type { SqlFormatDialect } from "@/lib/sqlFormatter";
 
@@ -178,12 +179,7 @@ const activeSqlFormatDialect = computed<SqlFormatDialect>(() => {
   }
 });
 
-const editorDialect = computed<"mysql" | "postgres" | "sqlserver">(() => {
-  if (activeEffectiveDatabaseType.value === "postgres" || activeEffectiveDatabaseType.value === "kwdb")
-    return "postgres";
-  if (activeEffectiveDatabaseType.value === "sqlserver") return "sqlserver";
-  return "mysql";
-});
+const editorDialect = computed<SqlDialect>(() => sqlDialectForDatabaseType(activeEffectiveDatabaseType.value));
 
 const shortcutModifier = computed(() => (navigator.platform.toLowerCase().includes("mac") ? "Cmd" : "Ctrl"));
 

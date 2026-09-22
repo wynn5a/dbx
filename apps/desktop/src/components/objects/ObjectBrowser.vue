@@ -81,6 +81,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useQueryStore } from "@/stores/queryStore";
 import QueryEditor from "@/components/editor/QueryEditor.vue";
 import type { SqlFormatDialect } from "@/lib/sqlFormatter";
+import { sqlDialectForDatabaseType, type SqlDialect } from "@/lib/sqlDialect";
 import { isCancelSearchShortcut } from "@/lib/keyboardShortcuts";
 import { DsDialog } from "@/components/ui/dialog";
 import {
@@ -182,17 +183,7 @@ const canOpenStructureEditor = computed(() => supportsTableStructureEditing(effe
 const canOpenDiagram = computed(() => !!props.database && supportsSchemaDiagram(effectiveDatabaseType.value));
 const canOpenTableImport = computed(() => !!props.database && supportsTableImport(effectiveDatabaseType.value));
 const supportsTruncateTable = computed(() => supportsTableTruncate(effectiveDatabaseType.value));
-const sourceDialect = computed<"mysql" | "postgres" | "sqlserver">(() => {
-  if (
-    effectiveDatabaseType.value === "postgres" ||
-    effectiveDatabaseType.value === "gaussdb" ||
-    effectiveDatabaseType.value === "kwdb" ||
-    effectiveDatabaseType.value === "opengauss"
-  )
-    return "postgres";
-  if (effectiveDatabaseType.value === "sqlserver") return "sqlserver";
-  return "mysql";
-});
+const sourceDialect = computed<SqlDialect>(() => sqlDialectForDatabaseType(effectiveDatabaseType.value));
 const sourceFormatDialect = computed<SqlFormatDialect>(() => {
   switch (effectiveDatabaseType.value) {
     case "mysql":

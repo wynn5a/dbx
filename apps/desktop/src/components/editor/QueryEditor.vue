@@ -19,7 +19,7 @@ import EditorSearchPanel from "./EditorSearchPanel.vue";
 import CustomContextMenu, { type ContextMenuItem } from "@/components/ui/CustomContextMenu.vue";
 import { copyToClipboard } from "@/lib/clipboard";
 import { resolveExecutableSql } from "@/lib/sqlExecutionTarget";
-import { formatSqlText, type SqlFormatDialect } from "@/lib/sqlFormatter";
+import { formatSqlText, formatDialectForSqlDialect, type SqlFormatDialect } from "@/lib/sqlFormatter";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useTheme } from "@/composables/useTheme";
@@ -42,6 +42,7 @@ import {
   type ElasticsearchCompletionItem,
 } from "@/lib/elasticsearchCompletion";
 import { extractIdentifierAt, isSqlKeyword, matchTable } from "@/lib/sqlNavigation";
+import { duckdbEditorKeywords, type SqlDialect } from "@/lib/sqlDialect";
 import { sqlStatementRangeAt } from "@/lib/sqlStatementSelection";
 import { lineColumnToOffset, parseSqlErrorLocation } from "@/lib/sqlDiagnostics";
 import {
@@ -93,7 +94,7 @@ const props = defineProps<{
   database?: string;
   schema?: string;
   databaseType?: DatabaseType;
-  dialect?: "mysql" | "postgres" | "sqlserver";
+  dialect?: SqlDialect;
   formatDialect?: SqlFormatDialect;
   formatRequestId?: number;
   executionError?: string;
@@ -820,7 +821,10 @@ async function refreshSemanticDiagnostics() {
     // databases: the editor's schema view is often incomplete (aliases,
     // computed columns, cross-schema refs), producing false positives on SQL
     // that runs fine.
-    await api.analyzeSqlReferences(sql, props.formatDialect ?? props.dialect ?? "generic");
+    // The editor dialect uses the shared mapping in the backend's vocabulary
+    // (duckdb/clickhouse/oracle included), so prefer it over the sql-formatter
+    // dialect, whose vocabulary is limited to the formatter's languages.
+    await api.analyzeSqlReferences(sql, props.dialect ?? props.formatDialect ?? "generic");
     if (runId !== semanticDiagnosticRunId) return;
     setSemanticDiagnostics([]);
   } catch (error) {
@@ -855,7 +859,7 @@ async function formatCurrentSql() {
   try {
     const formatted = await formatSqlText(
       source,
-      props.formatDialect ?? props.dialect ?? "generic",
+      props.formatDialect ?? formatDialectForSqlDialect(props.dialect),
       settingsStore.editorSettings.sqlFormatter,
     );
     if (
@@ -1793,7 +1797,7 @@ onMounted(async () => {
       ViewPlugin,
     },
     { EditorState, Compartment, Prec, StateEffect, StateField },
-    { sql, MSSQL, MySQL, PostgreSQL, SQLDialect },
+    { sql, MSSQL, MySQL, PostgreSQL, SQLite, PLSQL, StandardSQL, SQLDialect },
     {
       autocompletion,
       startCompletion,
@@ -1943,9 +1947,22 @@ onMounted(async () => {
       ],
     });
 
-  const baseDialect = props.dialect === "postgres" ? PostgreSQL : props.dialect === "sqlserver" ? MSSQL : MySQL;
-  const extraKeywords =
-    "PIVOT UNPIVOT EXCLUDE REPLACE QUALIFY ASOF POSITIONAL ANTI SEMI SAMPLE TABLESAMPLE STRUCT MAP LIST ARRAY LAMBDA UNNEST LATERAL FILTER RECURSIVE SUMMARIZE PRAGMA READ_CSV READ_PARQUET READ_JSON DESCRIBE SHOW COPY EXPORT IMPORT";
+  // Editor dialect union mirrors the shared sqlDialect map (and the backend
+  // analyzer); sqlparser has no Oracle dialect in CodeMirror either, so Oracle
+  // uses its PL/SQL dialect spec.
+  const baseDialect =
+    props.dialect === "postgres"
+      ? PostgreSQL
+      : props.dialect === "sqlserver"
+        ? MSSQL
+        : props.dialect === "sqlite"
+          ? SQLite
+          : props.dialect === "oracle"
+            ? PLSQL
+            : props.dialect === "mysql"
+              ? MySQL
+              : StandardSQL;
+  const extraKeywords = duckdbEditorKeywords(props.databaseType);
 
   // PL/pgSQL extension: add procedural language keywords and built-in variables for PostgreSQL function/procedure bodies
   const isPostgres = props.dialect === "postgres";

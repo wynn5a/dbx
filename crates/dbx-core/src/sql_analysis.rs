@@ -71,6 +71,9 @@ pub fn analyze_sql_references(sql: &str, dialect: Option<&str>) -> Result<SqlRef
         "sqlserver" => Parser::parse_sql(&MsSqlDialect {}, sql),
         "clickhouse" => Parser::parse_sql(&ClickHouseDialect {}, sql),
         "duckdb" => Parser::parse_sql(&DuckDbDialect {}, sql),
+        // sqlparser has no Oracle dialect; Oracle-family syntax parses with the
+        // generic dialect (best effort, same as before the oracle alias existed).
+        "oracle" => Parser::parse_sql(&GenericDialect {}, sql),
         _ => Parser::parse_sql(&GenericDialect {}, sql),
     }
     .map_err(|err| err.to_string())?;
@@ -88,14 +91,19 @@ fn starts_with_duckdb_parser_gap_sql(sql: &str) -> bool {
         && starts_with_executable_sql_keyword(sql, &["FROM", "SUMMARIZE", "SUMMARISE", "PIVOT", "UNPIVOT"])
 }
 
+// The dialect grouping shared with the frontend's editor/completion dialects.
+// apps/desktop/src/lib/sqlDialect.ts mirrors this table — keep both in sync
+// (locked by the test below and by packages/app-tests/sqlDialect.test.ts).
 fn normalize_dialect(dialect: Option<&str>) -> String {
     match dialect.unwrap_or("generic").to_ascii_lowercase().as_str() {
-        "postgres" | "postgresql" | "redshift" | "opengauss" | "gaussdb" | "highgo" => "postgres".to_string(),
-        "mysql" | "mariadb" | "doris" | "starrocks" | "oceanbase" => "mysql".to_string(),
-        "sqlite" => "sqlite".to_string(),
+        "postgres" | "postgresql" | "redshift" | "opengauss" | "gaussdb" | "highgo" | "kingbase" | "vastbase"
+        | "kwdb" => "postgres".to_string(),
+        "mysql" | "mariadb" | "doris" | "starrocks" | "oceanbase" | "goldendb" | "databend" => "mysql".to_string(),
+        "sqlite" | "rqlite" => "sqlite".to_string(),
         "sqlserver" | "mssql" => "sqlserver".to_string(),
         "clickhouse" => "clickhouse".to_string(),
         "duckdb" => "duckdb".to_string(),
+        "oracle" | "dameng" | "oceanbase-oracle" | "yashandb" => "oracle".to_string(),
         _ => "generic".to_string(),
     }
 }
@@ -388,4 +396,56 @@ fn table_reference_from_name(name: &ObjectName, alias: Option<String>) -> Option
 
 fn object_name_last_ident(name: &ObjectName) -> Option<&Ident> {
     name.0.iter().rev().find_map(ObjectNamePart::as_ident)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalize_dialect_groups_engines_like_the_frontend_map() {
+        // Locked table — mirrors SQL_DIALECT_ALIASES in
+        // apps/desktop/src/lib/sqlDialect.ts. Change both together.
+        let expected: &[(&str, &str)] = &[
+            ("postgres", "postgres"),
+            ("postgresql", "postgres"),
+            ("redshift", "postgres"),
+            ("opengauss", "postgres"),
+            ("gaussdb", "postgres"),
+            ("highgo", "postgres"),
+            ("kingbase", "postgres"),
+            ("vastbase", "postgres"),
+            ("kwdb", "postgres"),
+            ("mysql", "mysql"),
+            ("mariadb", "mysql"),
+            ("doris", "mysql"),
+            ("starrocks", "mysql"),
+            ("oceanbase", "mysql"),
+            ("goldendb", "mysql"),
+            ("databend", "mysql"),
+            ("sqlite", "sqlite"),
+            ("rqlite", "sqlite"),
+            ("sqlserver", "sqlserver"),
+            ("mssql", "sqlserver"),
+            ("clickhouse", "clickhouse"),
+            ("duckdb", "duckdb"),
+            ("oracle", "oracle"),
+            ("dameng", "oracle"),
+            ("oceanbase-oracle", "oracle"),
+            ("yashandb", "oracle"),
+        ];
+        for (input, want) in expected {
+            assert_eq!(&normalize_dialect(Some(input)), want, "alias {input}");
+        }
+
+        // Case-insensitive, like the frontend lookup.
+        assert_eq!(normalize_dialect(Some("Postgres")), "postgres");
+        assert_eq!(normalize_dialect(Some("OCEANBASE-ORACLE")), "oracle");
+
+        // Missing and unknown inputs fall back to generic, never to a family.
+        assert_eq!(normalize_dialect(None), "generic");
+        assert_eq!(normalize_dialect(Some("h2")), "generic");
+        assert_eq!(normalize_dialect(Some("gbase")), "generic");
+        assert_eq!(normalize_dialect(Some("jdbc")), "generic");
+    }
 }

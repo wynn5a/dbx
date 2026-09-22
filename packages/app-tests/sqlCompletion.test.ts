@@ -327,6 +327,29 @@ test("keeps Postgres quoting independent of the MySQL and SQL Server identifier 
   assert.equal(build("sqlserver").find((item) => item.label === "user")?.apply, "[user]");
 });
 
+test("inserts Oracle and DuckDB identifiers bare instead of falling back to MySQL backticks", () => {
+  // Before the shared dialect map, every engine outside postgres/sqlserver was
+  // typed as mysql, so Oracle inserts came out backtick-quoted (a syntax error
+  // in Oracle). Generic-family dialects stay deliberately unquoted.
+  for (const dialect of ["oracle", "duckdb", "clickhouse", "sqlite", "generic"] as const) {
+    const reservedItems = buildSqlCompletionItems("select * from ord", "select * from ord".length, {
+      tables: dialectQuotedTables,
+      columnsByTable: new Map(),
+      dialect,
+    });
+    const specialItems = buildSqlCompletionItems("select * from has", "select * from has".length, {
+      tables: dialectQuotedTables,
+      columnsByTable: new Map(),
+      dialect,
+    });
+
+    // `order` is a MySQL reserved word (would have been backtick-quoted before);
+    // `has`tick` would have been backtick-quoted with the backtick doubled.
+    assert.equal(reservedItems.find((item) => item.label === "order")?.apply, "order", dialect);
+    assert.equal(specialItems.find((item) => item.label === "has`tick")?.apply, "has`tick", dialect);
+  }
+});
+
 test("suggests matching table names after FROM", () => {
   const sql = "select * from us";
   const items = buildSqlCompletionItems(sql, sql.length, {
