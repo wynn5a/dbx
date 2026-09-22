@@ -33,7 +33,7 @@
 | T12 | Agent 工具查询可取消可见 | improvement-plan §5 D2 | M | ✅ b2e2f9d8 |
 | T13 | 启动并行加载 + 加载态 | improvement-plan §3 B3 | S | ✅ 014307e0 |
 | T14 | DDL 后失效补全缓存 | improvement-plan §4 C4 | S | ✅ 9b9e361f |
-| T15 | 启动无暗色闪烁 | improvement-plan §6 E2 | S | ⬜ |
+| T15 | 启动无暗色闪烁 | improvement-plan §6 E2 | S | ✅ 73011fe7 |
 | T16 | 全局错误处理器 | improvement-plan §6 E3 | S | ⬜ |
 | T17 | 可行动的连接错误提示 | improvement-plan §6 E4 | M | ⬜ |
 | T18 | 连接与 schema 加载可取消 | improvement-plan §6 E5 | M | ⬜ |
@@ -218,14 +218,15 @@
   - [x] 测试通过（`pnpm check` 全绿：vitest 165 文件 1146 用例）
 - **实现说明**：DDL 判定复用仓库既有分类器 `sqlMetadataRefreshTarget`（`lib/sqlMetadataRefresh.ts`，与侧栏树刷新同源），不自造正则：成功执行的回调（`useSqlExecution` 的 `doExecute`，抽为导出的 `refreshMetadataAfterExecution`）在对象 DDL（CREATE/ALTER/DROP/RENAME …）命中时对该 connection+database 调用 `invalidateCompletionCache`（新从 connectionStore 导出），数据库级 DDL（CREATE/DROP DATABASE/SCHEMA）则失效整个 connection 的缓存。**TRUNCATE 有意不触发**：该分类器（既有测试锁定）把 TRUNCATE 归为数据操作——它不改结构，补全列表（表/列名）依然有效；任务原文中的 TRUNCATE 按仓库现状从宽处理为不失效。注释在匹配前剥离，CTE/子查询无 DDL 关键字头不会命中（字符串字面量内含 "CREATE TABLE" 的极端误判与树刷新现状一致，仅多一次无害重取）。失效是惰性的：下一次补全请求时重取。侧栏树刷新原本就有 DDL 钩子（同一成功分支），本次仅在同分支补上补全缓存失效，未扩大范围。
 
-### T15 启动无暗色闪烁 ⬜
+### T15 启动无暗色闪烁 ✅ 73011fe7
 
 - **来源** improvement-plan-2026-09.md §6 E2（Track E）· **规模** S
 - **内容** `index.html` 无主题引导，`applyTheme()` 在 `App.vue:940` onMounted 才跑。加 5 行内联脚本（读同一 localStorage key，首帧前设 root class），并给 `#root:empty` 加 `prefers-color-scheme: dark` 背景。
 - **验收**
-  - [ ] 暗色系统冷启动无白闪（首帧前 class 就位）；亮色/暗色/跟随系统三模式均正确
-  - [ ] localStorage 键与语义和 `applyTheme()` 一致（抽共享常量或注释锁定）
-  - [ ] 手工截图/录屏佐证 + `pnpm check`
+  - [x] 暗色系统冷启动无白闪（首帧前 class 就位）；亮色/暗色/跟随系统三模式均正确（chrome-headless-shell + CDP 对 `pnpm build` 产物实测：首帧 rAF 探针在首帧绘制前已读到 `html.dark` + `color-scheme: dark`；录得首帧截图——存储 dark / system→dark 的预挂载加载帧为深色 `rgb(19 20 22)`、存储 light 在暗色系统下保持白底、禁用脚本的 no-JS 对照经 media query 回退同样深色）
+  - [x] localStorage 键与语义和 `applyTheme()` 一致（`lib/appTheme.ts` 新增 `resolveBootThemeAppearance` 纯函数命名该解析并有单测；`index.html` 内联脚本注释锁定键名/class/归一化/system 解析；`appTheme.test.ts` 从 index.html 抽出真实内联脚本对 DOM stub 执行（三种模式 × 丢失/非法键），并加源码契约测试防漂移：脚本必须在 `<head>` 且先于 app bundle、读 `APP_THEME_STORAGE_KEY`、`html.dark #root:empty` 深色规则存在、`#root` 保持空）
+  - [x] 手工截图/录屏佐证 + `pnpm check`（无头浏览器截图见上；`pnpm check` 全绿：vitest 165 文件 1149 用例）
+- **实现说明**：`<head>` 内联脚本与 `useTheme.applyTheme` 同契约（同 key `dbx-theme`、同 `html.dark` class、同内联 `color-scheme`、非法/缺失值回退 system、system 走 matchMedia），onMounted 的 `applyTheme()` 仍是主题所有者、重复应用无视觉变化。**附带修复一处既有缺陷**：`#root:empty` 的样式原来写在 `#root` 内部——`:empty` 只匹配无任何子节点的元素，选择器从未命中，预挂载帧实际始终是浏览器白底（即暗色白闪的真正来源），"Loading…" 也从未显示；样式块移入 `<head>` 后加载帧真正生效，并新增三层着色：`html.dark`（引导脚本已解析）→ `@media (prefers-color-scheme: dark)` 无 JS 回退 → `html:not(.dark)` 钉死亮色（防暗系统上的显式 light 被误染）。深色取值对齐 `styles/globals.css` 的 `.dark` token（`--background` / `--muted-foreground` 回退值）。
 
 ### T16 全局错误处理器 ⬜
 
