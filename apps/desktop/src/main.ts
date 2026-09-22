@@ -5,6 +5,7 @@ import "vue-virtual-scroller/dist/vue-virtual-scroller.css";
 import "./styles/globals.css";
 import { installDebugLogCapture } from "@/lib/debugLog";
 import { installGlobalErrorHandler } from "@/lib/globalErrorHandler";
+import { flushStartupMarks, markStartupPhase } from "@/lib/startupMarks";
 import { useToast } from "@/composables/useToast";
 
 function startupErrorMessage(error: unknown): string {
@@ -88,22 +89,35 @@ function installAppErrorHandler(app: ReturnType<typeof createApp>, t: (key: stri
 }
 
 async function bootstrap() {
-  console.log("[STARTUP] frontend bootstrap begin");
+  markStartupPhase("startup:bootstrap-begin");
   const [{ default: i18n, loadSavedLocale }, { default: App }] = await Promise.all([
     import("./i18n"),
     import("./App.vue"),
   ]);
-  console.log("[STARTUP] frontend modules loaded");
+  markStartupPhase("startup:modules-loaded");
   await loadSavedLocale();
-  console.log("[STARTUP] locale ready");
+  markStartupPhase("startup:locale-ready");
 
   const app = createApp(App);
   app.use(createPinia());
   app.use(i18n);
   app.use(VueVirtualScroller);
   installAppErrorHandler(app, i18n.global.t);
+  markStartupPhase("startup:app-created");
   app.mount("#root");
-  console.log("[STARTUP] vue mounted");
+  markStartupPhase("startup:vue-mounted");
+
+  // First frame: flush the phases collected so far. The async init chain
+  // (App.vue initApp) flushes again once its disk reads settle, and enabling
+  // debug logging after boot flushes the buffered summary via debugLog.
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(() => {
+      markStartupPhase("startup:first-frame");
+      flushStartupMarks();
+    });
+  } else {
+    flushStartupMarks();
+  }
 }
 
 installDebugLogCapture();

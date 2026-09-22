@@ -148,6 +148,15 @@ export function appendErrorDebugLog(...args: unknown[]) {
   flushDebugLogs();
 }
 
+// Listeners run when debug logging is switched on. lib/startupMarks registers
+// here so a startup summary collected before logging was enabled still reaches
+// the exported log.
+const debugLoggingEnabledListeners: Array<() => void> = [];
+
+export function onDebugLoggingEnabled(listener: () => void) {
+  debugLoggingEnabledListeners.push(listener);
+}
+
 export function setDebugLoggingEnabled(enabled: boolean) {
   enabledCache = enabled;
   safeLocalStorageSet(DEBUG_LOG_ENABLED_KEY, enabled ? "1" : "0");
@@ -159,6 +168,7 @@ export function setDebugLoggingEnabled(enabled: boolean) {
       language: navigator.language,
       online: navigator.onLine,
     });
+    debugLoggingEnabledListeners.forEach((listener) => listener());
   } else {
     // Persist whatever was buffered while logging was on.
     flushDebugLogs();

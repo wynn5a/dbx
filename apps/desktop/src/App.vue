@@ -68,6 +68,7 @@ import { supportsSqlFileExecution } from "@/lib/databaseCapabilities";
 import { buildHistoryAiAnalysisPrompt } from "@/lib/historyAiAnalysis";
 import { countAvailableAgentDriverUpdates, type AgentDriverUpdateBadgeState } from "@/lib/agentDriverUpdateBadge";
 import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/safeStorage";
+import { flushStartupMarks, markStartupPhase } from "@/lib/startupMarks";
 import { DsDialog } from "@/components/ui/dialog";
 import { DsToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -940,17 +941,20 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 function initApp() {
-  const t0 = performance.now();
-  console.log("[STARTUP] initApp begin");
+  markStartupPhase("startup:init-app-begin");
   settingsStore.initDesktopSettings().catch(() => {});
   savedSqlStore
     .initFromStorage()
     .then(() => {
-      console.log(`[STARTUP]   savedSqlStore.initFromStorage: ${(performance.now() - t0).toFixed(0)}ms`);
+      markStartupPhase("startup:saved-sql-loaded");
       return connectionStore.initFromDisk();
     })
     .then(() => {
-      console.log(`[STARTUP]   connectionStore.initFromDisk: ${(performance.now() - t0).toFixed(0)}ms`);
+      markStartupPhase("startup:connections-loaded");
+      // End of the awaited startup chain: flush the complete summary (the
+      // first-frame flush in main.ts may have run before these disk reads
+      // settled).
+      flushStartupMarks();
       reconnectRestoredTabs();
     })
     .catch((e: any) => {
@@ -1002,12 +1006,12 @@ watch(updateNotificationsEnabled, (enabled) => {
 });
 
 onMounted(async () => {
-  console.log("[STARTUP] onMounted begin");
-  const mountStart = performance.now();
+  markStartupPhase("startup:on-mounted-begin");
   requestAnimationFrame(() => {
     aiPanelReady.value = true;
   });
   applyTheme();
+  markStartupPhase("startup:theme-applied");
   void applyUiScale(settingsStore.editorSettings.uiScale);
   window.addEventListener("keydown", handleKeydown);
   window.addEventListener("dbx-open-driver-store", openDriverStoreFromEvent);
@@ -1032,7 +1036,7 @@ onMounted(async () => {
   void openPendingSqlFiles();
   void openPendingDbFiles();
   void openPendingConnectionLinks();
-  console.log(`[STARTUP] onMounted sync done: ${(performance.now() - mountStart).toFixed(0)}ms`);
+  markStartupPhase("startup:on-mounted-sync-done");
 });
 
 onUnmounted(() => {
