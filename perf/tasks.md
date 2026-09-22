@@ -38,7 +38,7 @@
 | T17 | 可行动的连接错误提示 | improvement-plan §6 E4 | M | ✅ 0bbf6f2d |
 | T18 | 连接与 schema 加载可取消 | improvement-plan §6 E5 | M | ✅ 58f1c843 |
 | T19 | 高危 SQL 增加确认摩擦 | improvement-plan §5 D3 | S | ✅ 75cfc769 |
-| T20 | search_tables 工具 | improvement-plan §5 D4 | S | ⬜ |
+| T20 | search_tables 工具 | improvement-plan §5 D4 | S | ✅ adf7a942 |
 | T21 | Gemini/Ollama 工具调用 | improvement-plan §5 D5 | M | ⬜ |
 | T22 | 置信门控未知列诊断 | improvement-plan §4 C5 | L | ⬜ |
 | T23 | 网格 FK 点击跳转 | improvement-plan §6 E7-1 | M | ⬜ |
@@ -268,14 +268,15 @@
   - [x] 测试通过（`pnpm check` 全绿：format + lint + typecheck + vitest 168 文件 1182 用例，含新增 4 例——friction 仅限 dangerous/schema_change、Run 可用性映射、friction 取自确认卡同一 decision、AiAssistant 接线与六 locale 文案源码契约）
 - **实现说明**：摩擦形式选勾选确认框（简单可靠，纯前端）。判定与门控抽为 `aiSqlExecutionPolicy.ts` 纯函数供测试；`AiAssistant.vue` 的 `PendingToolConfirm` 增加 `frictionAcknowledged` 字段，`tool_confirm_request` 每次置 false（状态独立、随卡复位），勾选框仅在 `requiresAiConfirmFriction(category)` 为真时渲染，Run 按钮绑定 `isAiConfirmRunEnabled`。后端确认 API 与风险分类逻辑零改动。UI 组件无挂载测试设施，接线以源码契约测试锁定（同 T15/T16 先例）。
 
-### T20 search_tables 工具 ⬜
+### T20 search_tables 工具 ✅ adf7a942
 
 - **来源** improvement-plan-2026-09.md §5 D4（Track D）· **规模** S
 - **内容** schema 上下文只是 listing 顺序前 50 张表（`ai.ts:375, 413-455`）+ truncated 标志。新增按表名/注释子串搜索的工具，agent 在数千表 schema 里可自助定位。
 - **验收**
-  - [ ] 测试：数千表 schema 下 agent 通过搜索定位目标表并继续查询
-  - [ ] 命中上限时返回 truncated 标记
-  - [ ] 工具注册与描述进入 agent 工具清单测试
+  - [x] 测试：数千表 schema 下 agent 通过搜索定位目标表并继续查询（工具层两步模拟：2 500 表 SQLite 实库上先断言 capped `list_tables` 确实看不到排在末尾的目标表，再 `search_tables` 命中、随后 `execute_query` 对该表 COUNT 成功；另有纯函数层 5 000 表 mock 清单的大小写不敏感命中测试）
+  - [x] 命中上限时返回 truncated 标记（命中数超过 limit 时尾部追加 `... (truncated ...)` 行；纯函数返回 `truncated` 布尔并被单测锁定，超限/未超限两侧都有断言）
+  - [x] 工具注册与描述进入 agent 工具清单测试（`search_tables` 进 Ask 模式与 Agent 模式（SQL/非 SQL 引擎）清单断言，描述含 case-insensitive/comment、`read_only=true`、`parallel_ok=true`、`required=["search"]` 逐一锁定）
+- **实现说明**：`agent_tools.rs` 新增 `search_tables`（`search` 必填、`schema` 可选默认当前 database、`limit` 可选默认 50 上限 100 复用 `requested_limit`）。行为：对目标 schema 取**无 filter/limit 的完整表清单**（复用 `list_tables_core`，不新写 SQL——截断的 listing 会漏掉命中，违背工具初衷），对表名+注释做大小写不敏感子串匹配（匹配与渲染拆成纯函数便于 mock 测试），按 listing 顺序输出 `- 表名 (类型) -- 注释` 行；schema-aware 引擎输出 `schema.table` 限定名（`is_schema_aware` 判定，与 `build_table_select_sql` 一致），扁平命名空间引擎（MySQL/SQLite）输出裸表名；零命中显式输出 `(no tables matching …)`。注册进 `read_only_tools`/`all_tools`（紧随 `list_tables`），只读、parallel_ok——自动执行、不经写确认卡（确认卡仅对 `execute_query` 非 read-only SQL 触发，前端零接线改动）；Agent 模式提示词的工具清单行补入 search_tables 并附一句"列表找不到就搜索"的指引。schema 限定用 DuckDB 内存库三 schema 实测（analytics/sales 显式限定互斥、默认 scope 只见 main）。
 
 ### T21 Gemini/Ollama 工具调用 ⬜
 
