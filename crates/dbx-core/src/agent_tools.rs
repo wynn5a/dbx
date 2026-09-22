@@ -13,15 +13,19 @@ use tokio_util::sync::CancellationToken;
 
 use crate::agent_events::{ToolCall, ToolDefinition, ToolResult};
 use crate::connection::AppState;
+use crate::db;
 use crate::models::connection::DatabaseType;
 use crate::query::{self, QueryExecutionOptions};
 use crate::query_execution_sql::{build_explain_sql, supports_explain_plan, supports_sql_query, ExplainSqlOptions};
 use crate::schema;
-use crate::sql_dialect::{build_table_select_sql, TableSelectSqlOptions};
+use crate::sql_dialect::{build_table_select_sql, is_schema_aware, TableSelectSqlOptions};
 use crate::types::QueryResult;
 
 /// Tables returned by `list_tables` (one extra is requested to detect overflow).
 const LIST_TABLES_LIMIT: usize = 200;
+/// Default match cap for `search_tables` (the model can ask for more, up to
+/// `MAX_ALLOWED_ROWS`).
+const SEARCH_TABLES_LIMIT: usize = 50;
 /// Default row cap for `execute_query`.
 const EXECUTE_QUERY_LIMIT: usize = 50;
 /// Default row cap for `get_sample_data`.
@@ -33,13 +37,13 @@ const MAX_CELL_CHARS: usize = 200;
 
 /// Tools available in Ask mode (metadata only — never mutate, never execute SQL).
 pub fn read_only_tools() -> Vec<ToolDefinition> {
-    vec![list_tables_tool(), get_columns_tool()]
+    vec![list_tables_tool(), search_tables_tool(), get_columns_tool()]
 }
 
 /// Tools available in Agent mode for the given database type. SQL execution tools
 /// are gated to SQL stores; `explain_query` is gated to engines that support EXPLAIN.
 pub fn all_tools(db_type: DatabaseType) -> Vec<ToolDefinition> {
-    let mut tools = vec![list_tables_tool(), get_columns_tool()];
+    let mut tools = vec![list_tables_tool(), search_tables_tool(), get_columns_tool()];
     if supports_sql_query(db_type) {
         tools.push(execute_query_tool());
         tools.push(get_sample_data_tool());
@@ -60,6 +64,26 @@ fn list_tables_tool() -> ToolDefinition {
                 "schema": { "type": "string", "description": "Schema to list (defaults to the current database/schema)" }
             },
             "required": []
+        }),
+        read_only: true,
+        parallel_ok: true,
+    }
+}
+
+fn search_tables_tool() -> ToolDefinition {
+    ToolDefinition {
+        name: "search_tables",
+        description: "Search tables and views by a case-insensitive substring on their name or comment and get \
+                      the matches back. Use this to locate tables when the database is too large for \
+                      list_tables to show every one of them.",
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "search": { "type": "string", "description": "Substring to match against table names and comments (case-insensitive)" },
+                "schema": { "type": "string", "description": "Schema to search (defaults to the current database/schema)" },
+                "limit": { "type": "integer", "description": "Max matches to return (default 50, capped at 100)" }
+            },
+            "required": ["search"]
         }),
         read_only: true,
         parallel_ok: true,
@@ -164,6 +188,7 @@ pub async fn execute_tool(
 
     let result = match tool_call.name.as_str() {
         "list_tables" => execute_list_tables(tool_call, state, connection_id, database).await,
+        "search_tables" => execute_search_tables(tool_call, state, connection_id, database, db_type).await,
         "get_columns" => execute_get_columns(tool_call, state, connection_id, database).await,
         "execute_query" => execute_execute_query(tool_call, state, connection_id, database, session_id, cancel).await,
         "get_sample_data" => {
@@ -235,6 +260,80 @@ async fn execute_list_tables(
         lines.push(format!("... (truncated to first {LIST_TABLES_LIMIT})"));
     }
     Ok(lines.join("\n"))
+}
+
+/// `search_tables`: case-insensitive substring search over the table name and
+/// comment. The listing is fetched without `list_tables`' filter/limit so a
+/// capped listing cannot hide a match — the whole point on schemas with
+/// thousands of tables — and matches are reported schema-qualified so the
+/// model can query them directly.
+async fn execute_search_tables(
+    tool_call: &ToolCall,
+    state: &Arc<AppState>,
+    connection_id: &str,
+    database: &str,
+    db_type: &DatabaseType,
+) -> Result<String, String> {
+    let query = arg_str(tool_call, "search").ok_or("Missing required parameter: search")?;
+    let schema = arg_str(tool_call, "schema").unwrap_or(database);
+    let limit = requested_limit(tool_call, SEARCH_TABLES_LIMIT);
+
+    let tables = schema::list_tables_core(state, connection_id, database, schema, None, None).await?;
+    let (matches, truncated) = search_table_infos(&tables, query, limit);
+    Ok(format_table_search_results(schema, db_type, &matches, query, truncated))
+}
+
+/// Case-insensitive substring match over table names and comments, in listing
+/// order. `truncated` is true when more than `limit` tables matched, so the
+/// model knows to refine the search or raise the limit.
+fn search_table_infos<'a>(tables: &'a [db::TableInfo], query: &str, limit: usize) -> (Vec<&'a db::TableInfo>, bool) {
+    let needle = query.to_lowercase();
+    let matched: Vec<&db::TableInfo> = tables
+        .iter()
+        .filter(|table| {
+            table.name.to_lowercase().contains(&needle)
+                || table.comment.as_deref().map(str::trim).unwrap_or_default().to_lowercase().contains(&needle)
+        })
+        .collect();
+    let truncated = matched.len() > limit;
+    (matched.into_iter().take(limit).collect(), truncated)
+}
+
+/// Render matches as `- table (type) -- comment` lines (schema-qualified on
+/// schema-aware engines), with a truncation marker when hits exceeded the limit.
+fn format_table_search_results(
+    schema: &str,
+    db_type: &DatabaseType,
+    matches: &[&db::TableInfo],
+    query: &str,
+    truncated: bool,
+) -> String {
+    if matches.is_empty() {
+        return format!("(no tables matching \"{query}\")");
+    }
+    let mut lines: Vec<String> = matches
+        .iter()
+        .map(|table| {
+            let name = if is_schema_aware(*db_type) && !schema.trim().is_empty() {
+                format!("{schema}.{}", table.name)
+            } else {
+                table.name.clone()
+            };
+            let mut line = format!("- {} ({})", name, table.table_type);
+            if let Some(comment) = table.comment.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+                line.push_str(&format!(" -- {comment}"));
+            }
+            line
+        })
+        .collect();
+    if truncated {
+        lines.push(format!(
+            "... (truncated to first {} matches; more tables match \"{}\" — refine the search or raise the limit)",
+            matches.len(),
+            query
+        ));
+    }
+    lines.join("\n")
 }
 
 async fn execute_get_columns(
@@ -528,6 +627,10 @@ mod tests {
         ToolCall { id: id.to_string(), name: "execute_query".to_string(), arguments }
     }
 
+    fn named_tool_call(id: &str, name: &str, arguments: Value) -> ToolCall {
+        ToolCall { id: id.to_string(), name: name.to_string(), arguments }
+    }
+
     fn sample_result() -> QueryResult {
         QueryResult {
             columns: vec!["one".to_string()],
@@ -554,24 +657,89 @@ mod tests {
         (state, dir)
     }
 
+    /// Minimal DuckDB connection config, same shape as `transfer.rs`'s test
+    /// helper: enough for the pool registry to recognize the engine type.
+    fn duckdb_test_config(id: &str) -> crate::models::connection::ConnectionConfig {
+        crate::models::connection::ConnectionConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            db_type: DatabaseType::DuckDb,
+            driver_profile: None,
+            driver_label: None,
+            url_params: None,
+            host: ":memory:".to_string(),
+            port: 0,
+            username: String::new(),
+            password: String::new(),
+            database: None,
+            visible_databases: None,
+            attached_databases: Vec::new(),
+            color: None,
+            transport_layers: Vec::new(),
+            connect_timeout_secs: 5,
+            query_timeout_secs: 30,
+            idle_timeout_secs: 60,
+            ssl: false,
+            ca_cert_path: String::new(),
+            client_cert_path: String::new(),
+            client_key_path: String::new(),
+            sysdba: false,
+            oracle_connection_type: None,
+            connection_string: None,
+            redis_connection_mode: None,
+            redis_sentinel_master: String::new(),
+            redis_sentinel_nodes: String::new(),
+            redis_sentinel_username: String::new(),
+            redis_sentinel_password: String::new(),
+            redis_sentinel_tls: false,
+            redis_cluster_nodes: String::new(),
+            etcd_endpoints: String::new(),
+            external_config: None,
+            jdbc_driver_class: None,
+            jdbc_driver_paths: Vec::new(),
+            one_time: false,
+        }
+    }
+
     #[test]
     fn ask_mode_tools_are_metadata_only() {
         let names: Vec<&str> = read_only_tools().iter().map(|t| t.name).collect();
-        assert_eq!(names, vec!["list_tables", "get_columns"]);
+        assert_eq!(names, vec!["list_tables", "search_tables", "get_columns"]);
     }
 
     #[test]
     fn agent_tools_gated_by_database_type() {
         let mysql: Vec<&str> = all_tools(DatabaseType::Mysql).iter().map(|t| t.name).collect();
-        assert_eq!(mysql, vec!["list_tables", "get_columns", "execute_query", "get_sample_data", "explain_query"]);
+        assert_eq!(
+            mysql,
+            vec!["list_tables", "search_tables", "get_columns", "execute_query", "get_sample_data", "explain_query"]
+        );
 
         // SQLite supports SQL but not EXPLAIN-plan parsing here.
         let sqlite: Vec<&str> = all_tools(DatabaseType::Sqlite).iter().map(|t| t.name).collect();
-        assert_eq!(sqlite, vec!["list_tables", "get_columns", "execute_query", "get_sample_data"]);
+        assert_eq!(sqlite, vec!["list_tables", "search_tables", "get_columns", "execute_query", "get_sample_data"]);
 
         // Redis is non-SQL: only metadata tools.
         let redis: Vec<&str> = all_tools(DatabaseType::Redis).iter().map(|t| t.name).collect();
-        assert_eq!(redis, vec!["list_tables", "get_columns"]);
+        assert_eq!(redis, vec!["list_tables", "search_tables", "get_columns"]);
+    }
+
+    #[test]
+    fn search_tables_is_registered_read_only_and_fully_described() {
+        for tools in [read_only_tools(), all_tools(DatabaseType::Postgres)] {
+            let def = tools.iter().find(|t| t.name == "search_tables").expect("search_tables registered");
+            // Read-only metadata search: auto-executed like list_tables, never
+            // routed through the write-confirmation card.
+            assert!(def.read_only, "{}", def.description);
+            assert!(def.parallel_ok, "{}", def.description);
+            assert!(def.description.contains("case-insensitive"), "{}", def.description);
+            assert!(def.description.contains("comment"), "{}", def.description);
+            let required = def.parameters["required"].as_array().expect("required array");
+            assert_eq!(required, json!(["search"]).as_array().unwrap());
+            for key in ["search", "schema", "limit"] {
+                assert!(def.parameters["properties"][key].is_object(), "missing parameter {key}");
+            }
+        }
     }
 
     #[test]
@@ -588,6 +756,231 @@ mod tests {
         assert!(validate_table_name("").is_err());
         assert!(validate_table_name("users; DROP TABLE x").is_err());
         assert!(validate_table_name("a\"b").is_err());
+    }
+
+    fn listed_table(name: &str, comment: Option<&str>) -> db::TableInfo {
+        db::TableInfo {
+            name: name.to_string(),
+            table_type: "BASE TABLE".to_string(),
+            comment: comment.map(str::to_string),
+            parent_schema: None,
+            parent_name: None,
+        }
+    }
+
+    #[test]
+    fn search_finds_a_target_table_by_name_in_a_thousands_table_schema() {
+        // The mock metadata source: a 5 000-table listing whose target sits at
+        // the very end — far beyond the capped listing the agent's schema
+        // context (first 50) or list_tables (first 200) exposes.
+        let mut tables: Vec<db::TableInfo> =
+            (0..4_999).map(|i| listed_table(&format!("app_entity_{i:04}"), None)).collect();
+        tables.push(listed_table("payment_transactions_2024", Some("Settled card payments")));
+
+        // Case-insensitive: the model asks in whatever case it likes.
+        let (matches, truncated) = search_table_infos(&tables, "PAYMENT_TRANS", 50);
+        assert_eq!(matches.len(), 1, "exactly the target matches");
+        assert_eq!(matches[0].name, "payment_transactions_2024");
+        assert!(!truncated);
+
+        // Comment-only match: the name does not contain the query.
+        let (matches, truncated) = search_table_infos(&tables, "settled card", 50);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].name, "payment_transactions_2024");
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn search_matches_comment_substrings_case_insensitively() {
+        let tables = vec![
+            listed_table("app_entity_0001", None),
+            listed_table("odometer_logs", Some("Vehicle Odometer readings")),
+            listed_table("tire_pressure", Some("  leading spaces are trimmed  ")),
+        ];
+        let (matches, _) = search_table_infos(&tables, "odometer reading", 50);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].name, "odometer_logs");
+
+        let (matches, _) = search_table_infos(&tables, "LEADING SPACES", 50);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].name, "tire_pressure");
+    }
+
+    #[test]
+    fn search_truncates_at_the_limit_and_reports_it() {
+        let tables: Vec<db::TableInfo> = (0..30).map(|i| listed_table(&format!("log_entry_{i}"), None)).collect();
+
+        let (matches, truncated) = search_table_infos(&tables, "log_entry", 50);
+        assert_eq!(matches.len(), 30);
+        assert!(!truncated);
+
+        let (matches, truncated) = search_table_infos(&tables, "log_entry", 10);
+        assert_eq!(matches.len(), 10, "cut to the requested limit");
+        assert!(truncated, "more hits than the limit must set the truncated flag");
+    }
+
+    #[test]
+    fn search_with_no_matches_renders_an_empty_marker() {
+        let tables = vec![listed_table("users", None)];
+        let (matches, truncated) = search_table_infos(&tables, "does_not_exist", 50);
+        assert!(matches.is_empty());
+        assert!(!truncated);
+        assert_eq!(
+            format_table_search_results("public", &DatabaseType::Postgres, &matches, "does_not_exist", truncated),
+            "(no tables matching \"does_not_exist\")"
+        );
+    }
+
+    #[test]
+    fn search_results_render_schema_qualified_lines_with_a_truncation_marker() {
+        let tables = vec![
+            listed_table("payment_transactions_2024", Some("Settled card payments")),
+            listed_table("payment_failures", None),
+        ];
+        let (matches, truncated) = search_table_infos(&tables, "payment", 1);
+        assert_eq!(matches.len(), 1);
+        assert!(truncated);
+
+        // Schema-aware engines get qualified names the model can query as-is.
+        let text = format_table_search_results("billing", &DatabaseType::Postgres, &matches, "payment", truncated);
+        assert!(text.contains("- billing.payment_transactions_2024 (BASE TABLE) -- Settled card payments"), "{text}");
+        assert!(text.contains("truncated"), "{text}");
+
+        // Flat-namespace engines (MySQL/SQLite: the schema is the database) get
+        // bare names, matching what their queries accept.
+        let text = format_table_search_results("mydb", &DatabaseType::Mysql, &matches, "payment", false);
+        assert!(text.contains("- payment_transactions_2024 (BASE TABLE)"), "{text}");
+        assert!(!text.contains("truncated"), "{text}");
+    }
+
+    #[tokio::test]
+    async fn search_tables_locates_a_target_on_a_thousands_table_schema_then_queries_it() {
+        // Tool-layer simulation of the two agent turns on a real engine:
+        // turn 1 searches for the target table, turn 2 queries it. The target
+        // sorts last among 2 500 tables, so the capped list_tables cannot
+        // surface it — only the search can.
+        let (state, dir) = sqlite_state().await;
+        let pool = match state.connections.read().await.get(CONN_ID) {
+            Some(PoolKind::Sqlite(pool)) => pool.clone(),
+            _ => panic!("sqlite pool must be present"),
+        };
+        let mut ddl = String::from("CREATE TABLE zz_payment_transactions (id INTEGER);");
+        ddl.push_str("INSERT INTO zz_payment_transactions VALUES (1), (2);");
+        for i in 0..2_499 {
+            ddl.push_str(&format!("CREATE TABLE bulk_table_{i:04} (id INTEGER);"));
+        }
+        db::sqlite::execute_query(&pool, &ddl).await.expect("seed tables");
+
+        let cancel = CancellationToken::new();
+
+        // Premise: the capped list_tables listing hides the target.
+        let listed = execute_tool(
+            &named_tool_call("call-list", "list_tables", json!({})),
+            &state,
+            CONN_ID,
+            "",
+            &DatabaseType::Sqlite,
+            "session-1",
+            &cancel,
+        )
+        .await;
+        assert!(!listed.is_error);
+        assert!(!listed.content.contains("zz_payment_transactions"), "{}", listed.content);
+
+        // Turn 1: the model searches instead of guessing.
+        let found = execute_tool(
+            &named_tool_call("call-search", "search_tables", json!({"search": "payment_trans"})),
+            &state,
+            CONN_ID,
+            "",
+            &DatabaseType::Sqlite,
+            "session-1",
+            &cancel,
+        )
+        .await;
+        assert!(!found.is_error, "{}", found.content);
+        assert!(found.content.contains("- zz_payment_transactions (BASE TABLE)"), "{}", found.content);
+
+        // Turn 2: the model queries the table the search surfaced.
+        let queried = execute_tool(
+            &tool_call("call-query", json!({"sql": "SELECT COUNT(*) AS n FROM zz_payment_transactions"})),
+            &state,
+            CONN_ID,
+            "",
+            &DatabaseType::Sqlite,
+            "session-1",
+            &cancel,
+        )
+        .await;
+        assert!(!queried.is_error, "{}", queried.content);
+        assert!(queried.content.contains("| 2 |"), "{}", queried.content);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn search_tables_scopes_to_the_requested_schema() {
+        // DuckDB exposes real schemas, so the optional `schema` parameter is
+        // observable end-to-end: the same search over different schemas returns
+        // disjoint tables, and the default scope (the current database's schema,
+        // here `main`) sees only its own tables.
+        let con = db::duckdb_driver::connect_path(":memory:").expect("connect duckdb");
+        con.lock()
+            .expect("duckdb lock")
+            .execute_batch(
+                "CREATE TABLE payment_draft (id INTEGER); \
+                 CREATE SCHEMA analytics; CREATE SCHEMA sales; \
+                 CREATE TABLE analytics.fact_payment_events (id INTEGER); \
+                 CREATE TABLE sales.region_payment_targets (id INTEGER);",
+            )
+            .expect("seed schemas");
+
+        let dir = std::env::temp_dir().join(format!("dbx-agent-tools-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let storage = Storage::open(&dir.join("storage.db")).await.unwrap();
+        let state = Arc::new(AppState::new(storage));
+        // The config tells the pool registry this is a single-connection DuckDB
+        // engine, so the pre-seeded pool under `CONN_ID` is found as-is.
+        state.configs.write().await.insert(CONN_ID.to_string(), duckdb_test_config(CONN_ID));
+        state.connections.write().await.insert(CONN_ID.to_string(), PoolKind::DuckDb(con));
+        let cancel = CancellationToken::new();
+
+        let search = |id: &str, args: Value| {
+            let state = Arc::clone(&state);
+            let cancel = cancel.clone();
+            let id = id.to_string();
+            async move {
+                execute_tool(
+                    &named_tool_call(&id, "search_tables", args),
+                    &state,
+                    CONN_ID,
+                    "main",
+                    &DatabaseType::DuckDb,
+                    "session-1",
+                    &cancel,
+                )
+                .await
+            }
+        };
+
+        let analytics = search("call-a", json!({"search": "payment", "schema": "analytics"})).await;
+        assert!(!analytics.is_error, "{}", analytics.content);
+        assert!(analytics.content.contains("fact_payment_events"), "{}", analytics.content);
+        assert!(!analytics.content.contains("region_payment_targets"), "{}", analytics.content);
+        assert!(!analytics.content.contains("payment_draft"), "{}", analytics.content);
+
+        let sales = search("call-s", json!({"search": "payment", "schema": "sales"})).await;
+        assert!(!sales.is_error, "{}", sales.content);
+        assert!(sales.content.contains("region_payment_targets"), "{}", sales.content);
+        assert!(!sales.content.contains("fact_payment_events"), "{}", sales.content);
+
+        // Default scope is the current database's schema — `main` here — so only
+        // the unqualified table matches, never the other schemas'.
+        let main = search("call-m", json!({"search": "payment"})).await;
+        assert!(!main.is_error, "{}", main.content);
+        assert!(main.content.contains("payment_draft"), "{}", main.content);
+        assert!(!main.content.contains("fact_payment_events"), "{}", main.content);
+        assert!(!main.content.contains("region_payment_targets"), "{}", main.content);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

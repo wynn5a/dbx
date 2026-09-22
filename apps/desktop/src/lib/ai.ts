@@ -193,8 +193,8 @@ export function buildAgentSystemPrompt(action: AiAction, context: AiContext): st
 function buildAgentToolPromptLines(isZh: boolean): string[] {
   return [
     isZh
-      ? "你处于 Agent 模式，可以调用工具直接与数据库交互：list_tables、get_columns、execute_query、get_sample_data、explain_query（部分数据库可用）。"
-      : "You are in Agent mode and can call tools to interact with the database directly: list_tables, get_columns, execute_query, get_sample_data, and explain_query (where supported).",
+      ? "你处于 Agent 模式，可以调用工具直接与数据库交互：list_tables、search_tables、get_columns、execute_query、get_sample_data、explain_query（部分数据库可用）。数据库表很多、列表里找不到目标表时，用 search_tables 按表名或注释子串搜索。"
+      : "You are in Agent mode and can call tools to interact with the database directly: list_tables, search_tables, get_columns, execute_query, get_sample_data, and explain_query (where supported). When the database has too many tables to find the target in the listing, use search_tables to locate it by a substring of its name or comment.",
     isZh
       ? "优先调用工具来核实结构并执行只读查询，而不是仅在文本里给出 SQL。只读查询会立即执行；任何写操作（INSERT/UPDATE/DELETE/DDL）传给 execute_query 后，会先暂停请用户确认再执行。"
       : "Prefer calling tools to verify structure and run read-only queries rather than only emitting SQL in text. Read-only queries run immediately; any write (INSERT/UPDATE/DELETE/DDL) passed to execute_query pauses for the user's confirmation before it runs.",
