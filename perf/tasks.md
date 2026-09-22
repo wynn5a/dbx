@@ -35,7 +35,7 @@
 | T14 | DDL 后失效补全缓存 | improvement-plan §4 C4 | S | ✅ 9b9e361f |
 | T15 | 启动无暗色闪烁 | improvement-plan §6 E2 | S | ✅ 73011fe7 |
 | T16 | 全局错误处理器 | improvement-plan §6 E3 | S | ✅ 6609cd39 |
-| T17 | 可行动的连接错误提示 | improvement-plan §6 E4 | M | ⬜ |
+| T17 | 可行动的连接错误提示 | improvement-plan §6 E4 | M | ✅ 0bbf6f2d |
 | T18 | 连接与 schema 加载可取消 | improvement-plan §6 E5 | M | ⬜ |
 | T19 | 高危 SQL 增加确认摩擦 | improvement-plan §5 D3 | S | ⬜ |
 | T20 | search_tables 工具 | improvement-plan §5 D4 | S | ⬜ |
@@ -238,14 +238,15 @@
   - [x] 新增用例；既有 debugLog 测试不回退（新增 `globalErrorHandler.test.ts` 7 例：格式化、逐错误记录 + toast 限频（10s 窗口内只弹一次、窗口后恢复）、真实 `installGlobalErrorHandler` 接线（调试日志关闭时仍入缓冲并同步持久化）、main.ts 契约；`debugLog.test.ts` 新增 `appendErrorDebugLog` 关闭态记录 + 立即 flush 一例；`pnpm check` 全绿：vitest 166 文件 1157 用例）
 - **实现说明**：错误日志写入不受"启用调试日志"开关限制（错误罕见且缓冲本身有 1500 条上限，保证用户没开开关时也能导出堆栈），并立即 flush 防止随后崩溃丢条目。toast 按 10s 限频，错误本身仍逐条记录/打印，渲染死循环不会刷屏。文案落六个 locale 原本空的 `app:` 段。
 
-### T17 可行动的连接错误提示 ⬜
+### T17 可行动的连接错误提示 ✅ 0bbf6f2d
 
 - **来源** improvement-plan-2026-09.md §6 E4（Track E）· **规模** M
 - **内容** `i18n/backend-errors.ts` 只映射 4 种安装器错误。增加跨驱动分类器：refused/timeout → host/port/VPN、auth 关键字 → 凭据、TLS → SSL 设置；原文兜底。
 - **验收**
-  - [ ] 每类至少一条 × 多驱动（PG/MySQL/SQL Server/Redis）样例文本的单测
-  - [ ] 无法分类的错误原样展示；新文案 i18n 就位
-  - [ ] `pnpm check` 通过
+  - [x] 每类至少一条 × 多驱动（PG/MySQL/SQL Server/Redis）样例文本的单测（新增 `connectionErrorHints.test.ts` 12 例：network/auth/tls 三类各覆盖 PG、MySQL、SQL Server、Redis 至少两条真实错误文本——如 PG `Connection refused`、MySQL `ERROR 2003`/`Can't connect`、SQL Server `Error: 10061`/`Login failed`/`Error: 18456`、Redis `NOAUTH`/`WRONGPASS`；另有大小写不敏感、驱动错误码仅在传入驱动时生效（`mssql`/`postgresql` 别名归一）、不可分类透传 null）
+  - [x] 无法分类的错误原样展示；新文案 i18n 就位（分类未命中返回 null，title 保持原文且 description 为空；安装器错误翻译链路不变；`connection.errorHintNetwork/errorHintAuth/errorHintTls` 三条文案进六个 locale，测试逐一断言六语言 key 存在且非空）
+  - [x] `pnpm check` 通过（format + lint + typecheck + vitest 全绿：167 文件 1168 用例）
+- **实现说明**：分类器在 `lib/connectionErrorHints.ts`（无框架依赖），三类按 auth → tls → network 优先级匹配（auth 关键字最具体，refused/timeout 最宽泛）；裸驱动错误码（18456、ERROR 2003/1045/2026、SQLSTATE 28P01）歧义大，仅在调用方能提供 `db_type` 时参与匹配（对话框表单、连接配置处顺带可得）。接线走现有展示链路：`backend-errors.ts` 新增 `presentConnectionError`（toast title + hint description）与 `formatConnectionError`（hint 追加到字符串），App/TreeItem/AppSidebar/AiAssistant 的连接失败 toast 把 hint 放进 DsToast 既有 description 弱色行、对话框测试结果按 Mongo hint 先例追加、侧栏 ConnectionErrorIndicator 气泡在原文下加 hint 块。原文永不替换；连接失败 toast 在所有语言下显式走 error 变体（原 `inferVariant` 对"连接失败"这类非英文文案会误判为 success）。
 
 ### T18 连接与 schema 加载可取消 ⬜
 
