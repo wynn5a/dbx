@@ -1,5 +1,6 @@
 import {
   DEFAULT_SHORTCUT_SETTINGS,
+  GOTO_TAB_ACTION_COUNT,
   normalizeShortcutSettings,
   type ShortcutActionId,
   type ShortcutSettings,
@@ -74,6 +75,27 @@ export function isExecuteSqlShortcut(event: ShortcutLikeEvent, shortcuts?: Parti
 
 export function isCloseTabShortcut(event: ShortcutLikeEvent, shortcuts?: Partial<ShortcutSettings>): boolean {
   return matchesShortcut(event, actionShortcut("closeTab", shortcuts));
+}
+
+export function isNextTabShortcut(event: ShortcutLikeEvent, shortcuts?: Partial<ShortcutSettings>): boolean {
+  return matchesShortcut(event, actionShortcut("nextTab", shortcuts));
+}
+
+export function isPrevTabShortcut(event: ShortcutLikeEvent, shortcuts?: Partial<ShortcutSettings>): boolean {
+  return matchesShortcut(event, actionShortcut("prevTab", shortcuts));
+}
+
+/** Returns the 1-based tab position (9 = last tab) when the event hits a gotoTabN binding, else null. */
+export function gotoTabNumberFromShortcut(
+  event: ShortcutLikeEvent,
+  shortcuts?: Partial<ShortcutSettings>,
+): number | null {
+  for (let position = 1; position <= GOTO_TAB_ACTION_COUNT; position++) {
+    if (matchesShortcut(event, actionShortcut(`gotoTab${position}` as ShortcutActionId, shortcuts))) {
+      return position;
+    }
+  }
+  return null;
 }
 
 export function isNewQueryShortcut(event: ShortcutLikeEvent, shortcuts?: Partial<ShortcutSettings>): boolean {

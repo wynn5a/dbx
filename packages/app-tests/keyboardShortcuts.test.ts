@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "vitest";
 import {
   eventToShortcut,
+  gotoTabNumberFromShortcut,
   isBrowserReloadShortcut,
   isCancelSearchShortcut,
   isCloseTabShortcut,
@@ -10,8 +11,10 @@ import {
   isModRShortcut,
   isNewConnectionShortcut,
   isNewQueryShortcut,
+  isNextTabShortcut,
   isObjectSourceSaveShortcutTarget,
   isOpenSettingsShortcut,
+  isPrevTabShortcut,
   isResetZoomShortcut,
   isRefreshDataShortcut,
   isSaveShortcut,
@@ -118,6 +121,51 @@ test("matches Cmd+W for closing query tabs", () => {
 
 test("ignores Ctrl+W for closing query tabs", () => {
   assert.equal(isCloseTabShortcut({ key: "w", ctrlKey: true }), false);
+});
+
+test("matches Mod+Alt+ArrowRight/Left for switching tabs", () => {
+  assert.equal(isNextTabShortcut({ key: "ArrowRight", metaKey: true, altKey: true }), true);
+  assert.equal(isNextTabShortcut({ key: "ArrowRight", ctrlKey: true, altKey: true }), true);
+  assert.equal(isPrevTabShortcut({ key: "ArrowLeft", metaKey: true, altKey: true }), true);
+  assert.equal(isPrevTabShortcut({ key: "ArrowLeft", ctrlKey: true, altKey: true }), true);
+  assert.equal(eventToShortcut({ key: "ArrowRight", ctrlKey: true, altKey: true } as any), "Mod+Alt+ArrowRight");
+});
+
+test("rejects tab switch shortcuts with missing or extra modifiers", () => {
+  assert.equal(isNextTabShortcut({ key: "ArrowRight", metaKey: true }), false);
+  assert.equal(isNextTabShortcut({ key: "ArrowRight", altKey: true }), false);
+  assert.equal(isNextTabShortcut({ key: "ArrowRight", metaKey: true, altKey: true, shiftKey: true }), false);
+  assert.equal(isNextTabShortcut({ key: "ArrowLeft", metaKey: true, altKey: true }), false);
+  assert.equal(isPrevTabShortcut({ key: "ArrowLeft" }), false);
+});
+
+test("matches configurable next/prev tab shortcuts", () => {
+  assert.equal(
+    isNextTabShortcut({ key: "ArrowRight", metaKey: true, altKey: true }, { nextTab: "Mod+Alt+ArrowDown" } as any),
+    false,
+  );
+  assert.equal(
+    isNextTabShortcut({ key: "ArrowDown", ctrlKey: true, altKey: true }, { nextTab: "Mod+Alt+ArrowDown" } as any),
+    true,
+  );
+});
+
+test("resolves goto tab numbers 1..9 and nothing else", () => {
+  for (let position = 1; position <= 9; position++) {
+    assert.equal(gotoTabNumberFromShortcut({ key: String(position), metaKey: true }), position);
+  }
+  assert.equal(gotoTabNumberFromShortcut({ key: "0", metaKey: true }), null);
+  assert.equal(gotoTabNumberFromShortcut({ key: "1", altKey: true }), null);
+  assert.equal(gotoTabNumberFromShortcut({ key: "1", metaKey: true, shiftKey: true }), null);
+  assert.equal(gotoTabNumberFromShortcut({ key: "1" }), null);
+});
+
+test("matches custom goto tab shortcut settings", () => {
+  assert.equal(gotoTabNumberFromShortcut({ key: "1", metaKey: true }, { gotoTab1: "Mod+Shift+1" } as any), null);
+  assert.equal(
+    gotoTabNumberFromShortcut({ key: "1", metaKey: true, shiftKey: true }, { gotoTab1: "Mod+Shift+1" } as any),
+    1,
+  );
 });
 
 test("matches Ctrl+F for focusing search", () => {

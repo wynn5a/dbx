@@ -8,6 +8,17 @@ export type ShortcutActionId =
   | "newConnection"
   | "openSettings"
   | "closeTab"
+  | "nextTab"
+  | "prevTab"
+  | "gotoTab1"
+  | "gotoTab2"
+  | "gotoTab3"
+  | "gotoTab4"
+  | "gotoTab5"
+  | "gotoTab6"
+  | "gotoTab7"
+  | "gotoTab8"
+  | "gotoTab9"
   | "focusSearch"
   | "zoomInUi"
   | "zoomOutUi"
@@ -21,11 +32,35 @@ export type ShortcutActionId =
 
 export type ShortcutScope = "global" | "editor" | "grid" | "search";
 
+/** Number of `gotoTabN` bindings; N = 9 follows the browser convention "jump to the last tab". */
+export const GOTO_TAB_ACTION_COUNT = 9;
+
+const gotoTabDefinitions: ShortcutDefinition[] = Array.from({ length: GOTO_TAB_ACTION_COUNT }, (_, index) => {
+  const position = index + 1;
+  if (position === GOTO_TAB_ACTION_COUNT) {
+    return {
+      id: `gotoTab${position}` as ShortcutActionId,
+      labelKey: "settings.shortcutGotoLastTab",
+      scope: "global",
+      defaultShortcut: `Mod+${position}`,
+    };
+  }
+  return {
+    id: `gotoTab${position}` as ShortcutActionId,
+    labelKey: "settings.shortcutGotoTabN",
+    labelParams: { n: position },
+    scope: "global",
+    defaultShortcut: `Mod+${position}`,
+  };
+});
+
 export interface ShortcutDefinition {
   id: ShortcutActionId;
   labelKey: string;
   scope: ShortcutScope;
   defaultShortcut: string;
+  /** Named interpolation params for labelKey (vue-i18n named args), e.g. { n: 3 }. */
+  labelParams?: Record<string, unknown>;
 }
 
 export type ShortcutSettings = Record<ShortcutActionId, string>;
@@ -85,6 +120,19 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     scope: "global",
     defaultShortcut: "Meta+W",
   },
+  {
+    id: "nextTab",
+    labelKey: "settings.shortcutNextTab",
+    scope: "global",
+    defaultShortcut: "Mod+Alt+ArrowRight",
+  },
+  {
+    id: "prevTab",
+    labelKey: "settings.shortcutPrevTab",
+    scope: "global",
+    defaultShortcut: "Mod+Alt+ArrowLeft",
+  },
+  ...gotoTabDefinitions,
   {
     id: "focusSearch",
     labelKey: "settings.shortcutFocusSearch",

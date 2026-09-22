@@ -105,6 +105,7 @@ import {
   findShortcutConflict,
   normalizeShortcutSettings,
   type ShortcutActionId,
+  type ShortcutDefinition,
   type ShortcutScope,
 } from "@/lib/shortcutRegistry";
 import { normalizeSidebarHiddenTablePrefixes } from "@/lib/sidebarTableNameDisplay";
@@ -683,6 +684,10 @@ function shortcutKeyTokens(shortcut: string): string[] {
     .filter(Boolean);
 }
 
+function shortcutDefinitionLabel(definition: ShortcutDefinition): string {
+  return t(definition.labelKey, definition.labelParams ?? {});
+}
+
 const SHORTCUT_SCOPE_META: { scope: ShortcutScope; labelKey: string; icon: Component }[] = [
   { scope: "global", labelKey: "settings.shortcutScopeGlobal", icon: Command },
   { scope: "editor", labelKey: "settings.shortcutScopeEditor", icon: SquareTerminal },
@@ -696,7 +701,7 @@ const filteredShortcutGroups = computed(() => {
     const items = SHORTCUT_DEFINITIONS.filter((definition) => {
       if (definition.scope !== meta.scope) return false;
       if (!query) return true;
-      const label = t(definition.labelKey).toLowerCase();
+      const label = shortcutDefinitionLabel(definition).toLowerCase();
       const keys = formatShortcutPill(editShortcuts.value[definition.id]).toLowerCase();
       return label.includes(query) || keys.includes(query);
     });
@@ -2307,7 +2312,7 @@ watch(
                   >
                     <div class="flex items-center justify-between gap-3">
                       <Label class="min-w-0 truncate leading-none text-[var(--ds-text-1)]">
-                        {{ t(definition.labelKey) }}
+                        {{ shortcutDefinitionLabel(definition) }}
                       </Label>
 
                       <!-- Capturing a new shortcut -->

@@ -49,15 +49,19 @@ import {
   isModRShortcut,
   isNewConnectionShortcut,
   isNewQueryShortcut,
+  isNextTabShortcut,
   isObjectSourceSaveShortcutTarget,
   isOpenSettingsShortcut,
+  isPrevTabShortcut,
   isResetZoomShortcut,
   isRefreshDataShortcut,
   isSaveShortcut,
   isToggleSidebarShortcut,
   isZoomInShortcut,
   isZoomOutShortcut,
+  gotoTabNumberFromShortcut,
 } from "@/lib/keyboardShortcuts";
+import { resolveTabSwitchTarget, type TabSwitchAction } from "@/lib/tabSwitch";
 import { isPreviewTab } from "@/lib/tabPresentation";
 import { supportsSqlFileExecution } from "@/lib/databaseCapabilities";
 import { buildHistoryAiAnalysisPrompt } from "@/lib/historyAiAnalysis";
@@ -792,6 +796,14 @@ function onAiExecuteSql(sql: string) {
   nextTick(() => tryExecute(sql));
 }
 
+function switchTab(action: TabSwitchAction) {
+  const targetId = resolveTabSwitchTarget(queryStore.tabs, queryStore.activeTabId, action);
+  if (!targetId) return;
+  // The activeTabId watcher fires dbx:before-tab-switch (pending grid snapshots),
+  // drops the driver store tab and resets per-tab UI state, same as tab clicks.
+  queryStore.activeTabId = targetId;
+}
+
 function handleKeydown(e: KeyboardEvent) {
   if (e.defaultPrevented) return;
 
@@ -843,6 +855,25 @@ function handleKeydown(e: KeyboardEvent) {
     } else if (queryStore.activeTabId) {
       queryStore.closeTab(queryStore.activeTabId);
     }
+    return;
+  }
+  if (isNextTabShortcut(e, shortcuts)) {
+    e.preventDefault();
+    e.stopPropagation();
+    switchTab("next");
+    return;
+  }
+  if (isPrevTabShortcut(e, shortcuts)) {
+    e.preventDefault();
+    e.stopPropagation();
+    switchTab("prev");
+    return;
+  }
+  const gotoTabNumber = gotoTabNumberFromShortcut(e, shortcuts);
+  if (gotoTabNumber !== null) {
+    e.preventDefault();
+    e.stopPropagation();
+    switchTab(gotoTabNumber);
     return;
   }
   if (isSaveShortcut(e, shortcuts) && e.target instanceof Element && isObjectSourceSaveShortcutTarget(e.target)) {
