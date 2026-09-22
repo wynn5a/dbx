@@ -56,7 +56,7 @@
 | T35 | Format SQL 快捷键 | improvement-plan §6 E6-2 | S | ✅ fa0e42a8 |
 | T36 | getSqlCompletionResultValidFor 落地 | improvement-plan §4 C7-2 | S | ✅ ad03e069 |
 | T37 | prefers-reduced-motion 支持 | improvement-plan §6 E9-1 | S | ✅ a92296bb |
-| T38 | 启动阶段 performance.mark | improvement-plan §6 E9-2 | S | ⬜ |
+| T38 | 启动阶段 performance.mark | improvement-plan §6 E9-2 | S | ✅ f158bc2b |
 | T39 | QueryEditor 异步组件化 | improvement-plan §6 E9-3 | S | ⬜ |
 | T40 | 列固定 + 拖拽排序 | improvement-plan §6 E7-2 | M | ⬜ |
 | T41 | 侧栏拖表/列入编辑器 | improvement-plan §6 E7-3 | M | ⬜ |
@@ -440,13 +440,14 @@
   - [x] 手工验证 + `pnpm check`（手工/DevTools emulate 以真实无头 Chrome 实测替代并如实标注：对 `pnpm build` 产物用 Chromium `--force-prefers-reduced-motion` / `--force-prefers-no-reduced-motion`（与 DevTools 模拟同一 media feature）各跑一次探针页——reduce 开启时 `animate-spin`/`animate-pulse`/`transition-all`/`animate-in` 四类探针元素计算样式全部坍缩为 `animation-duration 1e-05s`（=0.01ms）、`animation-iteration-count 1`、`transition-duration 1e-05s`、`scroll-behavior auto`；关闭时基线不变（spin 1s/infinite、pulse 2s/infinite、transition 0.15s）。`pnpm check` 全绿（format + lint + typecheck + vitest 179 文件 1336 用例，含新增 5 例））
 - **实现说明**：① 全局兜底选"坍缩为一帧"而非移除声明（业界标准写法）：状态变化保持即时，加载态不消失——`animate-spin`（96 处 Loader2）停在首帧成静止图标、`animate-pulse` 骨架（5 处）定格为静态色块，旁边加载文字/样式仍表达状态；`0.01ms` 而非 `0s` 保持 `transitionend`/`animationend` 触发，Vue `<Transition>`（toast 进出场、编辑器搜索面板、网格搜索浮层）与 reka-ui overlay presence 生命周期正常完成（tw-animate-css 退场动画 `animation-fill-mode: none`，但 Presence 在首个 animationend 即卸载，不会闪回可见）；`animation-iteration-count: 1` 停掉全部无限循环（spinner/骨架/树状态点脉冲——TreeItem.vue 既有单点 reduce 覆盖保留且与新全局规则一致）。组件内 `<style>` 与 Tailwind 工具类动画经通用选择器 + `!important` 一并覆盖，无需逐文件清单。② JS 驱动的动效不在 CSS 可达范围：新增框架无关 `lib/reducedMotion.ts`（`prefersReducedMotion` / `scrollBehaviorForMotion`，默认读 `window.matchMedia`、可注入 matcher 供测试），接线 tab 栏两处平滑滚动——`useTabScroll.ts` 箭头翻页 `scrollBy` 与 `AppTabBar.vue` 活动 tab/driver store 的 `scrollIntoView`（后者在 `scrollActiveTabIntoView` 单点收敛，auto/smooth 全部调用方一并覆盖）。③ 豁免决定：无豁免项——仓库没有承担信息传达的关键动画（导出进度条宽度是数据驱动非 keyframe 动画，其 `animate-pulse` 仅标记不确定态，静止后进度条+文字状态仍可读）；ECharts 渲染动画属 JS 数据可视化动画，不在本次 CSS 级改动范围。测试：`packages/app-tests/reducedMotion.test.ts`——helper 单测（media query 常量、reduce 开/关的行为映射含 auto 透传、缺 matchMedia 视为关闭）、globals.css 源码契约、useTabScroll/AppTabBar 全部 smooth scroll 经 helper 且无未守卫的 `behavior: "smooth"` 残留。
 
-### T38 启动阶段 performance.mark ⬜
+### T38 启动阶段 performance.mark ✅ f158bc2b
 
 - **来源** improvement-plan-2026-09.md §6 E9 第 2 项（Track E）· **规模** S
 - **内容** 现状是散落的 `console.log(performance.now())`。启动各阶段打 `performance.mark` 并写入 debug log。
 - **验收**
-  - [ ] 导出的调试日志含各启动阶段耗时标记
-  - [ ] 无残留 ad-hoc console 计时
+  - [x] 导出的调试日志含各启动阶段耗时标记（`lib/startupMarks.ts`：每阶段 `markStartupPhase` 记录一次（幂等）真实 `performance.mark`（DevTools performance 面板可见）+ 内存缓冲；`flushStartupMarks` 经 `appendDebugLog` 写入单行摘要 `[DBX][startup-timing] phase atMs(+stepMs) | …`（time origin 起的绝对耗时 + 相邻阶段步进）。debug log 默认关闭且最早阶段时缓冲可能不可达，故标记只存内存，摘要仅在可落盘时 flush 且不重复：① 首帧（main.ts rAF）② initApp 链路终点（`connectionStore.initFromDisk` 落定后，补齐首帧 flush 时未完成的磁盘读）③ 启动后才开启 debug log 时——debugLog 新增 `onDebugLoggingEnabled` 钩子，startupMarks 模块级注册，缓冲摘要随即落盘；摘要只在其覆盖未 flush 标记时追加且始终含全部标记，日志末条即完整版，反复开关不重复。行为测试以 `getDebugLogText()`（导出内容来源）+ localStorage 持久化双向断言）
+  - [x] 无残留 ad-hoc console 计时（main.ts/App.vue 的 8 处 `[STARTUP]` console 里程碑与 2 处 `console.log(performance.now())` 计时全部删除，信息（里程碑+耗时）由 12 个 `startup:*` 标记与摘要承载；启动失败 `console.error` 路径保留；DataGrid/ContentArea/TreeItem 运行期网格诊断日志非启动计时，不动。源码契约测试锁定：启动文件无 `console.log`+`performance.now()` 同行模式、无 `[STARTUP]` console 残留）
+- **实现说明**：新增框架无关 `lib/startupMarks.ts`（无 performance API 时 `Date.now()` 兜底、mark 发射尽力而为，测试环境安全）。阶段清单（12）：`bootstrap-begin → modules-loaded → locale-ready → app-created → on-mounted-begin → theme-applied → init-app-begin → on-mounted-sync-done → vue-mounted → first-frame`（onMounted 系列在 `app.mount()` 内先于 vue-mounted 触发，摘要按真实时间序呈现）+ 异步尾 `saved-sql-loaded → connections-loaded`（initFromDisk 三读并发，`connections-loaded` 后触发完整摘要 flush）。debugLog 仅新增 `onDebugLoggingEnabled` 监听注册（`setDebugLoggingEnabled(true)` 时通知），无循环依赖。测试：`packages/app-tests/startupMarks.test.ts` 10 例——mark 工具单测（stub performance API：时钟/步进/真实 mark 发射/幂等 first-wins/缺 API 降级/摘要格式/空 flush）、flush 行为断言（导出文本含摘要并落 localStorage；关→开后经钩子恰好落一次、重复开关不重复；迟到处标记产出一条更新后的完整摘要）、源码契约（启动文件无 ad-hoc 计时模式、12 阶段全部接线、两处 flush 触发点、debugLog 钩子与 appendDebugLog 接线在位）。`pnpm check` 全绿（format + lint + typecheck + vitest 180 文件 1346 用例）。
 
 ### T39 QueryEditor 异步组件化 ⬜
 
