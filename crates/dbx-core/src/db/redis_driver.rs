@@ -91,23 +91,45 @@ pub enum RedisConnection {
 }
 
 /// A direct (standalone or Sentinel) Redis connection plus the session db it
-/// is currently SELECTed to. Tracking the db lets per-operation SELECT round
-/// trips be skipped; the surrounding mutex serializes every user, which is
-/// what makes the tracked state reliable.
+/// is currently SELECTed to. The inner [`redis::aio::ConnectionManager`]
+/// reconnects automatically (with exponential backoff) whenever the socket is
+/// lost, so a Redis restart heals on the next commands without the user
+/// reconnecting. Tracking the db lets per-operation SELECT round trips be
+/// skipped; the surrounding mutex serializes every user, which is what makes
+/// the tracked state reliable. Because a reconnect starts a fresh server
+/// session on the configured db, a connection-level error invalidates the
+/// tracked db so the next operation re-SELECTs (see the ConnectionLike impl).
 pub struct RedisDirectConnection {
-    con: redis::aio::MultiplexedConnection,
+    con: redis::aio::ConnectionManager,
     selected_db: Option<u32>,
 }
 
 impl RedisDirectConnection {
-    fn new(con: redis::aio::MultiplexedConnection, selected_db: u32) -> Self {
+    fn new(con: redis::aio::ConnectionManager, selected_db: u32) -> Self {
         Self { con, selected_db: Some(selected_db) }
+    }
+
+    /// The ConnectionManager triggers its backoff reconnection exactly when a
+    /// command fails with an I/O error or another unrecoverable error; regular
+    /// server errors (WRONGTYPE, NOAUTH, …) never reconnect. After such a
+    /// failure the server session starts on the configured db again, so a
+    /// tracked SELECT can no longer be trusted.
+    fn forget_tracked_db_on_connection_error(&mut self, error: &redis::RedisError) {
+        if error.is_io_error() || error.is_unrecoverable_error() {
+            self.selected_db = None;
+        }
     }
 }
 
 impl ConnectionLike for RedisDirectConnection {
     fn req_packed_command<'a>(&'a mut self, cmd: &'a redis::Cmd) -> redis::RedisFuture<'a, redis::Value> {
-        self.con.req_packed_command(cmd)
+        Box::pin(async move {
+            let result = self.con.req_packed_command(cmd).await;
+            if let Err(error) = &result {
+                self.forget_tracked_db_on_connection_error(error);
+            }
+            result
+        })
     }
 
     fn req_packed_commands<'a>(
@@ -116,7 +138,13 @@ impl ConnectionLike for RedisDirectConnection {
         offset: usize,
         count: usize,
     ) -> redis::RedisFuture<'a, Vec<redis::Value>> {
-        self.con.req_packed_commands(cmd, offset, count)
+        Box::pin(async move {
+            let result = self.con.req_packed_commands(cmd, offset, count).await;
+            if let Err(error) = &result {
+                self.forget_tracked_db_on_connection_error(error);
+            }
+            result
+        })
     }
 
     fn get_db(&self) -> i64 {
@@ -143,7 +171,9 @@ pub async fn connect(url: &str, timeout: std::time::Duration) -> Result<RedisDir
     let client = redis::Client::open(url).map_err(|e| format!("Redis connection failed: {e}"))?;
     // The URL's /db path component decides the session db the server starts in.
     let initial_db = u32::try_from(client.get_connection_info().redis.db).unwrap_or(0);
-    let mut con = tokio::time::timeout(timeout, client.get_multiplexed_async_connection())
+    // ConnectionManager re-selects the URL's db and re-authenticates on every
+    // automatic reconnect, so the session db from the URL survives restarts.
+    let mut con = tokio::time::timeout(timeout, redis::aio::ConnectionManager::new(client))
         .await
         .map_err(|_| format!("Redis connection timed out ({}s)", timeout.as_secs()))?
         .map_err(|e| format!("Redis connection failed: {e}"))?;
@@ -177,6 +207,9 @@ pub async fn connect_sentinel(config: &ConnectionConfig) -> Result<RedisDirectCo
     .map_err(|e| format!("Redis Sentinel master lookup failed: {e}"))?;
 
     // Sentinel masters are always reached with db 0 (see node_connection_info).
+    // The returned ConnectionManager reconnects to the resolved master address;
+    // a Sentinel failover that moves the master to a different address still
+    // needs a manual reconnect (the manager cannot re-resolve via Sentinel).
     Ok(RedisDirectConnection::new(connect_client(client).await?, 0))
 }
 
@@ -366,8 +399,8 @@ fn parse_redis_port(port: &str) -> Result<u16, String> {
     port.parse::<u16>().map_err(|_| format!("Invalid Redis port '{port}'"))
 }
 
-async fn connect_client(client: redis::Client) -> Result<redis::aio::MultiplexedConnection, String> {
-    let mut con = tokio::time::timeout(super::connection_timeout(), client.get_multiplexed_async_connection())
+async fn connect_client(client: redis::Client) -> Result<redis::aio::ConnectionManager, String> {
+    let mut con = tokio::time::timeout(super::connection_timeout(), redis::aio::ConnectionManager::new(client))
         .await
         .map_err(|_| format!("Redis connection timed out ({}s)", super::CONNECTION_TIMEOUT_SECS))?
         .map_err(|e| format!("Redis connection failed: {e}"))?;
@@ -386,7 +419,7 @@ pub async fn connect_direct_node(
     insecure: bool,
     username: &str,
     password: &str,
-) -> Result<redis::aio::MultiplexedConnection, String> {
+) -> Result<redis::aio::ConnectionManager, String> {
     let client =
         redis::Client::open(connection_info(&endpoint.host, endpoint.port, tls, insecure, username, password, 0))
             .map_err(|e| format!("Redis connection failed: {e}"))?;
@@ -455,7 +488,8 @@ where
 
 /// SELECTs the session db, skipping the round trip when the connection is
 /// already on the requested db (browsing a single db used to pay one SELECT
-/// per operation).
+/// per operation). A reconnect invalidates the tracked db, so after a Redis
+/// restart the next browse pays one SELECT and re-tracks from there.
 pub async fn select_db(con: &mut RedisDirectConnection, db: u32) -> Result<(), String> {
     if con.selected_db == Some(db) {
         return Ok(());
@@ -1881,6 +1915,54 @@ mod tests {
         assert!(
             ops_source.contains("execute_command_tracked"),
             "the console path on direct connections must use the tracked executor"
+        );
+    }
+
+    // --- auto-reconnect (ConnectionManager) contract ---
+
+    #[test]
+    fn direct_connections_use_auto_reconnecting_connection_manager() {
+        let source = include_str!("redis_driver.rs");
+        // Scan only the implementation; the test module below legitimately
+        // mentions the banned call in this very assertion.
+        let source = source.split("#[cfg(test)]").next().unwrap();
+
+        let direct_body = source.split("pub struct RedisDirectConnection").nth(1).unwrap();
+        assert!(
+            direct_body.contains("con: redis::aio::ConnectionManager"),
+            "standalone and Sentinel connections must wrap redis::aio::ConnectionManager so a \
+             lost socket reconnects with backoff instead of dying forever"
+        );
+        assert!(
+            !source.contains("get_multiplexed_async_connection"),
+            "no direct path may build a bare MultiplexedConnection; it never reconnects"
+        );
+
+        let error_hook = source.split("fn forget_tracked_db_on_connection_error").nth(1).unwrap();
+        assert!(
+            error_hook.contains("is_io_error") && error_hook.contains("is_unrecoverable_error"),
+            "a reconnecting failure starts the session on the configured db, so the tracked \
+             SELECT must be invalidated exactly on the errors that trigger reconnection"
+        );
+    }
+
+    #[test]
+    fn cluster_pool_keeps_its_self_reconnecting_cluster_connection() {
+        let source = include_str!("redis_driver.rs");
+
+        let cluster_body = source.split("pub async fn connect_cluster").nth(1).unwrap();
+        let cluster_body = cluster_body.split("\npub async fn ").next().unwrap();
+        assert!(
+            cluster_body.contains("ClusterClient::new") && cluster_body.contains("get_async_connection"),
+            "the cluster pool must keep redis's cluster client (which re-routes and reconnects \
+            on its own); T10 must not regress it"
+        );
+
+        let pool_body = source.split("pub struct RedisClusterPool").nth(1).unwrap();
+        assert!(
+            pool_body.contains("Mutex<ClusterConnection>"),
+            "RedisClusterPool must still hold the cluster ClusterConnection, not a direct \
+             ConnectionManager"
         );
     }
 }
