@@ -29,7 +29,7 @@
 | T08 | 一次 IPC 取全部 schema 表 | improvement-plan §3 B1 | M | ✅ 879d2673 |
 | T09 | 补全缓存按超集缓存 | improvement-plan §3 B2 | M | ✅ 4025a0cc |
 | T10 | Redis 自动重连 | improvement-plan §2 A3 | S | ✅ 4c8c98e2 |
-| T11 | 健康扫描覆盖全部驱动 | improvement-plan §2 A4 | S | ⬜ |
+| T11 | 健康扫描覆盖全部驱动 | improvement-plan §2 A4 | S | ✅ fe4c270c |
 | T12 | Agent 工具查询可取消可见 | improvement-plan §5 D2 | M | ⬜ |
 | T13 | 启动并行加载 + 加载态 | improvement-plan §3 B3 | S | ⬜ |
 | T14 | DDL 后失效补全缓存 | improvement-plan §4 C4 | S | ⬜ |
@@ -178,14 +178,15 @@
   - [x] 全量回归通过（`cargo fmt --check` + dbx-core 837 过 + `cargo check --workspace --locked` 全绿；未动前端）
 - **实现说明**：`RedisDirectConnection` 内层 `MultiplexedConnection` → `ConnectionManager`（standalone `connect` 与 Sentinel 复用的 `connect_client` 同换；cluster 每节点一次性连接的 `connect_direct_node` 顺带受益，主 cluster 池不动）。命令签名与既有 `ConnectionLike` 泛型 helper 全部不变；SCAN 的 TYPE pipeline 无 MULTI/EXEC 事务，与 ConnectionManager 兼容。新增行为契约：重连后的新会话回到配置 db，会使既有的"已 SELECT db 跳过"追踪失效——`ConnectionLike` 实现在恰好触发重连的错误上（I/O error / unrecoverable error，普通服务端错误如 WRONGTYPE 不在其列）将追踪 db 置空，下一条浏览命令重发 SELECT，杜绝重连后静默读错 db（live 测试断言 db0/db3 隔离）。开启 redis `connection-manager` feature（新增传递依赖 arc-swap、backon；redis 仍 0.32.7 未升未降）。
 
-### T11 健康扫描覆盖全部驱动 ⬜
+### T11 健康扫描覆盖全部驱动 ✅ fe4c270c
 
 - **来源** improvement-plan-2026-09.md §2 A4（Track A）· **规模** S
 - **内容** `refresh_connections`（`connection.rs:854-873`）只 ping MySQL/PG，其余走 `_ => Ok(())`。补 SQL Server（`check_conn_health`）与 Redis（`PING`）分支。
 - **验收**
-  - [ ] 单测覆盖新增分支；MySQL/PG 行为不变
-  - [ ] 断开的 SQL Server/Redis 连接在窗口聚焦触发刷新后显示离线
-  - [ ] 全量回归通过
+  - [x] 单测覆盖新增分支；MySQL/PG 行为不变（`connection.rs` 源码契约单测锁定扫描接线：MySQL 仍 checkout+ping、PG 仍 `SELECT 1`、SqlServer 走 `lease_checked`+`keep()`、Redis 双变体 `PING`、`clone_pool_kind` 与过滤器同集；Redis `ping` 探针以 mock `ConnectionLike` 做 3 例真实单测：PONG 通过 / I/O 错误上抛 / 不可解码回复失败）
+  - [x] 断开的 SQL Server/Redis 连接在窗口聚焦触发刷新后显示离线（`tests/live_health_refresh.rs` env 门控 live 测试，Docker azure-sql-edge / redis:7 实测：健康池扫描后原样保留，`docker stop` 后一次 `refresh_connections` 即驱逐池（<1ms），随后 `get_or_create_pool` 失败即 UI 显示离线）
+  - [x] 全量回归通过（`cargo fmt --check` + `cargo check --workspace --locked` + dbx-core 842 过（基线 837 + 新增 5）+ dbx --lib 42 过；未动前端）
+- **实现说明**：`PoolKind::SqlServer` 本就是 `Arc` 可克隆；`RedisConnection` 两变体改为 `Arc` 包裹（`Direct(Arc<Mutex<…>>)` / `Cluster(Arc<…>)`，行为不变，`redis_ops` 全部调用点零改动）使扫描能在读锁内克隆句柄、释放锁后再探测。SQL Server 分支复用池自身 `lease_checked`（`SELECT @@SPID` 健康检查 + 失效 socket 透明重拨，即既有 `check_conn_health` 语义），健康租约 `keep()` 归还空闲列表——扫描零副作用（不关 socket、不重建整池），仅当服务器真正不可达时租约失败、按既有 5s 每池上界驱逐。Redis 分支新增 `redis_driver::ping`（泛型 `ConnectionLike`，直连保持 T10 的 tracked-db 与重连记账，cluster 走自愈 `ClusterConnection`），失败同样驱逐。两个新 live 测试显式带 env 各跑一次；T10 standalone 重连 live 测试在 Arc 包裹后的 `RedisConnection` 上复跑通过。
 
 ### T12 Agent 工具查询可取消可见 ⬜
 
