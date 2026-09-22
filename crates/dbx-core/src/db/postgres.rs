@@ -86,6 +86,39 @@ impl<'a> FromSql<'a> for PgRawBytes {
     }
 }
 
+/// A `FromSql` adapter that passes json/jsonb cells through as the server's
+/// own text output, without parsing them into a `serde_json::Value`.
+///
+/// PostgreSQL transfers `json` as its stored text and binary `jsonb` as one
+/// version byte followed by the canonical `jsonb_out` text (a JSON document
+/// itself can never start with byte `0x01`, so an unprefixed payload —
+/// text-protocol servers, GaussDB-compatible backends — passes through
+/// unchanged too). Reading the text directly skips a parse→Value→to_string
+/// round trip per cell and shows what the database actually stores: the
+/// parsed path re-formatted every value (whitespace, number literals) and
+/// silently rewrote numbers outside f64 precision.
+struct PgJsonText(String);
+
+impl<'a> FromSql<'a> for PgJsonText {
+    fn from_sql(ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        let raw = if matches!(*ty, Type::JSONB) || ty.name() == "jsonb" {
+            match raw.split_first() {
+                Some((1, rest)) => rest,
+                _ => raw,
+            }
+        } else {
+            raw
+        };
+        std::str::from_utf8(raw)
+            .map(|text| PgJsonText(text.to_string()))
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Sync + Send>)
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        matches!(*ty, Type::JSON | Type::JSONB) || matches!(ty.name(), "json" | "jsonb")
+    }
+}
+
 /// A `FromSql` adapter that renders PostgreSQL's network address types
 /// (`inet`, `cidr`, `macaddr`, `macaddr8`) as the text psql displays.
 ///
@@ -708,11 +741,15 @@ fn pg_value_to_json(row: &Row, idx: usize, upper: &str) -> serde_json::Value {
     }
 
     if upper == "JSON" || upper == "JSONB" {
+        // Pass the server's own text through (see PgJsonText): no parse, no
+        // re-serialization, so values reach the grid exactly as the database
+        // renders them — key order, whitespace and full numeric precision
+        // intact. The parsed path stays only as a defensive fallback.
+        if let Ok(PgJsonText(text)) = row.try_get::<_, PgJsonText>(idx) {
+            return serde_json::Value::String(text);
+        }
         if let Ok(v) = row.try_get::<_, serde_json::Value>(idx) {
             return serde_json::Value::String(v.to_string());
-        }
-        if let Ok(v) = row.try_get::<_, String>(idx) {
-            return serde_json::Value::String(v);
         }
         return serde_json::Value::Null;
     }
@@ -2469,6 +2506,37 @@ mod tests {
 
         let raw = PgRawBytes::from_sql(&Type::UNKNOWN, &[0x01, 0xAB, 0xFF]).unwrap();
         assert_eq!(raw.0, vec![0x01, 0xAB, 0xFF]);
+    }
+
+    #[test]
+    fn pg_json_text_passes_server_bytes_through_without_parsing() {
+        // Valid JSON the old parse→Value→to_string path would re-format:
+        // whitespace normalized, 1.000 → 1.0, escapes decoded, the duplicate
+        // "dup" key collapsed. Byte-for-byte equality with the wire bytes
+        // proves no parse happened on the fast path.
+        let raw = br#"{ "b" : 1.000, "a": "\u00e9\u4e2d", "dup": 1, "dup": 2 }"#;
+        let text = PgJsonText::from_sql(&Type::JSON, raw).expect("json passthrough");
+        assert_eq!(text.0.as_bytes(), &raw[..]);
+
+        assert!(PgJsonText::accepts(&Type::JSON));
+        assert!(PgJsonText::accepts(&Type::JSONB));
+        assert!(!PgJsonText::accepts(&Type::TEXT));
+    }
+
+    #[test]
+    fn pg_jsonb_text_strips_only_the_version_byte() {
+        // Binary jsonb on the wire is one version byte followed by jsonb's
+        // canonical text (jsonb_out); only the prefix is dropped.
+        let mut raw = vec![1u8];
+        raw.extend_from_slice(br#"{"a": 1, "bb": 2}"#);
+        let text = PgJsonText::from_sql(&Type::JSONB, &raw).expect("binary jsonb passthrough");
+        assert_eq!(text.0, r#"{"a": 1, "bb": 2}"#);
+
+        // Text-protocol payloads carry no version byte, and since JSON text
+        // can never start with byte 0x01 the unprefixed form passes through
+        // unchanged too.
+        let text = PgJsonText::from_sql(&Type::JSONB, br#"{"a": 1}"#).expect("text jsonb passthrough");
+        assert_eq!(text.0, r#"{"a": 1}"#);
     }
 
     fn decode_hex(hex: &str) -> Vec<u8> {
