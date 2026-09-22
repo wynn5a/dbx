@@ -538,6 +538,50 @@ pub fn build_ai_http_client(config: &AiConfig, timeout_secs: u64) -> Result<reqw
 }
 
 // ---------------------------------------------------------------------------
+// Initial-request retry (one attempt, never mid-stream)
+// ---------------------------------------------------------------------------
+
+/// Backoff before the single retry of a failed initial chat request. One nudge,
+/// kept short on purpose (improvement-plan-2026-09 §5 D6).
+const AI_RETRY_BACKOFF: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Whether a non-success HTTP status is worth one fresh request: rate limiting
+/// and server-side/gateway failures are transient; the remaining 4xx are
+/// deterministic client errors (bad key, bad model) where a retry cannot help.
+fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+}
+
+/// Send one chat request, retrying **exactly once** while the failure is still
+/// in the initial phase — before any response body reached us:
+///
+/// - `.send()` errors (connect refused, DNS, TLS, timeout waiting for the
+///   response head): `.send()` only resolves once the response head is parsed,
+///   so anything it reports happened before a single response byte arrived.
+/// - HTTP 429 / 5xx answered instead of the response we asked for.
+///
+/// The `build` closure must produce an equivalent fresh request per attempt
+/// (reqwest builders are single-use). After the response head arrives — body
+/// parse errors, SSE mid-stream drops — errors propagate untouched: re-sending
+/// then could duplicate an answer the provider already billed.
+async fn send_with_retry_once(
+    build: impl Fn() -> reqwest::RequestBuilder,
+    op: &str,
+    backoff: std::time::Duration,
+) -> Result<reqwest::Response, String> {
+    let first = build().send().await;
+    let retryable = match &first {
+        Ok(res) => !res.status().is_success() && is_retryable_status(res.status()),
+        Err(_) => true,
+    };
+    if !retryable {
+        return first.map_err(|e| format!("{op}: {e}"));
+    }
+    tokio::time::sleep(backoff).await;
+    build().send().await.map_err(|e| format!("{op}: {e}"))
+}
+
+// ---------------------------------------------------------------------------
 // Model listing
 // ---------------------------------------------------------------------------
 
@@ -635,13 +679,14 @@ pub async fn call_claude(client: &reqwest::Client, request: AiCompletionRequest)
         "messages": request.messages,
     });
 
-    let res = client
-        .post(resolve_endpoint(&request.config))
-        .headers(claude_headers(&request.config)?)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Claude request failed: {e}"))?;
+    let url = resolve_endpoint(&request.config);
+    let headers = claude_headers(&request.config)?;
+    let res = send_with_retry_once(
+        || client.post(&url).headers(headers.clone()).json(&body),
+        "Claude request failed",
+        AI_RETRY_BACKOFF,
+    )
+    .await?;
 
     let status = res.status();
     let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
@@ -674,13 +719,13 @@ pub async fn call_openai_compatible(client: &reqwest::Client, request: AiComplet
         });
     }
 
-    let res = client
-        .post(resolve_endpoint(&request.config))
-        .headers(headers)
-        .json(&body_obj)
-        .send()
-        .await
-        .map_err(|e| format!("AI request failed: {e}"))?;
+    let url = resolve_endpoint(&request.config);
+    let res = send_with_retry_once(
+        || client.post(&url).headers(headers.clone()).json(&body_obj),
+        "AI request failed",
+        AI_RETRY_BACKOFF,
+    )
+    .await?;
 
     let status = res.status();
     let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
@@ -701,13 +746,13 @@ pub async fn call_responses_api(client: &reqwest::Client, request: AiCompletionR
         "temperature": request.temperature.unwrap_or(0.2),
     });
 
-    let res = client
-        .post(resolve_endpoint(&request.config))
-        .headers(headers)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("AI request failed: {e}"))?;
+    let url = resolve_endpoint(&request.config);
+    let res = send_with_retry_once(
+        || client.post(&url).headers(headers.clone()).json(&body),
+        "AI request failed",
+        AI_RETRY_BACKOFF,
+    )
+    .await?;
 
     let status = res.status();
     let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
@@ -739,14 +784,14 @@ pub async fn call_gemini(client: &reqwest::Client, request: AiCompletionRequest)
         },
     });
 
-    let res = client
-        .post(resolve_endpoint(&request.config))
-        .query(&[("key", request.config.api_key.as_str())])
-        .header(CONTENT_TYPE, "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Gemini request failed: {e}"))?;
+    let url = resolve_endpoint(&request.config);
+    let api_key = request.config.api_key.clone();
+    let res = send_with_retry_once(
+        || client.post(&url).query(&[("key", api_key.as_str())]).header(CONTENT_TYPE, "application/json").json(&body),
+        "Gemini request failed",
+        AI_RETRY_BACKOFF,
+    )
+    .await?;
 
     let status = res.status();
     let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
@@ -914,13 +959,14 @@ async fn stream_claude(
         "stream": true,
     });
 
-    let res = client
-        .post(resolve_endpoint(&request.config))
-        .headers(claude_headers(&request.config)?)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Claude request failed: {e}"))?;
+    let url = resolve_endpoint(&request.config);
+    let headers = claude_headers(&request.config)?;
+    let res = send_with_retry_once(
+        || client.post(&url).headers(headers.clone()).json(&body),
+        "Claude request failed",
+        AI_RETRY_BACKOFF,
+    )
+    .await?;
 
     if !res.status().is_success() {
         let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
@@ -983,13 +1029,13 @@ async fn stream_openai(
         });
     }
 
-    let res = client
-        .post(resolve_endpoint(&request.config))
-        .headers(headers)
-        .json(&body_obj)
-        .send()
-        .await
-        .map_err(|e| format!("AI request failed: {e}"))?;
+    let url = resolve_endpoint(&request.config);
+    let res = send_with_retry_once(
+        || client.post(&url).headers(headers.clone()).json(&body_obj),
+        "AI request failed",
+        AI_RETRY_BACKOFF,
+    )
+    .await?;
 
     if !res.status().is_success() {
         let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
@@ -1052,13 +1098,13 @@ async fn stream_responses_api(
         "stream": true,
     });
 
-    let res = client
-        .post(resolve_endpoint(&request.config))
-        .headers(headers)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("AI request failed: {e}"))?;
+    let url = resolve_endpoint(&request.config);
+    let res = send_with_retry_once(
+        || client.post(&url).headers(headers.clone()).json(&body),
+        "AI request failed",
+        AI_RETRY_BACKOFF,
+    )
+    .await?;
 
     if !res.status().is_success() {
         let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
@@ -1123,14 +1169,20 @@ async fn stream_gemini(
         },
     });
 
-    let res = client
-        .post(resolve_gemini_stream_endpoint(&request.config))
-        .query(&[("key", request.config.api_key.as_str()), ("alt", "sse")])
-        .header(CONTENT_TYPE, "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Gemini request failed: {e}"))?;
+    let url = resolve_gemini_stream_endpoint(&request.config);
+    let api_key = request.config.api_key.clone();
+    let res = send_with_retry_once(
+        || {
+            client
+                .post(&url)
+                .query(&[("key", api_key.as_str()), ("alt", "sse")])
+                .header(CONTENT_TYPE, "application/json")
+                .json(&body)
+        },
+        "Gemini request failed",
+        AI_RETRY_BACKOFF,
+    )
+    .await?;
 
     if !res.status().is_success() {
         let data: serde_json::Value = res.json().await.map_err(|e| e.to_string())?;
@@ -1419,13 +1471,13 @@ async fn stream_openai_with_tools(
         body["extra_body"] = json!({ "chat_template_kwargs": { "enable_thinking": false } });
     }
 
-    let res = client
-        .post(resolve_endpoint(config))
-        .headers(headers)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("AI request failed: {e}"))?;
+    let url = resolve_endpoint(config);
+    let res = send_with_retry_once(
+        || client.post(&url).headers(headers.clone()).json(&body),
+        "AI request failed",
+        AI_RETRY_BACKOFF,
+    )
+    .await?;
 
     if !res.status().is_success() {
         let data: Value = res.json().await.map_err(|e| e.to_string())?;
@@ -1562,13 +1614,14 @@ async fn stream_claude_with_tools(
         body["tools"] = json!(tool_defs);
     }
 
-    let res = client
-        .post(resolve_endpoint(config))
-        .headers(claude_headers(config)?)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Claude request failed: {e}"))?;
+    let url = resolve_endpoint(config);
+    let headers = claude_headers(config)?;
+    let res = send_with_retry_once(
+        || client.post(&url).headers(headers.clone()).json(&body),
+        "Claude request failed",
+        AI_RETRY_BACKOFF,
+    )
+    .await?;
 
     if !res.status().is_success() {
         let data: Value = res.json().await.map_err(|e| e.to_string())?;
@@ -1724,14 +1777,20 @@ async fn stream_gemini_with_tools(
         body["tools"] = json!([{ "functionDeclarations": tool_defs }]);
     }
 
-    let res = client
-        .post(resolve_gemini_stream_endpoint(config))
-        .query(&[("key", config.api_key.as_str()), ("alt", "sse")])
-        .header(CONTENT_TYPE, "application/json")
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Gemini request failed: {e}"))?;
+    let url = resolve_gemini_stream_endpoint(config);
+    let api_key = config.api_key.clone();
+    let res = send_with_retry_once(
+        || {
+            client
+                .post(&url)
+                .query(&[("key", api_key.as_str()), ("alt", "sse")])
+                .header(CONTENT_TYPE, "application/json")
+                .json(&body)
+        },
+        "Gemini request failed",
+        AI_RETRY_BACKOFF,
+    )
+    .await?;
 
     if !res.status().is_success() {
         let data: Value = res.json().await.map_err(|e| e.to_string())?;
@@ -1846,13 +1905,18 @@ pub fn load_config(path: &Path) -> Result<Option<AiConfig>, String> {
 mod tests {
     use super::{
         build_ai_http_client, cancel_stream, claude_system_blocks, drain_complete_lines, gemini_contents_with_tools,
-        gemini_text, ollama_native_show_endpoint, openai_response_text, openai_stream_text, parse_gemini_tool_event,
-        parse_model_list_response, provider_supports_function_calling, register_agent_cancel, register_stream,
-        resolve_endpoint, resolve_model_list_endpoint, responses_max_output_tokens, responses_text, unregister_stream,
-        validate_config, AiApiStyle, AiChatMessage, AiConfig, AiMessage, AiModelInfo, AiProvider, AiStreamChunk,
-        StreamToolEvent, StreamingToolCallAccumulator, TokenUsage, ToolCallRef,
+        gemini_text, is_retryable_status, ollama_native_show_endpoint, openai_response_text, openai_stream_text,
+        parse_gemini_tool_event, parse_model_list_response, provider_supports_function_calling, register_agent_cancel,
+        register_stream, resolve_endpoint, resolve_model_list_endpoint, responses_max_output_tokens, responses_text,
+        send_with_retry_once, unregister_stream, validate_config, AiApiStyle, AiChatMessage, AiConfig, AiMessage,
+        AiModelInfo, AiProvider, AiStreamChunk, StreamToolEvent, StreamingToolCallAccumulator, TokenUsage, ToolCallRef,
     };
     use serde_json::json;
+    use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex as TestMutex};
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn accumulator_collapses_fragmented_tool_call() {
@@ -2314,5 +2378,152 @@ mod tests {
         assert_eq!(old.usage, None);
         // Absent usage is not written back out, keeping old payloads unchanged.
         assert!(!serde_json::to_string(&old).unwrap().contains("usage"));
+    }
+
+    // -- T31: one retry on the initial chat request -------------------------------------
+
+    #[test]
+    fn retryable_status_matrix() {
+        let status = |code: u16| reqwest::StatusCode::from_u16(code).unwrap();
+        assert!(is_retryable_status(status(429)));
+        for code in [500, 502, 503, 504] {
+            assert!(is_retryable_status(status(code)), "{code} is a retryable 5xx");
+        }
+        for code in [200, 400, 401, 403, 404, 409, 422] {
+            assert!(!is_retryable_status(status(code)), "{code} is never retried");
+        }
+    }
+
+    fn canned_response(status_line: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// Minimal canned-response server for the retry wrapper: one raw HTTP
+    /// response per connection, popped in order; returns the base URL and a
+    /// counter of served requests so tests can assert exactly how many went out.
+    async fn spawn_canned_responses(responses: Vec<String>) -> (String, Arc<AtomicUsize>) {
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.expect("bind canned server");
+        let addr = listener.local_addr().expect("canned server addr");
+        let queue = Arc::new(TestMutex::new(VecDeque::from(responses)));
+        let served = Arc::new(AtomicUsize::new(0));
+        let task_queue = Arc::clone(&queue);
+        let task_served = Arc::clone(&served);
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                let Some(response) = task_queue.lock().expect("response queue").pop_front() else {
+                    break;
+                };
+                // Drain the request (head + Content-Length body) so the canned
+                // response never overtakes it on the socket.
+                let mut buf: Vec<u8> = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = String::from_utf8_lossy(&buf[..pos]);
+                        let len = head
+                            .lines()
+                            .find_map(|line| {
+                                let (name, value) = line.split_once(':')?;
+                                (name.trim().eq_ignore_ascii_case("content-length"))
+                                    .then(|| value.trim().parse::<usize>().ok())
+                                    .flatten()
+                            })
+                            .unwrap_or(0);
+                        if buf.len() >= pos + 4 + len {
+                            break;
+                        }
+                    }
+                    match stream.read(&mut chunk).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                    }
+                }
+                task_served.fetch_add(1, Ordering::SeqCst);
+                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.shutdown().await;
+            }
+        });
+        (format!("http://{addr}"), served)
+    }
+
+    #[tokio::test]
+    async fn retry_wrapper_succeeds_after_one_429() {
+        let (url, served) = spawn_canned_responses(vec![
+            canned_response("429 Too Many Requests", "{\"error\":{\"message\":\"slow down\"}}"),
+            canned_response("200 OK", "{}"),
+        ])
+        .await;
+        let client = reqwest::Client::new();
+
+        let res =
+            send_with_retry_once(|| client.post(&url).json(&json!({ "model": "m" })), "test", Duration::from_millis(1))
+                .await
+                .expect("the retry after the 429 lands");
+
+        assert!(res.status().is_success());
+        assert_eq!(served.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn retry_wrapper_retries_exactly_once() {
+        let (url, served) = spawn_canned_responses(vec![
+            canned_response("429 Too Many Requests", "{\"error\":{\"message\":\"slow down\"}}"),
+            canned_response("429 Too Many Requests", "{\"error\":{\"message\":\"still slow\"}}"),
+        ])
+        .await;
+        let client = reqwest::Client::new();
+
+        let res = send_with_retry_once(|| client.post(&url).json(&json!({})), "test", Duration::from_millis(1))
+            .await
+            .expect("both responses arrive; the caller shapes the final status into an error");
+
+        assert_eq!(res.status(), reqwest::StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(served.load(Ordering::SeqCst), 2, "one retry, then give up with the second response");
+    }
+
+    #[tokio::test]
+    async fn retry_wrapper_does_not_retry_client_errors() {
+        let (url, served) =
+            spawn_canned_responses(vec![canned_response("400 Bad Request", "{\"error\":{\"message\":\"bad model\"}}")])
+                .await;
+        let client = reqwest::Client::new();
+
+        let res = send_with_retry_once(|| client.post(&url).json(&json!({})), "test", Duration::from_millis(1))
+            .await
+            .expect("the response is handed back for the caller to describe");
+
+        assert_eq!(res.status(), reqwest::StatusCode::BAD_REQUEST);
+        assert_eq!(served.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn retry_wrapper_succeeds_after_a_connect_error() {
+        // A held-then-dropped port: connecting there is refused on attempt 1.
+        let dead = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("hold a port");
+        let dead_url = format!("http://{}", dead.local_addr().expect("dead addr"));
+        drop(dead);
+        let (url, served) = spawn_canned_responses(vec![canned_response("200 OK", "{}")]).await;
+        let client = reqwest::Client::new();
+        let first = AtomicBool::new(true);
+
+        let res = send_with_retry_once(
+            || {
+                if first.swap(false, Ordering::SeqCst) {
+                    client.post(&dead_url)
+                } else {
+                    client.post(&url)
+                }
+            },
+            "test",
+            Duration::from_millis(1),
+        )
+        .await
+        .expect("the retry lands on the live server");
+
+        assert!(res.status().is_success());
+        assert_eq!(served.load(Ordering::SeqCst), 1);
     }
 }

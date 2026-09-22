@@ -1,10 +1,14 @@
-//! Mock-SSE tests for the tool-calling stream (perf tasks T21 / plan §5 D5).
+//! Mock-SSE tests for the tool-calling stream (perf tasks T21 / plan §5 D5)
+//! and the initial-request retry (perf task T31 / plan §5 D6).
 //!
 //! A tiny HTTP server on a loopback port answers each request with the next
 //! canned response, so Gemini and Ollama provider streams are driven across a
 //! real multi-turn tool exchange: turn 1 streams a function call, the test
 //! replays the result the same way `agent_loop` does, turn 2 streams the final
 //! text — and the recorded request bodies assert what went back over the wire.
+//! The T31 section reuses the same server to pin the retry contract: exactly
+//! one retry for 429/5xx/connect failures before the response head, never
+//! after the stream started.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -154,6 +158,19 @@ fn gemini_config(base_url: &str) -> AiConfig {
         api_key: "test-key".to_string(),
         endpoint: base_url.to_string(),
         model: "gemini-test".to_string(),
+        api_style: AiApiStyle::Completions,
+        proxy_enabled: false,
+        proxy_url: String::new(),
+        enable_thinking: true,
+    }
+}
+
+fn openai_config(base_url: &str) -> AiConfig {
+    AiConfig {
+        provider: AiProvider::Openai,
+        api_key: "test-key".to_string(),
+        endpoint: base_url.to_string(),
+        model: "gpt-test".to_string(),
         api_style: AiApiStyle::Completions,
         proxy_enabled: false,
         proxy_url: String::new(),
@@ -422,4 +439,126 @@ async fn ollama_probe_failure_keeps_the_text_only_fallback() {
 
     assert!(!ai::provider_supports_function_calling(&config).await);
     assert_eq!(server.requests().len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// T31: one retry on the initial request — 429/5xx/connect, never mid-stream
+// ---------------------------------------------------------------------------
+
+/// Drive the plain `ai::stream` path and collect the text deltas.
+async fn stream_plain(config: &AiConfig, cancelled: &Notify) -> Result<String, String> {
+    let request = AiCompletionRequest {
+        config: config.clone(),
+        system_prompt: "You are DBX's assistant.".to_string(),
+        messages: vec![AiMessage::text("user", "hi")],
+        max_tokens: Some(16),
+        temperature: Some(0.0),
+    };
+    let text = Arc::new(Mutex::new(String::new()));
+    let sink = Arc::clone(&text);
+    let result = ai::stream("t31-retry", &request, cancelled, move |chunk: AiStreamChunk| {
+        sink.lock().expect("text sink").push_str(&chunk.delta);
+    })
+    .await;
+    result.map(|_| text.lock().expect("text sink").clone())
+}
+
+#[tokio::test]
+async fn stream_retries_once_on_429_and_replays_the_identical_request() {
+    let limited = http_response(
+        429,
+        "Too Many Requests",
+        "application/json",
+        "{\"error\":{\"message\":\"rate limited\"}}".to_string(),
+    );
+    let answer = openai_sse(&[json!({ "choices": [{ "delta": { "content": "Recovered." } }] })]);
+    let server = MockProvider::start(vec![limited, answer]).await;
+    let config = openai_config(&server.base_url);
+
+    let text = stream_plain(&config, &Notify::new()).await.expect("the retry after the 429 succeeds");
+
+    assert_eq!(text, "Recovered.");
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2, "exactly one retry");
+    assert_eq!(requests[0].path, "/chat/completions");
+    assert_eq!(requests[0].body, requests[1].body, "the retry replays the identical request");
+}
+
+#[tokio::test]
+async fn tool_stream_retries_once_on_503() {
+    let overloaded = http_response(
+        503,
+        "Service Unavailable",
+        "application/json",
+        "{\"error\":{\"message\":\"overloaded\"}}".to_string(),
+    );
+    let answer = gemini_sse(&[json!({
+        "candidates": [{ "content": { "role": "model", "parts": [{ "text": "Recovered." }] } }]
+    })]);
+    let server = MockProvider::start(vec![overloaded, answer]).await;
+    let config = gemini_config(&server.base_url);
+
+    let (text, calls, _) =
+        stream_turn(&config, &[AiMessage::text("user", "hi")], &[list_tables_tool()], &Notify::new()).await;
+
+    assert_eq!(text, "Recovered.");
+    assert!(calls.is_empty());
+    assert_eq!(server.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn complete_retries_once_on_502() {
+    let bad_gateway =
+        http_response(502, "Bad Gateway", "application/json", "{\"error\":{\"message\":\"bad gateway\"}}".to_string());
+    let answer = json_response(json!({ "choices": [{ "message": { "content": "Recovered." } }] }));
+    let server = MockProvider::start(vec![bad_gateway, answer]).await;
+    let config = openai_config(&server.base_url);
+
+    let request = AiCompletionRequest {
+        config,
+        system_prompt: String::new(),
+        messages: vec![AiMessage::text("user", "hi")],
+        max_tokens: Some(16),
+        temperature: Some(0.0),
+    };
+    let text = ai::complete(&request).await.expect("the retry after the 502 succeeds");
+
+    assert_eq!(text, "Recovered.");
+    assert_eq!(server.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn stream_errors_after_a_mid_stream_drop_without_retrying() {
+    // 200 + SSE headers, one delta, then the socket closes with the body far
+    // short of its Content-Length — an in-flight drop, not a refused request.
+    // Re-sending could duplicate the (billed) partial answer, so the error must
+    // propagate with no second request.
+    let partial = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: 400\r\nConnection: close\r\n\r\n{}",
+        "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\r\n\r\n"
+    );
+    let server = MockProvider::start(vec![partial]).await;
+    let config = openai_config(&server.base_url);
+
+    let result = stream_plain(&config, &Notify::new()).await;
+
+    assert!(result.is_err(), "the mid-stream drop surfaces as an error");
+    assert_eq!(server.requests().len(), 1, "never retried once the stream started");
+}
+
+#[tokio::test]
+async fn stream_does_not_retry_client_errors() {
+    let bad_request = http_response(
+        400,
+        "Bad Request",
+        "application/json",
+        "{\"error\":{\"message\":\"model not found\"}}".to_string(),
+    );
+    let server = MockProvider::start(vec![bad_request]).await;
+    let config = openai_config(&server.base_url);
+
+    let err = stream_plain(&config, &Notify::new()).await.expect_err("a 400 is a dead end");
+
+    assert!(err.contains("model not found"), "the provider's error message is surfaced: {err}");
+    assert_eq!(server.requests().len(), 1, "deterministic client errors get no second request");
 }
