@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { uuid } from "@/lib/utils";
 import { useI18n } from "vue-i18n";
 import { translateBackendError, presentConnectionError } from "@/i18n/backend-errors";
@@ -7,6 +7,7 @@ import {
   ArrowUp,
   ArrowRightLeft,
   AlertTriangle,
+  BarChart3,
   Bot,
   Check,
   ChevronRight,
@@ -61,6 +62,7 @@ import {
 } from "@/lib/aiSqlExecutionPolicy";
 import ExplainPlanViewer from "@/components/explain/ExplainPlanViewer.vue";
 import { parseExplainResult, type ParsedExplainPlan } from "@/lib/explainPlan";
+import { chartResultFromToolText, isChartableToolStep } from "@/lib/aiChartResult";
 import type { QueryResult } from "@/types/database";
 import { createAiShikiCodeHighlighter, type AiCodeHighlighter } from "@/lib/aiCodeHighlighter";
 import { createAiMessageRenderer } from "@/lib/aiMessageRender";
@@ -88,6 +90,11 @@ import { copyToClipboard } from "@/lib/clipboard";
 import { formatAiTableMention, parseAiTableMentions, type AiTableMention } from "@/lib/aiTableMentions";
 import { isAiPromptImeCompositionEvent, shouldSubmitAiPromptOnKeydown } from "@/lib/aiPromptKeyboard";
 import { formatTokenUsage, hasTokenUsage, usageFromAgentEndEvent, usageFromPersistedMessage } from "@/lib/aiTokenUsage";
+
+// Charting reuses the query-results chart (perf plan §5 D8). ECharts stays out
+// of the chat chunk: the component loads on first use, exactly like the
+// results pane in ContentArea.
+const QueryChart = defineAsyncComponent(() => import("@/components/chart/QueryChart.vue"));
 
 const { t } = useI18n();
 const settings = useSettingsStore();
@@ -823,6 +830,19 @@ function extractToolResult(result: unknown): { content?: string; explainData?: u
   };
 }
 
+// "Chart" action on query-tool result cards: one expanded chart at a time,
+// keyed by the step's tool_call_id.
+const chartStepId = ref("");
+
+function toggleStepChart(stepId: string) {
+  chartStepId.value = chartStepId.value === stepId ? "" : stepId;
+}
+
+/** The QueryChart prop for a step's markdown result table, or null when it holds nothing chartable. */
+function stepChartResult(step: AgentToolStep): QueryResult | null {
+  return chartResultFromToolText(step.resultText);
+}
+
 async function confirmTool(assistantIdx: number, approved: boolean) {
   const msg = messages.value[assistantIdx];
   const confirm = msg?.pendingConfirm;
@@ -1152,6 +1172,18 @@ watch(streamingIndex, () => {
                       <Play class="h-3 w-3" />
                       {{ t("ai.executeSql") }}
                     </Button>
+                    <Button
+                      v-if="isChartableToolStep(step)"
+                      size="sm"
+                      variant="outline"
+                      class="h-5 gap-1 px-1.5 text-[10px]"
+                      :class="{ 'bg-[var(--ds-bg-active)] text-[var(--ds-text-1)]': chartStepId === step.id }"
+                      :title="t('ai.chartResult')"
+                      @click="toggleStepChart(step.id)"
+                    >
+                      <BarChart3 class="h-3 w-3" />
+                      {{ t("ai.chartResult") }}
+                    </Button>
                   </div>
                   <ExplainPlanViewer
                     v-if="step.explainData && connection?.db_type"
@@ -1164,6 +1196,11 @@ watch(streamingIndex, () => {
                   >
                     {{ step.resultText }}
                   </div>
+                  <QueryChart
+                    v-if="chartStepId === step.id && stepChartResult(step)"
+                    :result="stepChartResult(step)!"
+                    class="h-64 shrink-0 rounded-md border border-[var(--ds-border)] bg-[var(--ds-bg-canvas)]"
+                  />
                 </div>
               </div>
               <div

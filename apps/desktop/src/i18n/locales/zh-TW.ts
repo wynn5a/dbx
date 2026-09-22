@@ -854,6 +854,7 @@ export default {
     copySql: "複製 SQL",
     copyCode: "複製程式碼",
     executeSql: "立即執行",
+    chartResult: "生成圖表",
 
     copied: "已複製",
 

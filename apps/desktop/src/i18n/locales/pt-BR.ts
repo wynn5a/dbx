@@ -906,6 +906,7 @@ export default {
     copySql: "Copiar SQL",
     copyCode: "Copiar Código",
     executeSql: "Executar SQL",
+    chartResult: "Gerar gráfico",
 
     copied: "Copiado",
 

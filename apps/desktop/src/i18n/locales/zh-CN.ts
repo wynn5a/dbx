@@ -887,6 +887,7 @@ export default {
     copySql: "复制 SQL",
     copyCode: "复制代码",
     executeSql: "立即执行",
+    chartResult: "生成图表",
 
     copied: "已复制",
 
