@@ -32,7 +32,7 @@
 | T11 | 健康扫描覆盖全部驱动 | improvement-plan §2 A4 | S | ✅ fe4c270c |
 | T12 | Agent 工具查询可取消可见 | improvement-plan §5 D2 | M | ✅ b2e2f9d8 |
 | T13 | 启动并行加载 + 加载态 | improvement-plan §3 B3 | S | ✅ 014307e0 |
-| T14 | DDL 后失效补全缓存 | improvement-plan §4 C4 | S | ⬜ |
+| T14 | DDL 后失效补全缓存 | improvement-plan §4 C4 | S | ✅ 9b9e361f |
 | T15 | 启动无暗色闪烁 | improvement-plan §6 E2 | S | ⬜ |
 | T16 | 全局错误处理器 | improvement-plan §6 E3 | S | ⬜ |
 | T17 | 可行动的连接错误提示 | improvement-plan §6 E4 | M | ⬜ |
@@ -208,14 +208,15 @@
   - [x] 测试通过（`pnpm check` 全绿：vitest 164 文件 1142 用例）
 - **实现说明**：三个读取改 `Promise.all` 并发、全部成功后按原顺序提交（`reconcileLayout` 依赖已装载的 connections，`rebuildTreeNodes` 依赖两者）；容错语义与原串行版一致——`loadPinnedTreeNodeIds` 自行 catch IPC，`loadConnections`/`loadSidebarLayout` 失败向上传播（App.vue toast `connection.loadFailed`），任一失败不阻止其余扇出。一处有意收紧：`Promise.all` 下任一读取失败则什么都不提交（原串行版会在 layout 失败后留下 connections 已装载但树未重建的半载状态）；失败时 `connectionsLoading` 在 `finally` 清除。标志初值 `true`（store 创建即加载中），冷启动首帧即加载态、无"无连接"闪现；后续 `initFromDisk` 重载（mcp-reload-connections 等事件）期间同样置位。UI 跟随仓库既有 Loader2 + `animate-spin` + `--ds-*` token 风格，文案六个 locale 全部就位。
 
-### T14 DDL 后失效补全缓存 ⬜
+### T14 DDL 后失效补全缓存 ✅ 9b9e361f
 
 - **来源** improvement-plan-2026-09.md §4 C4（Track C）· **规模** S
 - **内容** `invalidateCompletionCache`（`connectionStore.ts:796`）目前只在断连/更新时调用。编辑器成功执行 `CREATE|ALTER|DROP|TRUNCATE` 后，对该 connection + database 调用它。
 - **验收**
-  - [ ] 执行 CREATE TABLE 后新表立即出现在补全（无需重连/手动刷新）
-  - [ ] 纯 SELECT/DML 不触发缓存失效
-  - [ ] 测试通过
+  - [x] 执行 CREATE TABLE 后新表立即出现在补全（无需重连/手动刷新）（`sqlDdlCompletionInvalidation.test.ts` 以真实 Pinia store + IPC stub 断言：CREATE 成功后缓存被清、下一次补全请求恰好一次 `list_tables` 重取并返回新表，其余 database 不受影响）
+  - [x] 纯 SELECT/DML 不触发缓存失效（SELECT/INSERT/UPDATE/DELETE/TRUNCATE 及 `-- CREATE TABLE` 注释均零重取；执行失败 `success=false` 时完全不进入刷新路径）
+  - [x] 测试通过（`pnpm check` 全绿：vitest 165 文件 1146 用例）
+- **实现说明**：DDL 判定复用仓库既有分类器 `sqlMetadataRefreshTarget`（`lib/sqlMetadataRefresh.ts`，与侧栏树刷新同源），不自造正则：成功执行的回调（`useSqlExecution` 的 `doExecute`，抽为导出的 `refreshMetadataAfterExecution`）在对象 DDL（CREATE/ALTER/DROP/RENAME …）命中时对该 connection+database 调用 `invalidateCompletionCache`（新从 connectionStore 导出），数据库级 DDL（CREATE/DROP DATABASE/SCHEMA）则失效整个 connection 的缓存。**TRUNCATE 有意不触发**：该分类器（既有测试锁定）把 TRUNCATE 归为数据操作——它不改结构，补全列表（表/列名）依然有效；任务原文中的 TRUNCATE 按仓库现状从宽处理为不失效。注释在匹配前剥离，CTE/子查询无 DDL 关键字头不会命中（字符串字面量内含 "CREATE TABLE" 的极端误判与树刷新现状一致，仅多一次无害重取）。失效是惰性的：下一次补全请求时重取。侧栏树刷新原本就有 DDL 钩子（同一成功分支），本次仅在同分支补上补全缓存失效，未扩大范围。
 
 ### T15 启动无暗色闪烁 ⬜
 
