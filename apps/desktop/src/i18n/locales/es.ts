@@ -615,6 +615,7 @@ export default {
     imageLoadFailed: "No se pudo cargar la imagen",
     geometryPreview: "Vista previa de geometría",
     layerPreview: "Vista previa de capa",
+    previewLoadFailed: "No se pudo cargar la vista previa del mapa: {message}",
     zoomIn: "Acercar",
     zoomOut: "Alejar",
     fitImage: "Ajustar a ventana",

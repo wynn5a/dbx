@@ -612,6 +612,7 @@ export default {
     imageLoadFailed: "Image failed to load",
     geometryPreview: "Geometry Preview",
     layerPreview: "Layer Preview",
+    previewLoadFailed: "Failed to load the map preview: {message}",
     zoomIn: "Zoom In",
     zoomOut: "Zoom Out",
     fitImage: "Fit to Window",

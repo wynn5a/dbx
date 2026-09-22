@@ -607,6 +607,7 @@ export default {
     imageLoadFailed: "Caricamento immagine non riuscito",
     geometryPreview: "Anteprima Geometria",
     layerPreview: "Anteprima Layer",
+    previewLoadFailed: "Caricamento dell'anteprima mappa non riuscito: {message}",
     zoomIn: "Ingrandisci",
     zoomOut: "Rimpicciolisci",
     fitImage: "Adatta alla Finestra",

@@ -594,6 +594,7 @@ export default {
     imageLoadFailed: "圖片載入失敗",
     geometryPreview: "圖形預覽",
     layerPreview: "圖層預覽",
+    previewLoadFailed: "地圖預覽載入失敗：{message}",
     zoomIn: "放大",
     zoomOut: "縮小",
     fitImage: "適應視窗",

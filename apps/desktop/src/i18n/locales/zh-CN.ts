@@ -604,6 +604,7 @@ export default {
     imageLoadFailed: "图片加载失败",
     geometryPreview: "图形预览",
     layerPreview: "图层预览",
+    previewLoadFailed: "地图预览加载失败：{message}",
     zoomIn: "放大",
     zoomOut: "缩小",
     fitImage: "适应窗口",

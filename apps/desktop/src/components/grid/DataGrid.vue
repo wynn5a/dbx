@@ -140,8 +140,11 @@ import {
   gridDirtySnapshot,
   type GridDisplayRowRef,
 } from "@/lib/dataGridRowItems";
-import { getApplicablePreviewActions } from "@/lib/resultPreviewRegistry";
-import "@/lib/previewHandlers/geometryMapPreview";
+import {
+  getApplicablePreviewActions,
+  type PreviewAction,
+  type PreviewActionContext,
+} from "@/lib/resultPreviewRegistry";
 import {
   BINARY_CELL_DOWNLOAD_MODES,
   binaryCellDisplayText,
@@ -1573,11 +1576,41 @@ const visibleColumnTypes = computed(() =>
 );
 const visibleColumnCount = computed(() => visibleColumnIndexes.value.length);
 
-/** Preview actions from the result preview registry for the current result. */
+/**
+ * Preview actions from the result preview registry for the current result.
+ * Handlers register themselves from lazily loaded modules (the map preview
+ * pulls in Leaflet, which must stay out of the startup chunks), so
+ * `previewHandlersVersion` is bumped once a handler module finishes loading.
+ */
+const previewHandlersVersion = ref(0);
+let previewHandlersLoad: Promise<unknown> | undefined;
+function ensurePreviewHandlersLoaded(): Promise<unknown> {
+  previewHandlersLoad ??= import("@/lib/previewHandlers/geometryMapPreview").then(
+    (module) => {
+      previewHandlersVersion.value += 1;
+      return module;
+    },
+    (error) => {
+      previewHandlersLoad = undefined; // allow a retry on the next trigger
+      throw error;
+    },
+  );
+  return previewHandlersLoad;
+}
 const previewActions = computed(() => {
   if (!props.result) return [];
+  void previewHandlersVersion.value; // re-query the registry once handlers register
   return getApplicablePreviewActions(props.result);
 });
+// Warm the handler module as soon as a result carries geometry columns, so the
+// context-menu entry is registered by the time the user right-clicks.
+watch(
+  () => props.result?.column_types?.some((t) => isGeometryColumnType(t ?? "")) ?? false,
+  (hasGeometryColumns) => {
+    if (hasGeometryColumns) void ensurePreviewHandlersLoaded().catch(() => {});
+  },
+  { immediate: true },
+);
 const displayableColumnCount = computed(() => displayableColumnIndexes.value.length);
 const hiddenColumnCount = computed(() => displayableColumnCount.value - visibleColumnCount.value);
 const allNullColumnIndexesForResult = computed(() =>
@@ -2827,15 +2860,22 @@ function exportSelectedRowsSql() {
   return exportSql(affectedRowIds());
 }
 
-function executePreviewAction(action: { execute: (ctx: any) => any }) {
-  const config = action.execute({
-    result: props.result,
-    selectedRowIds: affectedRowIds(),
-    displayRowRefs: displayRowRefs.value,
-  });
-  if (config) {
-    previewDialogConfig.value = config;
-    previewDialogOpen.value = true;
+async function executePreviewAction(action: PreviewAction) {
+  try {
+    const config = await action.execute({
+      result: props.result,
+      selectedRowIds: affectedRowIds(),
+      // New (unsaved) rows carry display/new indexes instead of sourceIndex;
+      // preview handlers skip them via the isNew guard.
+      displayRowRefs: displayRowRefs.value as PreviewActionContext["displayRowRefs"],
+    });
+    if (config) {
+      previewDialogConfig.value = config;
+      previewDialogOpen.value = true;
+    }
+  } catch (e: any) {
+    console.error("[DataGrid] preview action failed:", e);
+    toast(t("grid.previewLoadFailed", { message: e?.message || String(e) }), 5000);
   }
 }
 

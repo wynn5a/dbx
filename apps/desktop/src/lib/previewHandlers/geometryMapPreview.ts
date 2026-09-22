@@ -1,7 +1,6 @@
 import { Map as MapIcon } from "@lucide/vue";
 import { registerPreviewAction } from "@/lib/resultPreviewRegistry";
 import { wktToGeoJson } from "@/lib/geometryPreview";
-import LayerPreviewDialog from "@/components/grid/LayerPreviewDialog.vue";
 
 registerPreviewAction({
   id: "geometry-map-preview",
@@ -16,7 +15,7 @@ registerPreviewAction({
       return base === "geometry" || base === "geography";
     });
   },
-  execute(ctx) {
+  async execute(ctx) {
     const geomIndices = geometryColumnIndices(ctx.result.column_types);
     if (geomIndices.length === 0) return null;
 
@@ -58,6 +57,10 @@ registerPreviewAction({
     }
 
     if (features.length === 0) return null;
+
+    // Load the dialog (and Leaflet underneath it) only now that there is
+    // something to show — keeps the map out of the startup chunks.
+    const { default: LayerPreviewDialog } = await import("@/components/grid/LayerPreviewDialog.vue");
 
     const fc = { type: "FeatureCollection", features };
 

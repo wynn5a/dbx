@@ -34,9 +34,11 @@ export interface PreviewAction {
   isAvailable(result: Pick<QueryResult, "columns" | "column_types">): boolean;
   /**
    * Execute the action. Returns a dialog configuration to render, or null
-   * if nothing to show (e.g. no applicable data in selected rows).
+   * if nothing to show (e.g. no applicable data in selected rows). May return
+   * a promise when the dialog has to be loaded on demand (e.g. the Leaflet
+   * map preview); a rejected promise means the dialog could not be loaded.
    */
-  execute(ctx: PreviewActionContext): PreviewDialogConfig | null;
+  execute(ctx: PreviewActionContext): PreviewDialogConfig | null | Promise<PreviewDialogConfig | null>;
 }
 
 const actions = new Map<string, PreviewAction>();

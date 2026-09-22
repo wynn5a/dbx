@@ -606,6 +606,7 @@ export default {
     imageLoadFailed: "Falha ao carregar a imagem",
     geometryPreview: "Visualização de Geometria",
     layerPreview: "Visualização de Camada",
+    previewLoadFailed: "Falha ao carregar a visualização do mapa: {message}",
     zoomIn: "Aproximar",
     zoomOut: "Afastar",
     fitImage: "Ajustar à Janela",
