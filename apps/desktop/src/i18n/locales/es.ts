@@ -51,6 +51,7 @@ export default {
     connections: "CONEXIONES",
     sqlLibrary: "BIBLIOTECA SQL",
     noConnections: "Sin conexiones",
+    cancelLoading: "Cancelar la carga",
     loadingConnections: "Cargando conexiones...",
     import: "Importar conexiones",
     importDbx: "Importar configuración DBX",

@@ -424,11 +424,59 @@ pub async fn test_connection(state: State<'_, Arc<AppState>>, config: Connection
     result
 }
 
+/// Stable error text returned when an attempt is cancelled via
+/// [`cancel_connection_attempt`]. The frontend discards results of cancelled
+/// attempts by attempt id, so the exact wording is cosmetic.
+const CONNECTION_ATTEMPT_CANCELLED: &str = "Connection attempt cancelled.";
+
 #[tauri::command]
-pub async fn connect_db(state: State<'_, Arc<AppState>>, config: ConnectionConfig) -> Result<String, String> {
+pub async fn connect_db(
+    state: State<'_, Arc<AppState>>,
+    config: ConnectionConfig,
+    attempt_id: Option<String>,
+) -> Result<String, String> {
     let config = config.canonicalized();
+    let token = attempt_id.as_deref().map(|id| state.connection_attempts.register(id));
+
+    let result = match token {
+        Some(token) => {
+            // Cancel mid-attempt aborts the connect future wherever it is
+            // waiting: no pool entry is committed unless the work already ran
+            // to completion, and a cancel that arrives after that finds no
+            // registration (unregistered below) and keeps the complete pool.
+            tokio::select! {
+                result = connect_db_work(state.inner(), &config) => result,
+                _ = token.cancelled() => Err(CONNECTION_ATTEMPT_CANCELLED.to_string()),
+            }
+        }
+        None => connect_db_work(state.inner(), &config).await,
+    };
+
+    if let Some(attempt_id) = attempt_id.as_deref() {
+        state.connection_attempts.unregister(attempt_id);
+    }
+    result
+}
+
+/// Commit the finished pool and its config in one step. Both write guards are
+/// acquired *before* either insert and there is no await point between the two
+/// inserts, so a cancellation can never land between them: an aborted attempt
+/// leaves either no entries at all or a fully registered connection.
+///
+/// `configs` is taken before `connections` because nothing else in the codebase
+/// holds `connections` while acquiring `configs` (the one dual-lock site,
+/// `active_agent_driver_keys`, reads both configs-first), so this ordering
+/// cannot form a lock cycle.
+async fn commit_connection_pool(state: &Arc<AppState>, id: &str, pool: PoolKind, config: &ConnectionConfig) {
+    let mut configs = state.configs.write().await;
+    let mut conns = state.connections.write().await;
+    conns.insert(id.to_string(), pool);
+    configs.insert(id.to_string(), config.clone());
+}
+
+async fn connect_db_work(state: &Arc<AppState>, config: &ConnectionConfig) -> Result<String, String> {
     let id = config.id.clone();
-    let db_config = metadata_connection_config(&config);
+    let db_config = metadata_connection_config(config);
 
     state.remove_connection_pools(&id).await;
     state.reset_connection_transport_for_config(&id, &db_config).await;
@@ -441,8 +489,7 @@ pub async fn connect_db(state: State<'_, Arc<AppState>>, config: ConnectionConfi
 
     let pool = match db_config.db_type {
         DatabaseType::Mysql => {
-            let (pool, mode) =
-                connect_mysql_metadata_pool(&config, &db_config, &host, port, connect_timeout, 3).await?;
+            let (pool, mode) = connect_mysql_metadata_pool(config, &db_config, &host, port, connect_timeout, 3).await?;
             PoolKind::Mysql(pool, mode)
         }
         DatabaseType::Doris | DatabaseType::StarRocks => PoolKind::Mysql(
@@ -499,8 +546,7 @@ pub async fn connect_db(state: State<'_, Arc<AppState>>, config: ConnectionConfi
                         .await
                     {
                         Ok(()) => {
-                            state.configs.write().await.insert(id.clone(), config);
-                            state.connections.write().await.insert(id.clone(), PoolKind::MongoDb(client));
+                            commit_connection_pool(state, &id, PoolKind::MongoDb(client), config).await;
                             return Ok(id);
                         }
                         Err(e) => e,
@@ -569,16 +615,25 @@ pub async fn connect_db(state: State<'_, Arc<AppState>>, config: ConnectionConfi
             PoolKind::Rqlite(client)
         }
         db_type if database_capabilities::is_agent_type(&db_type) => {
-            connect_agent_pool(state.inner(), &db_config, &host, port).await?
+            connect_agent_pool(state, &db_config, &host, port).await?
         }
         DatabaseType::Jdbc => state.external_driver_pool("jdbc", &db_config).await?,
         db_type => return Err(format!("Unsupported database type: {db_type:?}")),
     };
 
-    state.connections.write().await.insert(id.clone(), pool);
-    state.configs.write().await.insert(id.clone(), config);
+    commit_connection_pool(state, &id, pool, config).await;
 
     Ok(id)
+}
+
+/// Cancel an in-flight `connect_db` attempt (E5 cancellable connect). Flips the
+/// attempt's token, which aborts the connect future via `tokio::select!` in
+/// `connect_db` — before any pool is committed, so no half-open connection or
+/// duplicate pool entry can result. Returns whether an in-flight attempt was
+/// found; `false` means it already settled and the late cancel is a no-op.
+#[tauri::command]
+pub async fn cancel_connection_attempt(state: State<'_, Arc<AppState>>, attempt_id: String) -> Result<bool, String> {
+    Ok(state.connection_attempts.cancel(&attempt_id))
 }
 
 #[tauri::command]

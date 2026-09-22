@@ -462,8 +462,18 @@ export async function testConnection(config: ConnectionConfig): Promise<string> 
   return invoke("test_connection", { config });
 }
 
-export async function connectDb(config: ConnectionConfig): Promise<string> {
-  return invoke("connect_db", { config });
+export async function connectDb(config: ConnectionConfig, attemptId?: string): Promise<string> {
+  return invoke("connect_db", { config, attemptId });
+}
+
+/**
+ * Cancel an in-flight `connect_db` attempt by its attempt id. The backend flips
+ * the attempt's token, which aborts the connect future before any pool is
+ * committed (E5). Returns whether an in-flight attempt was found — a late
+ * cancel after the attempt settled is a harmless no-op.
+ */
+export async function cancelConnectionAttempt(attemptId: string): Promise<boolean> {
+  return invoke("cancel_connection_attempt", { attemptId });
 }
 
 export async function connectionFinalProxyPort(config: ConnectionConfig): Promise<number> {

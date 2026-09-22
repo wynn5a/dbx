@@ -54,6 +54,54 @@ pub enum PoolKind {
     ExternalDriver { driver_id: String, config: Arc<ConnectionConfig>, session: Arc<PluginDriverSession> },
 }
 
+/// Registry of in-flight `connect_db` attempts keyed by a frontend-minted
+/// attempt id (cancellable connect, improvement-plan E5). The connect command
+/// registers on entry and unregisters when the attempt settles; the frontend's
+/// cancel command flips the token, which aborts the connect future.
+///
+/// Resource contract of an aborted attempt: dropping the connect future leaves
+/// whatever it was doing mid-flight discarded, and the pool/config bookkeeping
+/// is a single commit with no await point between the two map inserts — so an
+/// aborted attempt either leaves no registry entries at all or a fully
+/// committed connection. Never a half-registered pool, never a duplicate entry
+/// (a late cancel after the commit finds no registration left and is a no-op).
+#[derive(Clone, Default)]
+pub struct ConnectionAttempts {
+    inner: Arc<std::sync::Mutex<HashMap<String, tokio_util::sync::CancellationToken>>>,
+}
+
+impl ConnectionAttempts {
+    /// Mint and register the cancellation token for `attempt_id`.
+    pub fn register(&self, attempt_id: &str) -> tokio_util::sync::CancellationToken {
+        let token = tokio_util::sync::CancellationToken::new();
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).insert(attempt_id.to_string(), token.clone());
+        token
+    }
+
+    /// Flip the token for `attempt_id` and drop its registration. Returns
+    /// whether an attempt was found — `false` means it already settled (or the
+    /// id is unknown), which makes a late cancel a harmless no-op.
+    pub fn cancel(&self, attempt_id: &str) -> bool {
+        let token = self.inner.lock().unwrap_or_else(|e| e.into_inner()).remove(attempt_id);
+        match token {
+            Some(token) => {
+                token.cancel();
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn unregister(&self, attempt_id: &str) {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).remove(attempt_id);
+    }
+
+    #[cfg(test)]
+    pub fn has(&self, attempt_id: &str) -> bool {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).contains_key(attempt_id)
+    }
+}
+
 /// A set of mutexes keyed by string, created on demand. Two tasks locking the
 /// same key are serialized; tasks locking different keys run concurrently.
 ///
@@ -84,6 +132,7 @@ pub struct AppState {
     pub connections: RwLock<HashMap<String, PoolKind>>,
     pub configs: RwLock<HashMap<String, ConnectionConfig>>,
     pub running_queries: RunningQueries,
+    pub connection_attempts: ConnectionAttempts,
     pub tunnels: TunnelManager,
     pub proxy_tunnels: ProxyTunnelManager,
     pub storage: Storage,
@@ -262,6 +311,7 @@ impl AppState {
             connections: RwLock::new(HashMap::new()),
             configs: RwLock::new(HashMap::new()),
             running_queries: RunningQueries::default(),
+            connection_attempts: ConnectionAttempts::default(),
             tunnels: TunnelManager::new(),
             proxy_tunnels: ProxyTunnelManager::new(),
             storage,
@@ -1623,6 +1673,40 @@ mod tests {
         config.host = path.to_string();
         config.database = None;
         config
+    }
+
+    #[test]
+    fn connection_attempt_cancel_flips_token_and_clears_registration() {
+        let attempts = super::ConnectionAttempts::default();
+        let token = attempts.register("attempt-1");
+
+        assert!(attempts.has("attempt-1"));
+        assert!(!token.is_cancelled());
+
+        assert!(attempts.cancel("attempt-1"), "cancel must find the in-flight attempt");
+        assert!(token.is_cancelled(), "the connect future selects on this token");
+        assert!(!attempts.has("attempt-1"), "a late cancel after settle finds nothing (no-op)");
+        assert!(!attempts.cancel("attempt-1"), "second cancel reports the attempt is gone");
+    }
+
+    #[test]
+    fn connection_attempt_cancel_unknown_id_is_a_noop() {
+        let attempts = super::ConnectionAttempts::default();
+
+        assert!(!attempts.cancel("missing"));
+        assert!(!attempts.has("missing"));
+    }
+
+    #[test]
+    fn connection_attempt_unregister_removes_registration() {
+        let attempts = super::ConnectionAttempts::default();
+        let token = attempts.register("attempt-1");
+
+        attempts.unregister("attempt-1");
+
+        assert!(!attempts.has("attempt-1"));
+        assert!(!attempts.cancel("attempt-1"), "settled attempts must not be cancellable");
+        assert!(!token.is_cancelled(), "unregister (normal settle) never cancels the token");
     }
 
     #[tokio::test]

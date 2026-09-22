@@ -1,6 +1,6 @@
 import { useI18n } from "vue-i18n";
 import { uuid } from "@/lib/utils";
-import { useConnectionStore } from "@/stores/connectionStore";
+import { useConnectionStore, ConnectionAttemptCancelledError } from "@/stores/connectionStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { useToast } from "@/composables/useToast";
 import * as api from "@/lib/api";
@@ -72,7 +72,11 @@ export function useFileDrop() {
         };
         try {
           await connectionStore.addConnection(config);
-          void connectionStore.connect(config);
+          void connectionStore.connect(config).catch((e) => {
+            // A deliberate cancel stays silent; other failures keep the existing
+            // unhandled-rejection path.
+            if (!(e instanceof ConnectionAttemptCancelledError)) throw e;
+          });
           toast(t("welcome.fileOpened", { name }));
         } catch (e: any) {
           toast(t("connection.saveFailed", { message: e?.message || String(e) }), 5000);

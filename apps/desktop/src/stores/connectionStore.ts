@@ -105,6 +105,19 @@ interface LoadTreeOptions {
   force?: boolean;
 }
 
+/**
+ * Rejected by `connectionStore.connect` when the in-flight attempt was
+ * cancelled by the user (E5 cancellable connect). Callers that surface connect
+ * failures as toasts check for it so a deliberate cancel stays silent — same
+ * UX contract as query cancel.
+ */
+export class ConnectionAttemptCancelledError extends Error {
+  constructor() {
+    super("Connection attempt cancelled.");
+    this.name = "ConnectionAttemptCancelledError";
+  }
+}
+
 interface PersistedTreeChildrenLoadResult {
   hit: boolean;
   isStale: boolean;
@@ -323,9 +336,75 @@ export const useConnectionStore = defineStore("connection", () => {
     }
   }
 
-  function withConnectionAttemptTimeout<T>(promise: Promise<T>, config: ConnectionConfig): Promise<T> {
+  function withConnectionAttemptTimeout<T>(
+    promise: Promise<T>,
+    config: ConnectionConfig,
+    attemptId?: string,
+  ): Promise<T> {
     const timeoutMs = connectionAttemptTimeoutMs(config);
-    return raceWithTimeout(promise, timeoutMs, connectionAttemptTimeoutMessage(timeoutMs));
+    const timeoutMessage = connectionAttemptTimeoutMessage(timeoutMs);
+    return raceWithTimeout(promise, timeoutMs, timeoutMessage).catch((error) => {
+      // Our own timeout fired while the backend connect is still dialing with
+      // no one listening — fire-and-forget cancel so it doesn't run to
+      // completion behind the scenes (same pattern as the query-timeout cancel
+      // in queryStore). Background callers pass no attempt id and keep the old
+      // abandon-only behavior.
+      if (attemptId && error instanceof Error && error.message === timeoutMessage) {
+        void api.cancelConnectionAttempt(attemptId).catch(() => undefined);
+      }
+      throw error;
+    });
+  }
+
+  // One in-flight attempt per tree node (E5): kind "connect" is cancellable on
+  // the backend via `cancel_connection_attempt` (the attempt id registers a
+  // CancellationToken there); kind "load" is cancelled by discarding the
+  // future — metadata reads have no server-side statement to kill. The guard
+  // is what makes late results dead: once an attempt is cancelled or
+  // superseded by a retry, `attemptIsActive` turns false and the loader drops
+  // its result instead of writing it into state.
+  interface NodeAttempt {
+    nodeId: string;
+    kind: "connect" | "load";
+    attemptId?: string;
+    inactive: boolean;
+  }
+  const nodeAttempts = new Map<string, NodeAttempt>();
+
+  function beginNodeAttempt(nodeId: string, kind: NodeAttempt["kind"], attemptId?: string): NodeAttempt {
+    // Supersede any previous attempt on this node so its late results stay dead.
+    const previous = nodeAttempts.get(nodeId);
+    if (previous) previous.inactive = true;
+    const attempt: NodeAttempt = { nodeId, kind, attemptId, inactive: false };
+    nodeAttempts.set(nodeId, attempt);
+    return attempt;
+  }
+
+  function attemptIsActive(attempt: NodeAttempt): boolean {
+    return !attempt.inactive && nodeAttempts.get(attempt.nodeId) === attempt;
+  }
+
+  function endNodeAttempt(attempt: NodeAttempt) {
+    if (nodeAttempts.get(attempt.nodeId) === attempt) nodeAttempts.delete(attempt.nodeId);
+  }
+
+  // Cancel whatever attempt is showing the spinner on `nodeId` and put the row
+  // back to idle immediately, so a new attempt can start right away. For a
+  // connect this also tells the backend to abort the dial; the in-flight
+  // promise settles later and is discarded by the attempt guard. Returns
+  // whether there was an attempt to cancel.
+  function cancelTreeNodeLoading(nodeId: string): boolean {
+    const attempt = nodeAttempts.get(nodeId);
+    if (!attempt) return false;
+    attempt.inactive = true;
+    nodeAttempts.delete(nodeId);
+    if (attempt.kind === "connect" && attempt.attemptId) {
+      void api.cancelConnectionAttempt(attempt.attemptId).catch(() => undefined);
+    }
+    commitTreeNode(nodeId, (draft) => {
+      draft.isLoading = false;
+    });
+    return true;
   }
 
   // Dedupes concurrent transparent reconnects: when a burst of metadata queries
@@ -974,11 +1053,17 @@ export const useConnectionStore = defineStore("connection", () => {
 
   async function connect(config: ConnectionConfig) {
     config = normalizeConnection(config);
+    // Cancellable attempt (E5): the attempt id registers a backend token so
+    // Cancel aborts the connect future instead of leaving it dialing behind
+    // the spinner (which the timeout race alone did).
+    const attemptId = uuid();
+    const attempt = beginNodeAttempt(config.id, "connect", attemptId);
     commitTreeNode(config.id, (draft) => {
       draft.isLoading = true;
     });
     try {
-      const id = await withConnectionAttemptTimeout(api.connectDb(config), config);
+      const id = await withConnectionAttemptTimeout(api.connectDb(config, attemptId), config, attemptId);
+      if (!attemptIsActive(attempt)) throw new ConnectionAttemptCancelledError();
       activeConnectionId.value = id;
       connectedIds.value.add(id);
       recordConnectionUsed(id);
@@ -1008,9 +1093,14 @@ export const useConnectionStore = defineStore("connection", () => {
       }
       return id;
     } catch (e) {
+      // A cancelled attempt resets the UI at cancel time and must stay
+      // silent: no error entry, and its late outcome (success or failure) is
+      // discarded so it can never leak into state.
+      if (!attemptIsActive(attempt)) throw new ConnectionAttemptCancelledError();
       recordConnectionError(config.id, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(config.id, (draft) => {
         draft.isLoading = false;
       });
@@ -1101,11 +1191,13 @@ export const useConnectionStore = defineStore("connection", () => {
   async function loadDatabases(connectionId: string, options?: LoadTreeOptions) {
     const node = findNode(treeNodes.value, connectionId);
     if (!node) return;
+    const attempt = beginNodeAttempt(node.id, "load");
     commitTreeNode(node, (draft) => {
       draft.isLoading = true;
     });
     try {
       await ensureConnected(connectionId);
+      if (!attemptIsActive(attempt)) return;
       if (useCachedChildren(node, options)) return;
 
       const config = getConfig(connectionId);
@@ -1121,6 +1213,7 @@ export const useConnectionStore = defineStore("connection", () => {
         const [databases, schemas] = await withMetadataLoadTimeout(connectionId, () =>
           Promise.all([api.listDatabases(connectionId), api.listSchemas(connectionId, "main")]),
         );
+        if (!attemptIsActive(attempt)) return;
         const children = withSavedSqlRoot(
           connectionId,
           buildDuckDbConnectionTreeNodes(connectionId, databases, schemas),
@@ -1139,6 +1232,7 @@ export const useConnectionStore = defineStore("connection", () => {
           }
         }
         const schemas = await withMetadataLoadTimeout(connectionId, () => api.listSchemas(connectionId, effectiveDb));
+        if (!attemptIsActive(attempt)) return;
         const visibleSchemas = filterDatabaseNamesForConnection(schemas, config);
         const schemaNodes: TreeNode[] = sortSidebarNames(visibleSchemas).map((s) => ({
           id: `${connectionId}:${s}:${s}`,
@@ -1162,6 +1256,7 @@ export const useConnectionStore = defineStore("connection", () => {
           }
         }
         const databases = await withMetadataLoadTimeout(connectionId, () => api.listDatabases(connectionId));
+        if (!attemptIsActive(attempt)) return;
         const visibleNames = filterDatabaseNamesForConnection(
           databases.map((database) => database.name),
           config,
@@ -1179,13 +1274,17 @@ export const useConnectionStore = defineStore("connection", () => {
         setChildren(node, children);
         await savePersistedTreeChildren(cacheKey, children);
       }
-      commitTreeNode(node, (draft) => {
-        draft.isExpanded = true;
-      });
+      if (attemptIsActive(attempt)) {
+        commitTreeNode(node, (draft) => {
+          draft.isExpanded = true;
+        });
+      }
     } catch (e) {
+      if (!attemptIsActive(attempt)) return;
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(node, (draft) => {
         draft.isLoading = false;
       });
@@ -1196,12 +1295,15 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, connectionId);
     if (!node) return;
 
+    const attempt = beginNodeAttempt(node.id, "load");
     commitTreeNode(node, (draft) => {
       draft.isLoading = true;
     });
     try {
       await ensureConnected(connectionId);
+      if (!attemptIsActive(attempt)) return;
       const dbs = await withMetadataLoadTimeout(connectionId, () => api.redisListDatabases(connectionId));
+      if (!attemptIsActive(attempt)) return;
       const config = getConfig(connectionId);
       const visibleNames = filterVisibleDatabaseNames(
         dbs.map((db) => String(db.db)),
@@ -1228,13 +1330,17 @@ export const useConnectionStore = defineStore("connection", () => {
           node,
         ),
       );
-      commitTreeNode(node, (draft) => {
-        draft.isExpanded = true;
-      });
+      if (attemptIsActive(attempt)) {
+        commitTreeNode(node, (draft) => {
+          draft.isExpanded = true;
+        });
+      }
     } catch (e) {
+      if (!attemptIsActive(attempt)) return;
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(node, (draft) => {
         draft.isLoading = false;
       });
@@ -1302,12 +1408,15 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, connectionId);
     if (!node) return;
 
+    const attempt = beginNodeAttempt(node.id, "load");
     commitTreeNode(node, (draft) => {
       draft.isLoading = true;
     });
     try {
       await ensureConnected(connectionId);
+      if (!attemptIsActive(attempt)) return;
       const dbs = await withMetadataLoadTimeout(connectionId, () => api.mongoListDatabases(connectionId));
+      if (!attemptIsActive(attempt)) return;
       const config = getConfig(connectionId);
       const visibleDbs = filterDatabaseNamesForConnection(dbs, config);
       setChildren(
@@ -1326,13 +1435,17 @@ export const useConnectionStore = defineStore("connection", () => {
           node,
         ),
       );
-      commitTreeNode(node, (draft) => {
-        draft.isExpanded = true;
-      });
+      if (attemptIsActive(attempt)) {
+        commitTreeNode(node, (draft) => {
+          draft.isExpanded = true;
+        });
+      }
     } catch (e) {
+      if (!attemptIsActive(attempt)) return;
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(node, (draft) => {
         draft.isLoading = false;
       });
@@ -1344,6 +1457,7 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, nodeId);
     if (!node) return;
 
+    const attempt = beginNodeAttempt(nodeId, "load");
     commitTreeNode(node, (draft) => {
       draft.isLoading = true;
     });
@@ -1351,6 +1465,7 @@ export const useConnectionStore = defineStore("connection", () => {
       const collections = await withMetadataLoadTimeout(connectionId, () =>
         api.mongoListCollections(connectionId, database),
       );
+      if (!attemptIsActive(attempt)) return;
       setChildren(
         node,
         sortSidebarNames(collections).map((col) => ({
@@ -1362,13 +1477,17 @@ export const useConnectionStore = defineStore("connection", () => {
           isExpanded: false,
         })),
       );
-      commitTreeNode(node, (draft) => {
-        draft.isExpanded = true;
-      });
+      if (attemptIsActive(attempt)) {
+        commitTreeNode(node, (draft) => {
+          draft.isExpanded = true;
+        });
+      }
     } catch (e) {
+      if (!attemptIsActive(attempt)) return;
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(node, (draft) => {
         draft.isLoading = false;
       });
@@ -1379,11 +1498,13 @@ export const useConnectionStore = defineStore("connection", () => {
     const nodeId = `${connectionId}:${database}`;
     const node = findNode(treeNodes.value, nodeId);
     if (!node) return;
+    const attempt = beginNodeAttempt(nodeId, "load");
     commitTreeNode(node, (draft) => {
       draft.isLoading = true;
     });
     try {
       await ensureConnected(connectionId);
+      if (!attemptIsActive(attempt)) return;
       if (useCachedChildren(node, options)) return;
       const cacheKey = schemaCacheKey(connectionId, database, "schemas");
       if (!options?.force) {
@@ -1397,6 +1518,7 @@ export const useConnectionStore = defineStore("connection", () => {
       const schemas = sortSidebarNames(
         await withMetadataLoadTimeout(connectionId, () => api.listSchemas(connectionId, database)),
       );
+      if (!attemptIsActive(attempt)) return;
       const children = schemas.map((s) => ({
         id: `${connectionId}:${database}:${s}`,
         label: s,
@@ -1409,13 +1531,17 @@ export const useConnectionStore = defineStore("connection", () => {
       }));
       setChildren(node, children);
       await savePersistedTreeChildren(cacheKey, children);
-      commitTreeNode(node, (draft) => {
-        draft.isExpanded = true;
-      });
+      if (attemptIsActive(attempt)) {
+        commitTreeNode(node, (draft) => {
+          draft.isExpanded = true;
+        });
+      }
     } catch (e) {
+      if (!attemptIsActive(attempt)) return;
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(node, (draft) => {
         draft.isLoading = false;
       });
@@ -1426,11 +1552,13 @@ export const useConnectionStore = defineStore("connection", () => {
     const nodeId = `${connectionId}:${database}`;
     const node = findNode(treeNodes.value, nodeId);
     if (!node) return;
+    const attempt = beginNodeAttempt(nodeId, "load");
     commitTreeNode(node, (draft) => {
       draft.isLoading = true;
     });
     try {
       await ensureConnected(connectionId);
+      if (!attemptIsActive(attempt)) return;
       if (useCachedChildren(node, options)) return;
       const simpleObjectDisplay = useSettingsStore().editorSettings.sidebarObjectDisplay === "simple";
       const cacheKey = schemaCacheKey(
@@ -1453,19 +1581,24 @@ export const useConnectionStore = defineStore("connection", () => {
             api.listObjects(connectionId, database, SQLSERVER_DEFAULT_SCHEMA),
           )
         : [];
+      if (!attemptIsActive(attempt)) return;
       const children = buildSqlServerDatabaseTreeNodes(connectionId, database, schemas, defaultSchemaObjects, {
         lazyObjectTypes: simpleObjectDisplay ? undefined : supportedSidebarObjectTypes(config),
         simpleObjectDisplay,
       });
       setChildren(node, children);
       await savePersistedTreeChildren(cacheKey, children);
-      commitTreeNode(node, (draft) => {
-        draft.isExpanded = true;
-      });
+      if (attemptIsActive(attempt)) {
+        commitTreeNode(node, (draft) => {
+          draft.isExpanded = true;
+        });
+      }
     } catch (e) {
+      if (!attemptIsActive(attempt)) return;
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(node, (draft) => {
         draft.isLoading = false;
       });
@@ -1476,11 +1609,13 @@ export const useConnectionStore = defineStore("connection", () => {
     const nodeId = schema ? `${connectionId}:${database}:${schema}` : `${connectionId}:${database}`;
     const node = findNode(treeNodes.value, nodeId);
     if (!node) return;
+    const attempt = beginNodeAttempt(nodeId, "load");
     commitTreeNode(node, (draft) => {
       draft.isLoading = true;
     });
     try {
       await ensureConnected(connectionId);
+      if (!attemptIsActive(attempt)) return;
       if (useCachedChildren(node, options)) return;
       const simpleObjectDisplay = useSettingsStore().editorSettings.sidebarObjectDisplay === "simple";
       const cacheKey = schemaCacheKey(
@@ -1509,6 +1644,7 @@ export const useConnectionStore = defineStore("connection", () => {
               api.listTables(connectionId, database, querySchema),
             ]),
           );
+          if (!attemptIsActive(attempt)) return;
           children = buildSimpleObjectTreeNodes({
             nodeId,
             connectionId,
@@ -1520,6 +1656,7 @@ export const useConnectionStore = defineStore("connection", () => {
           const tables = await withMetadataLoadTimeout(connectionId, () =>
             api.listTables(connectionId, database, querySchema),
           );
+          if (!attemptIsActive(attempt)) return;
           children = buildTableTreeNodes({ nodeId, connectionId, database, schema: effectiveSchema, tables });
         }
       } else {
@@ -1533,13 +1670,17 @@ export const useConnectionStore = defineStore("connection", () => {
       }
       setChildren(node, children);
       await savePersistedTreeChildren(cacheKey, children);
-      commitTreeNode(node, (draft) => {
-        draft.isExpanded = true;
-      });
+      if (attemptIsActive(attempt)) {
+        commitTreeNode(node, (draft) => {
+          draft.isExpanded = true;
+        });
+      }
     } catch (e) {
+      if (!attemptIsActive(attempt)) return;
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(node, (draft) => {
         draft.isLoading = false;
       });
@@ -1548,11 +1689,13 @@ export const useConnectionStore = defineStore("connection", () => {
 
   async function loadObjectGroupChildren(node: TreeNode, options?: LoadTreeOptions) {
     if (!node.connectionId || !hasTreeNodeDatabaseContext(node)) return;
+    const attempt = beginNodeAttempt(node.id, "load");
     commitTreeNode(node, (draft) => {
       draft.isLoading = true;
     });
     try {
       await ensureConnected(node.connectionId);
+      if (!attemptIsActive(attempt)) return;
       if (useCachedChildren(node, options)) return;
       const objectTypes = objectTypesForGroupNode(node.type);
       const parentNodeId = objectGroupRefreshParentId(node);
@@ -1587,6 +1730,7 @@ export const useConnectionStore = defineStore("connection", () => {
         : await withMetadataLoadTimeout(nodeConnectionId, () =>
             api.listObjects(nodeConnectionId, nodeDatabase, querySchema, objectTypes),
           );
+      if (!attemptIsActive(attempt)) return;
       const grouped = buildGroupedObjectTreeNodes({
         nodeId: parentNodeId,
         connectionId: node.connectionId,
@@ -1601,13 +1745,17 @@ export const useConnectionStore = defineStore("connection", () => {
       });
       setChildren(node, children);
       await savePersistedTreeChildren(cacheKey, children);
-      commitTreeNode(node, (draft) => {
-        draft.isExpanded = true;
-      });
+      if (attemptIsActive(attempt)) {
+        commitTreeNode(node, (draft) => {
+          draft.isExpanded = true;
+        });
+      }
     } catch (e) {
+      if (!attemptIsActive(attempt)) return;
       recordMetadataLoadError(node.connectionId, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(node, (draft) => {
         draft.isLoading = false;
       });
@@ -1698,6 +1846,7 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, parentId);
     if (!node) return;
 
+    const attempt = beginNodeAttempt(parentId, "load");
     commitTreeNode(node, (draft) => {
       draft.isLoading = true;
     });
@@ -1706,6 +1855,7 @@ export const useConnectionStore = defineStore("connection", () => {
       const columns = await withMetadataLoadTimeout(connectionId, () =>
         api.getColumns(connectionId, database, querySchema, table),
       );
+      if (!attemptIsActive(attempt)) return;
       setChildren(
         node,
         columns.map((col) => ({
@@ -1719,13 +1869,17 @@ export const useConnectionStore = defineStore("connection", () => {
           meta: col,
         })),
       );
-      commitTreeNode(node, (draft) => {
-        draft.isExpanded = true;
-      });
+      if (attemptIsActive(attempt)) {
+        commitTreeNode(node, (draft) => {
+          draft.isExpanded = true;
+        });
+      }
     } catch (e) {
+      if (!attemptIsActive(attempt)) return;
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(node, (draft) => {
         draft.isLoading = false;
       });
@@ -1741,6 +1895,7 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, parentId);
     if (!node) return;
 
+    const attempt = beginNodeAttempt(parentId, "load");
     commitTreeNode(node, (draft) => {
       draft.isLoading = true;
     });
@@ -1749,6 +1904,7 @@ export const useConnectionStore = defineStore("connection", () => {
       const indexes = await withMetadataLoadTimeout(connectionId, () =>
         api.listIndexes(connectionId, database, querySchema, table),
       );
+      if (!attemptIsActive(attempt)) return;
       setChildren(
         node,
         indexes.map((idx) => ({
@@ -1762,13 +1918,17 @@ export const useConnectionStore = defineStore("connection", () => {
           meta: idx,
         })),
       );
-      commitTreeNode(node, (draft) => {
-        draft.isExpanded = true;
-      });
+      if (attemptIsActive(attempt)) {
+        commitTreeNode(node, (draft) => {
+          draft.isExpanded = true;
+        });
+      }
     } catch (e) {
+      if (!attemptIsActive(attempt)) return;
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(node, (draft) => {
         draft.isLoading = false;
       });
@@ -1790,6 +1950,7 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, parentId);
     if (!node) return;
 
+    const attempt = beginNodeAttempt(parentId, "load");
     commitTreeNode(node, (draft) => {
       draft.isLoading = true;
     });
@@ -1798,6 +1959,7 @@ export const useConnectionStore = defineStore("connection", () => {
       const fkeys = await withMetadataLoadTimeout(connectionId, () =>
         api.listForeignKeys(connectionId, database, querySchema, table),
       );
+      if (!attemptIsActive(attempt)) return;
       setChildren(
         node,
         fkeys.map((fk) => ({
@@ -1811,13 +1973,17 @@ export const useConnectionStore = defineStore("connection", () => {
           meta: fk,
         })),
       );
-      commitTreeNode(node, (draft) => {
-        draft.isExpanded = true;
-      });
+      if (attemptIsActive(attempt)) {
+        commitTreeNode(node, (draft) => {
+          draft.isExpanded = true;
+        });
+      }
     } catch (e) {
+      if (!attemptIsActive(attempt)) return;
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(node, (draft) => {
         draft.isLoading = false;
       });
@@ -1833,6 +1999,7 @@ export const useConnectionStore = defineStore("connection", () => {
     const node = findNode(treeNodes.value, parentId);
     if (!node) return;
 
+    const attempt = beginNodeAttempt(parentId, "load");
     commitTreeNode(node, (draft) => {
       draft.isLoading = true;
     });
@@ -1841,6 +2008,7 @@ export const useConnectionStore = defineStore("connection", () => {
       const triggers = await withMetadataLoadTimeout(connectionId, () =>
         api.listTriggers(connectionId, database, querySchema, table),
       );
+      if (!attemptIsActive(attempt)) return;
       setChildren(
         node,
         triggers.map((tr) => ({
@@ -1854,13 +2022,17 @@ export const useConnectionStore = defineStore("connection", () => {
           meta: tr,
         })),
       );
-      commitTreeNode(node, (draft) => {
-        draft.isExpanded = true;
-      });
+      if (attemptIsActive(attempt)) {
+        commitTreeNode(node, (draft) => {
+          draft.isExpanded = true;
+        });
+      }
     } catch (e) {
+      if (!attemptIsActive(attempt)) return;
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
+      endNodeAttempt(attempt);
       commitTreeNode(node, (draft) => {
         draft.isLoading = false;
       });
@@ -3086,6 +3258,7 @@ export const useConnectionStore = defineStore("connection", () => {
     startCreatingConnectionInGroup,
     stopCreatingConnectionInGroup,
     connect,
+    cancelTreeNodeLoading,
     disconnect,
     closeDatabaseConnection,
     ensureConnected,

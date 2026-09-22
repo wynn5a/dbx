@@ -18,7 +18,7 @@ import type {
   SshTunnelConfig,
   TransportLayerConfig,
 } from "@/types/database";
-import { useConnectionStore } from "@/stores/connectionStore";
+import { useConnectionStore, ConnectionAttemptCancelledError } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useToast } from "@/composables/useToast";
 import DatabaseIcon from "@/components/icons/DatabaseIcon.vue";
@@ -1687,6 +1687,8 @@ async function save() {
         })
         .catch((e: any) => {
           if (config.one_time) void store.removeConnection(config.id);
+          // A deliberate cancel stays silent — same contract as query cancel.
+          if (e instanceof ConnectionAttemptCancelledError) return;
           emit("connectFailed", mongodbAuthFailureHint(String(e?.message || e)));
         });
       return;

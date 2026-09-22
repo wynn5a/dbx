@@ -48,6 +48,7 @@ import {
   Package,
   Clipboard,
   UsersRound,
+  X,
 } from "@lucide/vue";
 import CustomContextMenu, { type ContextMenuItem } from "@/components/ui/CustomContextMenu.vue";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -340,6 +341,13 @@ function onToggleClick(event: MouseEvent) {
     return;
   }
   void toggle();
+}
+
+// Cancel the connect/schema-load attempt whose spinner this row is showing
+// (E5): the store aborts the backend connect or discards the in-flight load
+// and resets the row so a retry can start immediately.
+function onCancelNodeLoading() {
+  connectionStore.cancelTreeNodeLoading(props.node.id);
 }
 
 async function toggle() {
@@ -3521,6 +3529,15 @@ function treeItemMenuItems(): ContextMenuItem[] {
           :connection-id="node.connectionId"
           trigger-class="h-4 w-4"
         />
+        <button
+          v-if="node.isLoading"
+          class="tree-row-pin rounded p-0.5 text-[var(--ds-text-3)] hover:text-[var(--ds-red)]"
+          :title="t('sidebar.cancelLoading')"
+          :aria-label="t('sidebar.cancelLoading')"
+          @click.stop="onCancelNodeLoading"
+        >
+          <X class="w-3 h-3" />
+        </button>
         <button
           v-if="canPin"
           class="tree-row-pin rounded p-0.5 focus:opacity-100"

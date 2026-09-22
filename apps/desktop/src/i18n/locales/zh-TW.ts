@@ -49,6 +49,7 @@ export default {
     sqlLibrary: "SQL 庫",
     connections: "連線",
     noConnections: "暫無連線",
+    cancelLoading: "取消載入",
     loadingConnections: "正在載入連線...",
     import: "匯入連線",
     importDbx: "匯入 DBX 設定",

@@ -12,7 +12,7 @@ import ContentArea from "@/components/layout/ContentArea.vue";
 import AppDialogs from "@/components/layout/AppDialogs.vue";
 import WelcomeScreen from "@/components/layout/WelcomeScreen.vue";
 import { connectionDriverLabel, connectionIconType } from "@/lib/connectionPresentation";
-import { useConnectionStore } from "@/stores/connectionStore";
+import { useConnectionStore, ConnectionAttemptCancelledError } from "@/stores/connectionStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useSavedSqlStore } from "@/stores/savedSqlStore";
@@ -588,7 +588,11 @@ async function openDbFilePath(path: string) {
       password: "",
     };
     await connectionStore.addConnection(config);
-    void connectionStore.connect(config);
+    void connectionStore.connect(config).catch((e) => {
+      // A deliberate cancel stays silent; other failures keep the existing
+      // unhandled-rejection path.
+      if (!(e instanceof ConnectionAttemptCancelledError)) throw e;
+    });
     toast(t("welcome.fileOpened", { name }));
   } catch (e: any) {
     toast(t("toolbar.sqlOpenFailed", { message: e?.message || String(e) }), 5000);
