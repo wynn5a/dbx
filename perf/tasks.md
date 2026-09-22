@@ -43,7 +43,7 @@
 | T22 | 置信门控未知列诊断 | improvement-plan §4 C5 | L | ✅ 4d08758a |
 | T23 | 网格 FK 点击跳转 | improvement-plan §6 E7-1 | M | ✅ 37fc558b |
 | T24 | 方言函数目录（CH/DuckDB/Oracle） | improvement-plan §4 C6 | M | ✅ 9a8178b2 |
-| T25 | Leaflet 按需加载 | improvement-plan §3 B5 | S | ⬜ |
+| T25 | Leaflet 按需加载 | improvement-plan §3 B5 | S | ✅ b963ea14 |
 | T26 | PG JSON 列免 parse-再序列化 | improvement-plan §3 B4 | S | ⬜ |
 | T27 | SSH 隧道放弃时驱逐连接池 | improvement-plan §2 A5 | S | ⬜ |
 | T28 | 原生 DB socket TCP keepalive | improvement-plan §2 A6 | S | ⬜ |
@@ -321,14 +321,15 @@
   - [x] 测试通过（新增 `packages/app-tests/sqlCompletion.dialectFunctions.test.ts` 9 项：三方言注册与结构完整性（目录条目数 74/76/50、描述与签名 key 一一对应、无大小写重复——可捕捉 Map 字面量重复键静默覆盖）、每方言代表性函数补全（精确 apply 模板与描述文案，CH 抽 countIf/toYYYYMM/groupArray/arrayJoin，DuckDB 抽 list_transform/struct_extract/json_extract*，Oracle 抽 LISTAGG/NVL2/ADD_MONTHS）、签名卡参数提示（含规范拼写与大写输入、activeParameter 位次）、跨方言不泄漏、共用目录行为不变、既有 5 方言清单钉死；`pnpm check` 全绿（format + lint + typecheck + vitest 171 文件 1233 测试，含 sqlCompletionPerformance 通过——目录扩大不影响既有补全性能测试））
 - **实现说明**：新增 `CLICKHOUSE/DUCKDB/ORACLE_FUNCTION_SIGNATURES`（`Map<string, string[]>` 参数签名）与 `DATABASE_FUNCTION_DESCRIPTIONS`（每函数一行英文说明，作为补全 item detail；与签名目录 key 一一对应，由测试锁定）。CH 保留 camelCase 规范拼写（该引擎函数名大小写敏感，`TODATETIME` 无法解析），DuckDB 按 docs 的小写/下划线拼写，Oracle 全大写。覆盖：聚合、字符串、日期/时间、数学、类型转换、条件、空值处理，CH/DuckDB 另有数组/list/struct/map/lambda（`list_transform` 等），Oracle 另有分析/层级函数；通用函数（COUNT/SUM/窗口函数族等）继续由共用目录 + `WINDOW_FUNCTIONS` 提供，未重复收录。签名由可靠知识编写，参数名参照各方言官方文档风格；不确定的变体（如 ClickHouse 参数化聚合 `quantile(level)(expr)`、`topK(N)(x)`）宁缺勿错未收录。存储过程参数提示按计划留待后续。`pnpm test && pnpm typecheck && pnpm lint` 全部通过。
 
-### T25 Leaflet 按需加载 ⬜
+### T25 Leaflet 按需加载 ✅ b963ea14
 
 - **来源** improvement-plan-2026-09.md §3 B5（Track B）· **规模** S
 - **内容** `DataGrid.vue:133` 静态 import `geometryMapPreview` → 静态引入 Leaflet 对话框。改为 `execute()` 内动态 import。
 - **验收**
-  - [ ] 初始 chunk 不含 Leaflet（构建产物体积对比，数字记录）
-  - [ ] 有几何列时地图预览功能正常
-  - [ ] 构建 + 手工验证
+  - [x] 初始 chunk 不含 Leaflet（构建产物体积对比，改动前后各一次 `pnpm build`：入口 `index-*.js` 68.64 kB（gzip 24.28 kB）前后一致且均无 leaflet 字样。如实记录：Leaflet JS/CSS 改动前就已是独立异步 chunk——对话框内 `loadLeaflet()` 本就动态 `import("leaflet")` + CSS，静态引入的是 handler 模块 + 对话框组件壳；本次把它们切到按需 chunk：DataGrid chunk **274.93 kB → 263.36 kB**（gzip 74.21 → 70.35，**−11.57 kB / gzip −3.86 kB**），新增按需 chunk `geometryMapPreview` 1.95 kB、`LayerPreviewDialog` 11.57 kB + 0.43 kB CSS；`leaflet-src` 148.82 kB / `leaflet.css` 15.09 kB 维持独立异步 chunk，仅在地图初始化时加载）
+  - [x] 有几何列时地图预览功能正常（源码契约 + node 冒烟：注册动作对 geometry/geography 列型可用（含 `geometry(Point,4326)`、大小写/空白）；`execute` 构建的 FeatureCollection 行为不变（hex 跳过、NULL 跳过、重复 WKT 去重、非几何列进 properties），有可展示要素时才 `await import()` 对话框，并以 stub 模块验证返回组件与 geojson 内容；DataGrid 侧 memoized 动态 import + 结果含几何列即预热，注册完成后菜单可复算出现；模块加载失败 toast `grid.previewLoadFailed`（六语言）而非静默失败）
+  - [x] 构建 + 手工验证（GUI 手工点击在本环境不可行，以构建产物断言替代并如实标注：`pnpm build` 产物断言——入口链 index.html（entry + rolldown-runtime + ui + index.css）与 DataGrid chunk 均无 leaflet/对话框标记（改前 DataGrid chunk 含对话框代码与 3 处 leaflet 样式类名），对话框代码（openstreetmap 底图串、leaflet 引用）位于独立异步 chunk；`pnpm check` 全绿：format + lint + typecheck + vitest 172 文件 1241 测试）
+- **实现说明**：`DataGrid.vue` 去掉 `import "@/lib/previewHandlers/geometryMapPreview"`，改为 `ensurePreviewHandlersLoaded()`（memoized 动态 import，失败重置以允许重试）+ `previewHandlersVersion` ref（handler 注册完成后使 `previewActions` computed 失效重查 registry）+ watch（结果含 geometry/geography 列时立即预热，右键前动作已注册）。`geometryMapPreview.execute()` 改 async，在构建完要素集合之后才 `await import("@/components/grid/LayerPreviewDialog.vue")`——无可展示要素时不加载任何东西；`PreviewAction.execute` 签名放宽为可返回 Promise，`executePreviewAction` await 并 catch，失败以 toast 呈现。Leaflet 依赖未删除；其 CSS 由对话框内动态 import 携带，随异步 chunk 走，无需额外处理。
 
 ### T26 PG JSON 列免 parse-再序列化 ⬜
 
