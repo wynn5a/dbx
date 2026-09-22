@@ -105,6 +105,7 @@ import {
   buildDataGridContextFilterCondition,
   buildDataGridCountSql,
   buildHiveTablePropertiesSql,
+  formatDataGridSavePreview,
   type DataGridContextFilterMode,
 } from "@/lib/dataGridSql";
 import {
@@ -2165,6 +2166,7 @@ const editor = useDataGridEditor({
   tableMeta: computed(() => props.tableMeta),
   sourceColumns: computed(() => props.sourceColumns),
   canEditExistingRows,
+  confirmBeforeSave: computed(() => settingsStore.editorSettings.confirmDangerousSqlExecution),
   onExecuteSql: computed(() => props.onExecuteSql),
   customSave: computed(() => props.customSave),
   sql: computed(() => props.sql),
@@ -2225,6 +2227,10 @@ const {
   cloneRows,
   saveChanges,
   discardChanges,
+  showSaveConfirm,
+  pendingSaveStatements,
+  pendingSaveRollbackStatements,
+  confirmDataGridSave,
   rowDataWithChanges,
   canEditColumn,
   resetGridVerticalScroll,
@@ -2641,6 +2647,22 @@ const deleteRowDetails = computed(() =>
     ? t("dangerDialog.deleteRowDetails", { table: props.tableMeta.tableName })
     : t("dangerDialog.deleteRowDetailsNoTable"),
 );
+
+const suppressSaveConfirm = ref(false);
+const saveConfirmDetails = computed(() =>
+  formatDataGridSavePreview(pendingSaveStatements.value, pendingSaveRollbackStatements.value, {
+    statements: t("grid.saveConfirmStatements"),
+    rollbacks: t("grid.saveConfirmRollbacks"),
+  }),
+);
+
+function onSaveConfirm() {
+  if (suppressSaveConfirm.value) {
+    settingsStore.updateEditorSettings({ confirmDangerousSqlExecution: false });
+  }
+  suppressSaveConfirm.value = false;
+  confirmDataGridSave();
+}
 
 const hasVisibleRows = computed(() => displayRowCount.value > 0);
 const hasActiveFilter = computed(
@@ -9052,6 +9074,16 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
           : t('grid.deleteRow')
       "
       @confirm="confirmDeleteRow"
+    />
+    <DangerConfirmDialog
+      v-model:open="showSaveConfirm"
+      :title="t('grid.saveConfirmTitle')"
+      :message="t('grid.saveConfirmMessage')"
+      :details="saveConfirmDetails"
+      :confirm-label="t('grid.saveConfirmExecute')"
+      :show-suppress-toggle="true"
+      v-model:suppress-future-prompts="suppressSaveConfirm"
+      @confirm="onSaveConfirm"
     />
     <ImagePreviewDialog v-model:open="imagePreviewOpen" :src="imagePreviewSrc" :title="imagePreviewTitle" />
     <component

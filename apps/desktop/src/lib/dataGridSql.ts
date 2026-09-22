@@ -122,3 +122,30 @@ export function normalizeDataGridSaveError(databaseType: DatabaseType | undefine
   }
   return message;
 }
+
+export interface DataGridSavePreviewLabels {
+  statements: string;
+  rollbacks: string;
+}
+
+/**
+ * Formats the statements a grid save will execute plus the backend-provided
+ * rollback statements as the text preview shown before executing the save.
+ * Rollback statements get their own section: the backend orders them
+ * independently of the save statements, so they are not 1:1 pairs.
+ */
+export function formatDataGridSavePreview(
+  statements: string[],
+  rollbackStatements: string[],
+  labels: DataGridSavePreviewLabels,
+): string {
+  const section = (label: string, items: string[]) => [
+    `-- ${label}`,
+    ...items.map((statement, index) => `${index + 1}. ${statement}`),
+  ];
+  const lines = section(labels.statements, statements);
+  if (rollbackStatements.length > 0) {
+    lines.push("", ...section(labels.rollbacks, rollbackStatements));
+  }
+  return lines.join("\n");
+}

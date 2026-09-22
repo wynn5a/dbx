@@ -642,6 +642,11 @@ export default {
     refresh: "重新整理",
     commit: "提交",
     rollback: "回溯",
+    saveConfirmTitle: "儲存前確認 SQL",
+    saveConfirmMessage: "儲存將執行以下語句。如結果不符合預期，可用回滾語句撤銷此次修改。",
+    saveConfirmStatements: "將執行的語句",
+    saveConfirmRollbacks: "回滾語句",
+    saveConfirmExecute: "儲存",
     transactionSaveHint: "在事務中提交 {count} 項待儲存更改。",
     nonTransactionalSaveHint: "逐條儲存 {count} 項更改；如果中途失敗，前面已成功的更改不會回溯。",
 

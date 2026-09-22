@@ -109,6 +109,13 @@ function column(name: string, isPrimaryKey = false, extra: string | null = null)
   };
 }
 
+async function waitUntil(condition: () => boolean): Promise<void> {
+  for (let i = 0; i < 200 && !condition(); i++) {
+    await Promise.resolve();
+  }
+  assert.ok(condition());
+}
+
 test("row data helper reuses unchanged rows and clones dirty rows only", () => {
   setActivePinia(createPinia());
   installBrowserTestGlobals();
@@ -776,4 +783,219 @@ test("failed table data save records a failed history entry", async () => {
   assert.equal(historyEntry.rollback_sql, undefined);
   assert.equal(historyEntry.affected_rows, undefined);
   assert.equal(historyEntry.sql, `UPDATE "pp_questions" SET "title" = 'New title' WHERE "id" = 1;`);
+});
+
+test("save confirmation lists every statement and rollback without executing until confirmed", async () => {
+  setActivePinia(createPinia());
+  (globalThis as any).window = {
+    __TAURI_INTERNALS__: {
+      invoke: async (cmd: string, args?: Record<string, unknown>) => {
+        if (cmd !== "prepare_data_grid_save") {
+          throw new Error("unexpected command: " + cmd);
+        }
+        const options = (args ?? {}).options as DataGridSaveStatementOptions;
+        return {
+          statements: mockPreparedSaveStatements(options),
+          rollbackStatements: [
+            `INSERT INTO "people" ("id", "name") VALUES (1, 'Ada');`,
+            `INSERT INTO "people" ("id", "name") VALUES (3, 'Grace');`,
+          ],
+          executionSchema: options.tableMeta.schema,
+        };
+      },
+    },
+  };
+
+  const rows = [[1, "Ada"] as CellValue[], [2, "Linus"] as CellValue[], [3, "Grace"] as CellValue[]];
+  const result = computed(() => ({ columns: ["id", "name"], rows }));
+  const executedSql: string[] = [];
+
+  const editor = useDataGridEditor({
+    result,
+    editable: computed(() => true),
+    databaseType: computed(() => "postgres"),
+    connectionId: computed(() => undefined),
+    database: computed(() => undefined),
+    tableMeta: computed(() => ({
+      tableName: "people",
+      columns: [column("id", true), column("name")],
+      primaryKeys: ["id"],
+    })),
+    onExecuteSql: computed(() => async (sql: string) => {
+      executedSql.push(sql);
+    }),
+    customSave: computed(() => undefined),
+    confirmBeforeSave: computed(() => true),
+    sql: computed(() => "SELECT id, name FROM people"),
+    searchText: ref(""),
+    whereFilterInput: ref(""),
+    orderByInput: ref(""),
+    currentWhereInput: computed(() => undefined),
+    rowStatusFilter: ref("all"),
+    pageSize: ref(50),
+    currentPage: ref(1),
+    getRowItem: (rowId) => {
+      const row = rows[rowId];
+      if (!row) return undefined;
+      return {
+        id: rowId,
+        sourceIndex: rowId,
+        data: row,
+        isNew: false,
+        isDeleted: false,
+        isDirtyCol: [false, false],
+        status: "clean",
+      };
+    },
+    emit: () => {},
+  });
+
+  editor.applyDeleteRow(0);
+  editor.applyDeleteRow(2);
+  const saving = editor.saveChanges();
+  await waitUntil(() => editor.showSaveConfirm.value);
+
+  assert.equal(editor.isSaving.value, true);
+  assert.deepEqual(executedSql, []);
+  assert.deepEqual(editor.pendingSaveStatements.value, [
+    `DELETE FROM "people" WHERE "id" = 1;`,
+    `DELETE FROM "people" WHERE "id" = 3;`,
+  ]);
+  assert.deepEqual(editor.pendingSaveRollbackStatements.value, [
+    `INSERT INTO "people" ("id", "name") VALUES (1, 'Ada');`,
+    `INSERT INTO "people" ("id", "name") VALUES (3, 'Grace');`,
+  ]);
+
+  editor.confirmDataGridSave();
+  await saving;
+
+  assert.deepEqual(executedSql, [
+    `DELETE FROM "people" WHERE "id" = 1;`,
+    `DELETE FROM "people" WHERE "id" = 3;`,
+  ]);
+  assert.equal(editor.showSaveConfirm.value, false);
+  assert.deepEqual(editor.pendingSaveStatements.value, []);
+  assert.deepEqual(editor.pendingSaveRollbackStatements.value, []);
+  assert.equal(editor.deletedRows.value.size, 0);
+});
+
+test("cancelling the save confirmation executes nothing and keeps pending changes", async () => {
+  setActivePinia(createPinia());
+  installBrowserTestGlobals();
+
+  const rows = [[1, "Ada"] as CellValue[], [2, "Linus"] as CellValue[]];
+  const result = computed(() => ({ columns: ["id", "name"], rows }));
+  const executedSql: string[] = [];
+
+  const editor = useDataGridEditor({
+    result,
+    editable: computed(() => true),
+    databaseType: computed(() => "postgres"),
+    connectionId: computed(() => undefined),
+    database: computed(() => undefined),
+    tableMeta: computed(() => ({
+      tableName: "people",
+      columns: [column("id", true), column("name")],
+      primaryKeys: ["id"],
+    })),
+    onExecuteSql: computed(() => async (sql: string) => {
+      executedSql.push(sql);
+    }),
+    customSave: computed(() => undefined),
+    confirmBeforeSave: computed(() => true),
+    sql: computed(() => "SELECT id, name FROM people"),
+    searchText: ref(""),
+    whereFilterInput: ref(""),
+    orderByInput: ref(""),
+    currentWhereInput: computed(() => undefined),
+    rowStatusFilter: ref("all"),
+    pageSize: ref(50),
+    currentPage: ref(1),
+    getRowItem: (rowId) => {
+      const row = rows[rowId];
+      if (!row) return undefined;
+      return {
+        id: rowId,
+        sourceIndex: rowId,
+        data: row,
+        isNew: false,
+        isDeleted: false,
+        isDirtyCol: [false, false],
+        status: "clean",
+      };
+    },
+    emit: () => {},
+  });
+
+  editor.applyDeleteRow(0);
+  const saving = editor.saveChanges();
+  await waitUntil(() => editor.showSaveConfirm.value);
+
+  // Closing the dialog (Cancel button, ESC, overlay) resolves as cancelled.
+  editor.showSaveConfirm.value = false;
+  await nextTick();
+  await saving;
+
+  assert.deepEqual(executedSql, []);
+  assert.equal(editor.showSaveConfirm.value, false);
+  assert.deepEqual(editor.pendingSaveStatements.value, []);
+  assert.equal(editor.deletedRows.value.size, 1);
+  assert.equal(editor.isSaving.value, false);
+  assert.equal(editor.saveError.value, "");
+});
+
+test("with the save confirmation disabled, saving executes directly without a dialog", async () => {
+  setActivePinia(createPinia());
+  installBrowserTestGlobals();
+
+  const rows = [[1, "Ada"] as CellValue[]];
+  const result = computed(() => ({ columns: ["id", "name"], rows }));
+  const executedSql: string[] = [];
+
+  const editor = useDataGridEditor({
+    result,
+    editable: computed(() => true),
+    databaseType: computed(() => "postgres"),
+    connectionId: computed(() => undefined),
+    database: computed(() => undefined),
+    tableMeta: computed(() => ({
+      tableName: "people",
+      columns: [column("id", true), column("name")],
+      primaryKeys: ["id"],
+    })),
+    onExecuteSql: computed(() => async (sql: string) => {
+      executedSql.push(sql);
+    }),
+    customSave: computed(() => undefined),
+    confirmBeforeSave: computed(() => false),
+    sql: computed(() => "SELECT id, name FROM people"),
+    searchText: ref(""),
+    whereFilterInput: ref(""),
+    orderByInput: ref(""),
+    currentWhereInput: computed(() => undefined),
+    rowStatusFilter: ref("all"),
+    pageSize: ref(50),
+    currentPage: ref(1),
+    getRowItem: (rowId) => {
+      const row = rows[rowId];
+      if (!row) return undefined;
+      return {
+        id: rowId,
+        sourceIndex: rowId,
+        data: row,
+        isNew: false,
+        isDeleted: false,
+        isDirtyCol: [false, false],
+        status: "clean",
+      };
+    },
+    emit: () => {},
+  });
+
+  editor.applyDeleteRow(0);
+  await editor.saveChanges();
+
+  assert.deepEqual(executedSql, [`DELETE FROM "people" WHERE "id" = 1;`]);
+  assert.equal(editor.showSaveConfirm.value, false);
+  assert.equal(editor.deletedRows.value.size, 0);
 });

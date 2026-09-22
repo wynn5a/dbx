@@ -650,6 +650,12 @@ export default {
     refresh: "Actualizar",
     commit: "Confirmar",
     rollback: "Revertir",
+    saveConfirmTitle: "Revisar SQL antes de guardar",
+    saveConfirmMessage:
+      "Al guardar se ejecutarán las instrucciones de abajo. Las instrucciones de reversión pueden deshacer el cambio después.",
+    saveConfirmStatements: "Instrucciones a ejecutar",
+    saveConfirmRollbacks: "Instrucciones de reversión",
+    saveConfirmExecute: "Guardar",
     transactionSaveHint: "Confirma {count} cambio(s) pendiente(s) en una transacción.",
     nonTransactionalSaveHint:
       "Guarda {count} cambio(s) pendiente(s) uno por uno. Si uno falla, los cambios anteriores correctos no se revierten.",

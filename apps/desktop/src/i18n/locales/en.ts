@@ -661,6 +661,12 @@ export default {
     refresh: "Refresh",
     commit: "Commit",
     rollback: "Rollback",
+    saveConfirmTitle: "Review SQL before saving",
+    saveConfirmMessage:
+      "Saving will execute the statements below. The rollback statements can revert the change afterwards.",
+    saveConfirmStatements: "Statements to execute",
+    saveConfirmRollbacks: "Rollback statements",
+    saveConfirmExecute: "Save",
     transactionSaveHint: "Commit {count} pending change(s) in a transaction.",
     nonTransactionalSaveHint:
       "Save {count} pending change(s) one by one. If one fails, earlier successful changes will not be rolled back.",

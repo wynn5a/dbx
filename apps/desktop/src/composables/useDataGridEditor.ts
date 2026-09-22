@@ -60,6 +60,9 @@ export interface UseDataGridEditorOptions {
   >;
   sourceColumns?: ComputedRef<Array<string | undefined> | undefined>;
   canEditExistingRows?: ComputedRef<boolean>;
+  /** Gates the save-statement confirmation dialog (the "confirm before
+   *  dangerous SQL" editor setting). Default: save without confirming. */
+  confirmBeforeSave?: ComputedRef<boolean>;
   onExecuteSql: ComputedRef<((sql: string) => Promise<void>) | undefined>;
   customSave?: ComputedRef<
     | ((changes: {
@@ -151,6 +154,7 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
     tableMeta,
     sourceColumns = computed(() => undefined),
     canEditExistingRows = computed(() => true),
+    confirmBeforeSave = computed(() => false),
     onExecuteSql,
     customSave,
     sql,
@@ -763,6 +767,32 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
     );
   }
 
+  // --- Save confirmation (statement preview) ---
+  const showSaveConfirm = ref(false);
+  const pendingSaveStatements = ref<string[]>([]);
+  const pendingSaveRollbackStatements = ref<string[]>([]);
+  let resolveSaveConfirmation: ((confirmed: boolean) => void) | undefined;
+
+  // Closing the dialog without confirming (Cancel button, ESC, overlay) aborts
+  // the save: no statement runs and pending changes stay editable.
+  watch(showSaveConfirm, (open) => {
+    if (open || !resolveSaveConfirmation) return;
+    const resolve = resolveSaveConfirmation;
+    resolveSaveConfirmation = undefined;
+    pendingSaveStatements.value = [];
+    pendingSaveRollbackStatements.value = [];
+    resolve(false);
+  });
+
+  function confirmDataGridSave() {
+    const resolve = resolveSaveConfirmation;
+    resolveSaveConfirmation = undefined;
+    showSaveConfirm.value = false;
+    pendingSaveStatements.value = [];
+    pendingSaveRollbackStatements.value = [];
+    resolve?.(true);
+  }
+
   async function saveChanges() {
     saveError.value = "";
     isSaving.value = true;
@@ -820,6 +850,20 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
       return;
     }
     const rollbackStmts = preparedSave?.rollbackStatements ?? [];
+
+    if (confirmBeforeSave.value) {
+      pendingSaveStatements.value = stmts;
+      pendingSaveRollbackStatements.value = rollbackStmts;
+      showSaveConfirm.value = true;
+      const confirmed = await new Promise<boolean>((resolve) => {
+        resolveSaveConfirmation = resolve;
+      });
+      if (!confirmed) {
+        isSaving.value = false;
+        return;
+      }
+    }
+
     const start = Date.now();
     let apiResult: { affected_rows?: number } | undefined;
     console.info("[DBX][dataGrid:save-statements]", {
@@ -1023,6 +1067,10 @@ export function useDataGridEditor(options: UseDataGridEditorOptions) {
     deleteSelectedRow,
     saveChanges,
     discardChanges,
+    showSaveConfirm,
+    pendingSaveStatements,
+    pendingSaveRollbackStatements,
+    confirmDataGridSave,
     rowDataWithChanges,
     coerceCellValue,
     canEditColumn,

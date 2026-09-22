@@ -654,6 +654,12 @@ export default {
     refresh: "Aggiorna",
     commit: "Commit",
     rollback: "Rollback",
+    saveConfirmTitle: "Revisiona SQL prima di salvare",
+    saveConfirmMessage:
+      "Il salvataggio eseguirà le istruzioni seguenti. Le istruzioni di rollback possono annullare la modifica in seguito.",
+    saveConfirmStatements: "Istruzioni da eseguire",
+    saveConfirmRollbacks: "Istruzioni di rollback",
+    saveConfirmExecute: "Salva",
     transactionSaveHint: "Applica {count} modifica/he in sospeso in una transazione.",
     nonTransactionalSaveHint:
       "Salva {count} modifica/he in sospeso una ad una. In caso di errore, le modifiche salvate in precedenza non saranno annullate.",

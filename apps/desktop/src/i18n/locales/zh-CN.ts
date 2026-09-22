@@ -655,6 +655,11 @@ export default {
     refresh: "刷新",
     commit: "提交",
     rollback: "回滚",
+    saveConfirmTitle: "保存前确认 SQL",
+    saveConfirmMessage: "保存将执行以下语句。如结果不符合预期，可用回滚语句撤销此次修改。",
+    saveConfirmStatements: "将执行的语句",
+    saveConfirmRollbacks: "回滚语句",
+    saveConfirmExecute: "保存",
     transactionSaveHint: "在事务中提交 {count} 项待保存更改。",
     nonTransactionalSaveHint: "逐条保存 {count} 项更改；如果中途失败，前面已成功的更改不会回滚。",
 

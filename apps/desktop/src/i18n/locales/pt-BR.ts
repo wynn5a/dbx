@@ -653,6 +653,12 @@ export default {
     refresh: "Atualizar",
     commit: "Confirmar",
     rollback: "Reverter",
+    saveConfirmTitle: "Revisar SQL antes de salvar",
+    saveConfirmMessage:
+      "Salvar executará as instruções abaixo. As instruções de reversão podem desfazer a alteração depois.",
+    saveConfirmStatements: "Instruções a executar",
+    saveConfirmRollbacks: "Instruções de reversão",
+    saveConfirmExecute: "Salvar",
     transactionSaveHint: "Confirmar {count} alteração(ões) pendente(s) em uma transação.",
     nonTransactionalSaveHint:
       "Salvar {count} alteração(ões) pendente(s) uma a uma. Se uma falhar, as alterações bem-sucedidas anteriores não serão revertidas.",
