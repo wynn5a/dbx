@@ -8,6 +8,7 @@ import {
   DIAGRAM_SUPPORTED_TYPES,
   FETCH_FIRST_TYPES,
   FIELD_LINEAGE_SUPPORTED_TYPES,
+  IDLE_TIMEOUT_SUPPORTED_TYPES,
   PG_LIKE_STRUCTURE_TYPES,
   PROCESS_MANAGEMENT_TYPES,
   SCHEMA_AWARE_TYPES,
@@ -114,4 +115,13 @@ export function supportsTableTruncate(dbType?: DatabaseType): boolean {
 
 export function usesPostgresLikeStructureCopy(dbType?: DatabaseType): boolean {
   return !!dbType && PG_LIKE_STRUCTURE_TYPES.has(dbType);
+}
+
+/**
+ * Whether the backend pool for this engine consumes `idle_timeout_secs`. Gates
+ * the connection-dialog control so it is only offered where it works (MongoDB);
+ * see IDLE_TIMEOUT_SUPPORTED_TYPES for the audit.
+ */
+export function supportsIdleTimeout(dbType?: DatabaseType): boolean {
+  return !!dbType && IDLE_TIMEOUT_SUPPORTED_TYPES.has(dbType);
 }

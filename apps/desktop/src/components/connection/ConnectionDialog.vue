@@ -28,6 +28,7 @@ import { isTauriRuntime } from "@/lib/tauriRuntime";
 import { applyParsedConnectionUrl, normalizeMongoConnectionString, parseConnectionUrl } from "@/lib/connectionUrl";
 import type { ConnectionDeepLinkDraft } from "@/lib/connectionDeepLink";
 import { connectionUrlPlaceholder as getUrlPlaceholder } from "@/lib/connectionPresentation";
+import { supportsIdleTimeout } from "@/lib/databaseCapabilities";
 import {
   h2ConnectionModeForConfig,
   h2FileJdbcUrl,
@@ -3160,7 +3161,7 @@ function openExternalUrl(url: string) {
                     step="1"
                   />
                   <LabeledNumberField
-                    v-show="form.db_type === 'mongodb'"
+                    v-show="supportsIdleTimeout(form.db_type)"
                     v-model="form.idle_timeout_secs"
                     :label="t('connection.idleTimeout')"
                     :unit="t('connection.unitSeconds')"

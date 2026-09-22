@@ -294,6 +294,21 @@ export const TRANSFER_SQL_TYPES = new Set<DatabaseType>([
   "oceanbase-oracle",
 ]);
 
+/**
+ * Engines whose pool actually consumes the connection form's `idle_timeout_secs`.
+ * Backend audit (improvement-plan-2026-09 §2 A7): the binding is built in
+ * `crates/dbx-core/src/connection.rs` (`get_or_create_pool`) and its desktop-shell
+ * copies in `src-tauri/src/commands/connection.rs`, then passed to exactly one
+ * driver — the native Mongo client (`db::mongo_driver::connect` maps it to
+ * `ClientOptions::max_idle_time`). MySQL hardcodes
+ * `inactive_connection_ttl(300s)` in `db/mysql.rs`, PG's deadpool and the SQL
+ * Server pool have no idle TTL at all, SQLite/DuckDB/Redis/ClickHouse/
+ * Elasticsearch/rqlite keep single long-lived clients, and `agent_connect_params`
+ * never forwards the setting to agent/JDBC drivers — so the control stays hidden
+ * for every engine except MongoDB until a driver is actually wired through.
+ */
+export const IDLE_TIMEOUT_SUPPORTED_TYPES = new Set<DatabaseType>(["mongodb"]);
+
 export const DIAGRAM_SQL_TYPES = new Set<DatabaseType>([
   "mysql",
   "postgres",
