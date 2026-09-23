@@ -62,7 +62,7 @@ import {
 } from "@/lib/aiSqlExecutionPolicy";
 import ExplainPlanViewer from "@/components/explain/ExplainPlanViewer.vue";
 import { parseExplainResult, type ParsedExplainPlan } from "@/lib/explainPlan";
-import { chartResultFromToolText, isChartableToolStep } from "@/lib/aiChartResult";
+import { createToolStepChartCache } from "@/lib/aiChartResult";
 import type { QueryResult } from "@/types/database";
 import { createAiShikiCodeHighlighter, type AiCodeHighlighter } from "@/lib/aiCodeHighlighter";
 import { createAiMessageRenderer } from "@/lib/aiMessageRender";
@@ -89,7 +89,13 @@ import {
 import { copyToClipboard } from "@/lib/clipboard";
 import { formatAiTableMention, parseAiTableMentions, type AiTableMention } from "@/lib/aiTableMentions";
 import { isAiPromptImeCompositionEvent, shouldSubmitAiPromptOnKeydown } from "@/lib/aiPromptKeyboard";
-import { formatTokenUsage, hasTokenUsage, usageFromAgentEndEvent, usageFromPersistedMessage } from "@/lib/aiTokenUsage";
+import {
+  formatTokenUsage,
+  hasTokenUsage,
+  shouldPersistSupersededAgentRun,
+  usageFromAgentEndEvent,
+  usageFromPersistedMessage,
+} from "@/lib/aiTokenUsage";
 
 // Charting reuses the query-results chart (perf plan §5 D8). ECharts stays out
 // of the chat chunk: the component loads on first use, exactly like the
@@ -710,6 +716,7 @@ async function runBackendAgent(params: RunTurnParams & { token: number }) {
   }
   messages.value.push({ role: "assistant", content: "", toolSteps: [], pendingConfirm: null });
   const assistantIdx = messages.value.length - 1;
+  const runMessage = messages.value[assistantIdx];
   const sessionId = uuid();
   currentSessionId.value = sessionId;
 
@@ -750,7 +757,20 @@ async function runBackendAgent(params: RunTurnParams & { token: number }) {
     if (currentSessionId.value === sessionId) currentSessionId.value = "";
   }
 
-  if (params.token === agentRunToken.value) finalizeRun();
+  const runStillCurrent = params.token === agentRunToken.value;
+  if (runStillCurrent) {
+    finalizeRun();
+  } else if (
+    shouldPersistSupersededAgentRun({
+      runStillCurrent,
+      messageStillShown: messages.value[assistantIdx] === runMessage,
+      usage: runMessage?.usage,
+    })
+  ) {
+    // Cancelled run: cancelStream already persisted, but agent_end's usage
+    // arrived afterwards — save again so it survives a reload.
+    void persistConversation();
+  }
 }
 
 function handleAgentEvent(assistantIdx: number, sessionId: string, event: AgentEvent) {
@@ -839,9 +859,17 @@ function toggleStepChart(stepId: string) {
   chartStepId.value = chartStepId.value === stepId ? "" : stepId;
 }
 
+// Memoized per step so re-renders (prompt keystrokes, streaming deltas) neither
+// re-parse result tables nor hand QueryChart a new object that resets X/Y.
+const stepChartCache = createToolStepChartCache();
+
 /** The QueryChart prop for a step's markdown result table, or null when it holds nothing chartable. */
 function stepChartResult(step: AgentToolStep): QueryResult | null {
-  return chartResultFromToolText(step.resultText);
+  return stepChartCache.result(step);
+}
+
+function isChartableToolStep(step: AgentToolStep): boolean {
+  return stepChartCache.chartable(step);
 }
 
 async function confirmTool(assistantIdx: number, approved: boolean) {
@@ -907,6 +935,7 @@ async function copyCode(code: string, key: string) {
 
 function clearMessages() {
   messages.value = [];
+  stepChartCache.clear();
   conversationId.value = "";
   cachedSchemaContext.value = null;
 }

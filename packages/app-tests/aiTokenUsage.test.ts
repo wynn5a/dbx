@@ -1,9 +1,11 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "../../apps/desktop/src/lib/api";
 import {
   formatCompactTokenCount,
   formatTokenUsage,
   hasTokenUsage,
+  shouldPersistSupersededAgentRun,
   usageFromAgentEndEvent,
   usageFromPersistedMessage,
 } from "../../apps/desktop/src/lib/aiTokenUsage";
@@ -116,5 +118,30 @@ describe("formatCompactTokenCount", () => {
   it("compacts millions", () => {
     expect(formatCompactTokenCount(3_400_000)).toBe("3.4m");
     expect(formatCompactTokenCount(1_000_000)).toBe("1m");
+  });
+});
+
+describe("shouldPersistSupersededAgentRun", () => {
+  const usage = usageFromAgentEndEvent(agentEnd(120, 45));
+
+  it("re-persists a cancelled run whose agent_end usage arrived after the early save", () => {
+    expect(shouldPersistSupersededAgentRun({ runStillCurrent: false, messageStillShown: true, usage })).toBe(true);
+  });
+
+  it("does not persist for the current run (finalizeRun does), without usage, or after the chat moved on", () => {
+    expect(shouldPersistSupersededAgentRun({ runStillCurrent: true, messageStillShown: true, usage })).toBe(false);
+    expect(shouldPersistSupersededAgentRun({ runStillCurrent: false, messageStillShown: true, usage: undefined })).toBe(
+      false,
+    );
+    expect(shouldPersistSupersededAgentRun({ runStillCurrent: false, messageStillShown: false, usage })).toBe(false);
+  });
+
+  it("is wired into AiAssistant's runBackendAgent settle path", () => {
+    const source = readFileSync(
+      new URL("../../apps/desktop/src/components/editor/AiAssistant.vue", import.meta.url),
+      "utf8",
+    );
+    expect(source).toMatch(/shouldPersistSupersededAgentRun\(\{\s*runStillCurrent,\s*messageStillShown: messages\.value\[assistantIdx\] === runMessage,\s*usage: runMessage\?\.usage,/);
+    expect(source).toMatch(/void persistConversation\(\);/);
   });
 });

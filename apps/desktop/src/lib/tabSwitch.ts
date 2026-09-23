@@ -39,3 +39,21 @@ export function resolveTabSwitchTarget<T extends TabLike>(
   const target = tabs[(activeIndex + (action === "next" ? 1 : -1) + count) % count];
   return target?.id ?? null;
 }
+
+/**
+ * Resolve a tab-switch shortcut against what is actually on screen. While the
+ * Driver Store covers the tab area, the still-set `activeTabId` is hidden, so
+ * the switch is resolved as if no tab were active (next → first, prev → last)
+ * and a resolved target always dismisses the store — even when it is the
+ * hidden tab itself, where assigning `activeTabId` alone changes nothing.
+ */
+export function resolveTabSwitch<T extends TabLike>(
+  tabs: readonly T[],
+  activeTabId: string | null,
+  action: TabSwitchAction,
+  driverStoreShown: boolean,
+): { targetId: string; dismissDriverStore: boolean } | null {
+  const targetId = resolveTabSwitchTarget(tabs, driverStoreShown ? null : activeTabId, action);
+  if (!targetId) return null;
+  return { targetId, dismissDriverStore: driverStoreShown };
+}

@@ -3,6 +3,7 @@ import { describe, expect, it, test } from "vitest";
 import {
   CHART_MAX_ROWS,
   chartResultFromToolText,
+  createToolStepChartCache,
   hasChartableNumericColumn,
   isChartableToolStep,
   parseResultTableMarkdown,
@@ -149,7 +150,9 @@ describe("AiAssistant wiring contract", () => {
   });
 
   it("gates the action on the pure predicate and feeds the parsed result as the prop", () => {
-    expect(assistantSource).toMatch(/import \{ chartResultFromToolText, isChartableToolStep \} from "@\/lib\/aiChartResult";/);
+    expect(assistantSource).toMatch(/import \{ createToolStepChartCache \} from "@\/lib\/aiChartResult";/);
+    expect(assistantSource).toMatch(/return stepChartCache\.result\(step\);/);
+    expect(assistantSource).toMatch(/return stepChartCache\.chartable\(step\);/);
     expect(assistantSource).toMatch(/v-if="isChartableToolStep\(step\)"/);
     expect(assistantSource).toMatch(/v-if="chartStepId === step\.id && stepChartResult\(step\)"/);
     expect(assistantSource).toMatch(/:result="stepChartResult\(step\)!"/);
@@ -171,4 +174,42 @@ test("the chart action label is translated in all six locales", () => {
     expect(match, `${locale} defines ai.chartResult`).toBeTruthy();
     expect(match![1].length, `${locale} label is non-empty`).toBeGreaterThan(0);
   }
+});
+
+describe("createToolStepChartCache", () => {
+  const doneStep = (resultText: string, id = "call_1") => ({ id, name: "execute_query", status: "done", resultText });
+
+  it("returns the same result object across re-renders while the step text is unchanged", () => {
+    const cache = createToolStepChartCache();
+    const first = cache.result(doneStep(EXECUTE_QUERY_TEXT));
+    expect(first).not.toBeNull();
+    // A re-render builds a new step-shaped object with the same text (e.g. a keystroke in the prompt box).
+    expect(cache.result(doneStep(EXECUTE_QUERY_TEXT))).toBe(first);
+    expect(cache.chartable(doneStep(EXECUTE_QUERY_TEXT))).toBe(true);
+    expect(cache.result(doneStep(EXECUTE_QUERY_TEXT))).toBe(first);
+  });
+
+  it("re-parses when the step's text changes and keys entries per step", () => {
+    const cache = createToolStepChartCache();
+    const first = cache.result(doneStep(EXECUTE_QUERY_TEXT));
+    const other = cache.result(doneStep(EXECUTE_QUERY_TEXT, "call_2"));
+    expect(other).not.toBe(first);
+    expect(other).toEqual(first);
+    const changed = cache.result(doneStep("| a | b |\n| --- |\n| x | 1 |\n(1 rows, 1ms)"));
+    expect(changed).not.toBe(first);
+    expect(changed?.columns).toEqual(["a", "b"]);
+    cache.clear();
+    expect(cache.result(doneStep(EXECUTE_QUERY_TEXT))).not.toBe(first);
+  });
+
+  it("agrees with isChartableToolStep on tool name, status and numeric columns", () => {
+    const cache = createToolStepChartCache();
+    const cases = [
+      doneStep(EXECUTE_QUERY_TEXT),
+      { id: "s", name: "execute_query", status: "running", resultText: EXECUTE_QUERY_TEXT },
+      { id: "d", name: "describe_table", status: "done", resultText: EXECUTE_QUERY_TEXT },
+      doneStep("| name |\n| --- |\n| alice |\n(1 rows, 1ms)", "n"),
+    ];
+    for (const step of cases) expect(cache.chartable(step)).toBe(isChartableToolStep(step));
+  });
 });

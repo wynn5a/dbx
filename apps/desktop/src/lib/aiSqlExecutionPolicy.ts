@@ -46,8 +46,18 @@ function classifyStatement(statement: string): AiSqlExecutionCategory {
   if (SCHEMA_RE.test(statement)) return "schema_change";
   if (INSERT_RE.test(statement)) return "low_risk_write";
   if (UPDATE_RE.test(statement)) return isScopedUpdate(statement) ? "low_risk_write" : "dangerous";
-  if (DELETE_RE.test(statement) || CONFIRM_WRITE_RE.test(statement)) return "write";
+  if (DELETE_RE.test(statement)) return hasNonTrivialWhere(statement) ? "write" : "dangerous";
+  if (CONFIRM_WRITE_RE.test(statement)) return "write";
   return "unknown";
+}
+
+/** A DELETE without a WHERE clause (or with an always-true one) removes every row. */
+function hasNonTrivialWhere(statement: string): boolean {
+  const whereMatch = statement.match(/\bWHERE\b([\s\S]*)$/i);
+  if (!whereMatch) return false;
+  const where = whereMatch[1].trim();
+  if (!where) return false;
+  return !/^\(*\s*(?:1\s*=\s*1|true)\s*\)*$/i.test(where);
 }
 
 function isScopedUpdate(statement: string): boolean {
@@ -94,7 +104,10 @@ export function classifyAiSqlExecution(sql: string, connection?: ConnectionConfi
   }
 
   if (hasMultipleStatements) {
-    return { action: "confirm", environment, category: "write", reasons };
+    // A schema change bundled with other statements keeps its high-risk
+    // category so the confirm card still demands the acknowledgment.
+    const category = categories.includes("schema_change") ? "schema_change" : "write";
+    return { action: "confirm", environment, category, reasons };
   }
 
   const [category] = categories;

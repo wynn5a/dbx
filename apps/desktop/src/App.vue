@@ -63,7 +63,7 @@ import {
   isZoomOutShortcut,
   gotoTabNumberFromShortcut,
 } from "@/lib/keyboardShortcuts";
-import { resolveTabSwitchTarget, type TabSwitchAction } from "@/lib/tabSwitch";
+import { resolveTabSwitch, type TabSwitchAction } from "@/lib/tabSwitch";
 import { isPreviewTab } from "@/lib/tabPresentation";
 import { supportsSqlFileExecution } from "@/lib/databaseCapabilities";
 import { buildHistoryAiAnalysisPrompt } from "@/lib/historyAiAnalysis";
@@ -827,11 +827,14 @@ function onAiExecuteSql(sql: string) {
 }
 
 function switchTab(action: TabSwitchAction) {
-  const targetId = resolveTabSwitchTarget(queryStore.tabs, queryStore.activeTabId, action);
-  if (!targetId) return;
-  // The activeTabId watcher fires dbx:before-tab-switch (pending grid snapshots),
-  // drops the driver store tab and resets per-tab UI state, same as tab clicks.
-  queryStore.activeTabId = targetId;
+  const resolved = resolveTabSwitch(queryStore.tabs, queryStore.activeTabId, action, showDriverStore.value);
+  if (!resolved) return;
+  // Dismiss explicitly: the activeTabId watcher (which also drops the driver
+  // store) does not fire when the target is the tab hidden behind it.
+  if (resolved.dismissDriverStore) showDriverStore.value = false;
+  // The activeTabId watcher fires dbx:before-tab-switch (pending grid snapshots)
+  // and resets per-tab UI state, same as tab clicks.
+  queryStore.activeTabId = resolved.targetId;
 }
 
 function handleKeydown(e: KeyboardEvent) {

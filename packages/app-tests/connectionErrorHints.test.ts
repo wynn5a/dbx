@@ -14,7 +14,8 @@ import zhCN from "../../apps/desktop/src/i18n/locales/zh-CN.ts";
 import zhTW from "../../apps/desktop/src/i18n/locales/zh-TW.ts";
 import type { ComposerTranslation } from "vue-i18n";
 
-const t = ((key: string) => `T:${key}`) as unknown as ComposerTranslation;
+const t = ((key: string, params?: Record<string, unknown>) =>
+  params && "message" in params ? `T:${key}[${String(params.message)}]` : `T:${key}`) as unknown as ComposerTranslation;
 
 function categoryOf(message: string, driver?: string | null): ConnectionErrorHintCategory | null {
   return classifyConnectionError(message, driver)?.category ?? null;
@@ -131,15 +132,15 @@ test("hint categories map to i18n keys present in all six locales", () => {
 test("presentConnectionError keeps the raw message and adds the hint as description", () => {
   const message = 'FATAL: password authentication failed for user "postgres"';
   const present = presentConnectionError(t, message, "postgres");
-  assert.equal(present.title, message);
+  assert.equal(present.title, `T:connection.connectFailed[${message}]`);
   assert.equal(present.description, "T:connection.errorHintAuth");
   assert.equal(present.variant, "error");
 });
 
-test("presentConnectionError shows only the raw message when unclassified", () => {
+test("presentConnectionError frames an unclassified raw message as a connection failure", () => {
   const message = 'FATAL: database "analytics" does not exist';
   const present = presentConnectionError(t, message);
-  assert.equal(present.title, message);
+  assert.equal(present.title, `T:connection.connectFailed[${message}]`);
   assert.equal(present.description, undefined);
 });
 
@@ -148,7 +149,7 @@ test("presentConnectionError still translates installer errors", () => {
     t,
     "MySQL driver is not installed. Please install it from the Driver Manager.",
   );
-  assert.equal(present.title, "T:connection.driverNotInstalled");
+  assert.equal(present.title, "T:connection.connectFailed[T:connection.driverNotInstalled]");
   assert.equal(present.description, undefined);
 });
 
@@ -158,4 +159,20 @@ test("formatConnectionError appends the hint below the original message", () => 
     "Connection refused (os error 111)\nT:connection.errorHintNetwork",
   );
   assert.equal(formatConnectionError(t, 'relation "users" does not exist'), 'relation "users" does not exist');
+});
+
+test("permission (authorization) errors are not misread as bad credentials", () => {
+  // MySQL 1044: the login worked, the grant is missing.
+  assert.equal(categoryOf("ERROR 1044 (42000): Access denied for user 'u'@'h' to database 'd'", "mysql"), null);
+  assert.equal(categoryOf("Access denied for user 'u'@'%' to database 'sales'"), null);
+  // MongoDB: authenticated but lacking the role for a command.
+  assert.equal(
+    categoryOf("not authorized on admin to execute command { listDatabases: 1, $db: \"admin\" }", "mongodb"),
+    null,
+  );
+  // Real Mongo auth failures still get the credentials hint.
+  assert.equal(categoryOf("Authentication failed.", "mongodb"), "auth");
+  assert.equal(categoryOf("Command failed with error 18 (AuthenticationFailed): 'Authentication failed.'"), "auth");
+  // MySQL 1045 still does.
+  assert.equal(categoryOf("Access denied for user 'root'@'localhost' (using password: NO)", "mysql"), "auth");
 });

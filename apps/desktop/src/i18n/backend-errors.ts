@@ -41,9 +41,10 @@ export interface PresentedConnectionError {
 }
 
 // Presents a connection failure for display: the installer-translated (or raw)
-// message as title, plus — when the cross-driver classifier recognizes the
-// error — an actionable hint as description. The raw message is never replaced:
-// without a classification only the original text is shown (existing behavior).
+// message framed as "Connection failed: …" as title, plus — when the
+// cross-driver classifier recognizes the error — an actionable hint as
+// description. The raw message is never replaced: without a classification the
+// framed original text is shown on its own.
 export function presentConnectionError(
   t: ComposerTranslation,
   message: string,
@@ -51,15 +52,17 @@ export function presentConnectionError(
 ): PresentedConnectionError {
   const hint = classifyConnectionError(message, driver);
   return {
-    title: translateBackendError(t, message),
+    title: t("connection.connectFailed", { message: translateBackendError(t, message) }),
     description: hint ? t(hint.i18nKey) : undefined,
     variant: "error",
   };
 }
 
-// String-context variant (fields that render a single string, e.g. the
-// connection dialog test result): appends the hint below the original message.
+// String-context variant (fields that render a single string under their own
+// failure label, e.g. the connection dialog test result): the unframed message
+// with the hint appended below it.
 export function formatConnectionError(t: ComposerTranslation, message: string, driver?: string | null): string {
-  const present = presentConnectionError(t, message, driver);
-  return present.description ? `${present.title}\n${present.description}` : present.title;
+  const text = translateBackendError(t, message);
+  const hint = classifyConnectionError(message, driver);
+  return hint ? `${text}\n${t(hint.i18nKey)}` : text;
 }

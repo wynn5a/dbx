@@ -155,3 +155,43 @@ test("main.ts registers the handler on the app before mount", () => {
   expect(mount).toBeGreaterThan(-1);
   expect(registration).toBeLessThan(mount);
 });
+
+test("with debug logging on, an unhandled error is logged once, not again by the console capture", async () => {
+  const originalError = console.error;
+  const sink = vi.fn();
+  console.error = sink;
+  const g = globalThis as Record<string, unknown>;
+  const hadWindow = "window" in g;
+  const hadDocument = "document" in g;
+  if (!hadWindow) g.window = { addEventListener: () => {} };
+  if (!hadDocument) g.document = { addEventListener: () => {} };
+  try {
+    storage.setItem("dbx-debug-logging-enabled", "1");
+    vi.resetModules();
+    const debugLog = await import("@/lib/debugLog");
+    const handlerModule = await import("@/lib/globalErrorHandler");
+    debugLog.installDebugLogCapture();
+    expect(debugLog.isDebugLoggingEnabled()).toBe(true);
+
+    const { createApp } = await import("vue");
+    const app = createApp({ name: "NeverMounted", render: () => null });
+    handlerModule.installGlobalErrorHandler(app, vi.fn());
+    app.config.errorHandler!(new Error("boom"), fakeInstance("QueryEditor"), "render function");
+    debugLog.flushDebugLogs();
+
+    const persisted = JSON.parse(storage.getItem(ENTRIES_KEY)!) as Array<{ message: string }>;
+    expect(persisted.filter((entry) => entry.message.includes("[vue:error]"))).toHaveLength(1);
+    // The console still shows it (through the pre-capture console.error).
+    expect(sink).toHaveBeenCalledTimes(1);
+
+    // Ordinary console.error calls are still captured.
+    console.error("plain failure");
+    debugLog.flushDebugLogs();
+    const after = JSON.parse(storage.getItem(ENTRIES_KEY)!) as Array<{ message: string }>;
+    expect(after.some((entry) => entry.message.includes("plain failure"))).toBe(true);
+  } finally {
+    console.error = originalError;
+    if (!hadWindow) delete g.window;
+    if (!hadDocument) delete g.document;
+  }
+});

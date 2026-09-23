@@ -151,3 +151,26 @@ test("all six locales carry the high-risk acknowledgment copy", () => {
     assert.match(block[0], /highRiskAck: ".+"/, `${locale} defines ai.toolConfirm.highRiskAck`);
   }
 });
+
+test("a schema change bundled with other statements keeps the high-risk acknowledgment", () => {
+  const twoCreates = classifyAiSqlExecution("CREATE TABLE a(x int); CREATE INDEX i ON a(x)", conn());
+  assert.equal(twoCreates.category, "schema_change");
+  assert.equal(requiresAiConfirmFriction(twoCreates.category), true);
+  assert.equal(isAiConfirmRunEnabled(twoCreates.category, false), false);
+
+  const insertThenCreate = classifyAiSqlExecution("INSERT INTO a VALUES (1); CREATE TABLE x(a int)", conn());
+  assert.equal(insertThenCreate.category, "schema_change");
+  assert.equal(requiresAiConfirmFriction(insertThenCreate.category), true);
+
+  const writes = classifyAiSqlExecution("INSERT INTO a VALUES (1); DELETE FROM a WHERE id = 2", conn());
+  assert.equal(writes.category, "write");
+  assert.equal(requiresAiConfirmFriction(writes.category), false);
+});
+
+test("an unscoped DELETE is dangerous like an unscoped UPDATE", () => {
+  assert.equal(classifyAiSqlExecution("DELETE FROM users", conn()).category, "dangerous");
+  assert.equal(classifyAiSqlExecution("DELETE FROM users WHERE 1=1", conn()).category, "dangerous");
+  assert.equal(classifyAiSqlExecution("DELETE FROM users WHERE (true)", conn()).category, "dangerous");
+  assert.equal(classifyAiSqlExecution("DELETE FROM users WHERE created_at < '2020-01-01'", conn()).category, "write");
+  assert.equal(requiresAiConfirmFriction(classifyAiSqlExecution("DELETE FROM users", conn()).category), true);
+});

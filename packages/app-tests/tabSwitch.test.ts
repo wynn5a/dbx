@@ -1,6 +1,7 @@
+import { readFileSync } from "node:fs";
 import { strict as assert } from "node:assert";
 import { test } from "vitest";
-import { GOTO_TAB_LAST_POSITION, resolveTabSwitchTarget } from "../../apps/desktop/src/lib/tabSwitch.ts";
+import { GOTO_TAB_LAST_POSITION, resolveTabSwitch, resolveTabSwitchTarget } from "../../apps/desktop/src/lib/tabSwitch.ts";
 
 const tabs = (ids: string[]) => ids.map((id) => ({ id }));
 
@@ -58,4 +59,25 @@ test("goto tab 9 jumps to the last tab (browser convention), not the 9th", () =>
   const ten = tabs(["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]);
   assert.equal(resolveTabSwitchTarget(ten, "a", GOTO_TAB_LAST_POSITION), "j");
   assert.equal(resolveTabSwitchTarget(ten, "a", 8), "h");
+});
+
+test("resolveTabSwitch dismisses the Driver Store and resolves as if no tab were active", () => {
+  const tabs = [{ id: "a" }, { id: "b" }, { id: "c" }];
+  // Driver Store over tab "a": Mod+1 targets the hidden tab itself and must still dismiss the store.
+  assert.deepEqual(resolveTabSwitch(tabs, "a", 1, true), { targetId: "a", dismissDriverStore: true });
+  // next / prev enter at the first / last tab instead of walking from the hidden one.
+  assert.deepEqual(resolveTabSwitch(tabs, "b", "next", true), { targetId: "a", dismissDriverStore: true });
+  assert.deepEqual(resolveTabSwitch(tabs, "b", "prev", true), { targetId: "c", dismissDriverStore: true });
+  // A single tab behind the store: next brings it back.
+  assert.deepEqual(resolveTabSwitch([{ id: "a" }], "a", "next", true), { targetId: "a", dismissDriverStore: true });
+  // Out-of-range goto is a no-op and leaves the store up.
+  assert.equal(resolveTabSwitch(tabs, "a", 5, true), null);
+  // Without the store, behavior is the plain resolver.
+  assert.deepEqual(resolveTabSwitch(tabs, "a", "next", false), { targetId: "b", dismissDriverStore: false });
+});
+
+test("App.vue routes tab-switch shortcuts through resolveTabSwitch with the Driver Store state", () => {
+  const app = readFileSync(new URL("../../apps/desktop/src/App.vue", import.meta.url), "utf8");
+  assert.match(app, /resolveTabSwitch\(queryStore\.tabs, queryStore\.activeTabId, action, showDriverStore\.value\)/);
+  assert.match(app, /if \(resolved\.dismissDriverStore\) showDriverStore\.value = false;/);
 });

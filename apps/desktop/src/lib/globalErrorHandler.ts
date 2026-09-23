@@ -1,5 +1,5 @@
 import type { App, ComponentPublicInstance } from "vue";
-import { appendErrorDebugLog } from "@/lib/debugLog";
+import { appendErrorDebugLog, uncapturedConsoleError } from "@/lib/debugLog";
 
 // A render loop or a broken watcher can throw many errors per second: every
 // error is still logged, but the user-facing toast is throttled to one per
@@ -61,7 +61,9 @@ export function createUnhandledVueErrorHandler(deps: GlobalErrorHandlerDeps) {
 export function installGlobalErrorHandler(app: App, showErrorToast: () => void) {
   app.config.errorHandler = createUnhandledVueErrorHandler({
     logError: appendErrorDebugLog,
-    consoleError: console.error.bind(console),
+    // The entry is already in the buffer via logError; the capture-wrapped
+    // console.error would append it again when debug logging is on.
+    consoleError: uncapturedConsoleError,
     showErrorToast,
     now: () => Date.now(),
   });

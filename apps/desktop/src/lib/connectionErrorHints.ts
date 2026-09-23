@@ -42,13 +42,16 @@ const RULES: CategoryRule[] = [
     patterns: [
       /password authentication failed/i, // PostgreSQL
       /authentication failed|authentication required/i,
-      /\baccess denied\b/i, // MySQL
+      // MySQL 1045. Not 1044 "Access denied for user … to database …", which is
+      // a missing grant for an already-authenticated user.
+      /\baccess denied\b(?![\s\S]*\bto database\b)/i,
       /\blogin failed\b/i, // SQL Server
       /\bNOAUTH\b|\bWRONGPASS\b/i, // Redis
       /client sent AUTH/i, // Redis (password set but server has none)
       /invalid username-?password|invalid credentials|incorrect password|invalid password|wrong password/i,
       /\brole\b .*\bdoes not exist\b/i, // PostgreSQL FATAL: role "…" does not exist
-      /\bnot authorized\b/i, // MongoDB
+      // MongoDB bad credentials surface as "Authentication failed" (above);
+      // "not authorized on <db> to execute command" is a role/permission issue.
     ],
     driverPatterns: {
       postgres: [/\b28P01\b|\b28000\b/i], // SQLSTATE invalid_password / invalid_authorization

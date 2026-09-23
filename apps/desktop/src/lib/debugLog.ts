@@ -148,6 +148,17 @@ export function appendErrorDebugLog(...args: unknown[]) {
   flushDebugLogs();
 }
 
+/**
+ * `console.error` without the debug-log capture wrapper. For callers that have
+ * already recorded the entry themselves (the global Vue error handler), so the
+ * same error is not logged — and its stack formatted — a second time when
+ * debug logging is on. Resolved per call: before capture is installed (or in
+ * tests) it is the current `console.error`.
+ */
+export function uncapturedConsoleError(...args: unknown[]) {
+  (originalConsole.error ?? console.error)(...args);
+}
+
 // Listeners run when debug logging is switched on. lib/startupMarks registers
 // here so a startup summary collected before logging was enabled still reaches
 // the exported log.

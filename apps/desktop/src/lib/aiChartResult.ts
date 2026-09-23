@@ -129,3 +129,38 @@ export function isChartableToolStep(step: { name: string; status: string; result
   const result = chartResultFromToolText(step.resultText);
   return !!result && hasChartableNumericColumn(result);
 }
+
+export interface ToolStepChartCache {
+  /** Memoized `chartResultFromToolText(step.resultText)`: the same object while the step's text is unchanged. */
+  result(step: { id: string; resultText?: string }): QueryResult | null;
+  /** Memoized `isChartableToolStep(step)`. */
+  chartable(step: { id: string; name: string; status: string; resultText?: string }): boolean;
+  clear(): void;
+}
+
+/**
+ * Per-step memo for the chat's chart action. The assistant template re-renders
+ * on every keystroke in the prompt box and every streaming delta; without a
+ * memo each render re-parses every chartable step's table and hands QueryChart
+ * a fresh `result` object, whose identity watch then resets the user's X/Y
+ * column choices. Entries are keyed by step id and invalidated when the step's
+ * `resultText` changes.
+ */
+export function createToolStepChartCache(): ToolStepChartCache {
+  const entries = new Map<string, { text: string | undefined; result: QueryResult | null; numeric: boolean }>();
+
+  function entry(step: { id: string; resultText?: string }) {
+    const cached = entries.get(step.id);
+    if (cached && cached.text === step.resultText) return cached;
+    const result = chartResultFromToolText(step.resultText);
+    const fresh = { text: step.resultText, result, numeric: !!result && hasChartableNumericColumn(result) };
+    entries.set(step.id, fresh);
+    return fresh;
+  }
+
+  return {
+    result: (step) => entry(step).result,
+    chartable: (step) => CHARTABLE_TOOLS.has(step.name) && step.status === "done" && entry(step).numeric,
+    clear: () => entries.clear(),
+  };
+}

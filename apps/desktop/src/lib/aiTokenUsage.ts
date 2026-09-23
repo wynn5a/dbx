@@ -20,6 +20,23 @@ export function usageFromAgentEndEvent(event: AgentEvent): AiMessageUsage | unde
 }
 
 /**
+ * Whether a superseded agent run (the user pressed Stop, which bumps the run
+ * token and persists the conversation at once) must persist again when its
+ * stream finally settles. The backend's terminal `agent_end` — and with it the
+ * run's usage — lands after that early save, so without a second save the usage
+ * shown under the answer is lost on reload. Only when the run's message is
+ * still in the visible conversation (not cleared / switched away) and actually
+ * received usage.
+ */
+export function shouldPersistSupersededAgentRun(run: {
+  runStillCurrent: boolean;
+  messageStillShown: boolean;
+  usage: AiMessageUsage | undefined;
+}): boolean {
+  return !run.runStillCurrent && run.messageStillShown && run.usage !== undefined;
+}
+
+/**
  * Tolerant read of the `usage` field from a persisted message. Conversations
  * saved before the field existed (and any malformed value) yield `undefined`,
  * so history loads without errors and shows no usage line.
