@@ -536,6 +536,10 @@ async fn list_tables_once(
 /// `n.nspname = ANY($1)`, MySQL `TABLE_SCHEMA IN (...)`, SQLite's
 /// schema-agnostic `sqlite_master`); every other engine repeats its per-schema
 /// listing inside this one call, so callers always pay exactly one invoke.
+/// Note: the desktop frontend only calls this for schema-aware engines
+/// (`SCHEMA_AWARE_TYPES`), which MySQL and SQLite are not — they complete one
+/// database/scope per `list_tables` call, so their bulk branches serve direct
+/// callers and the live/unit tests, not the editor.
 /// `filter`/`limit` keep the exact `list_tables` semantics, applied per schema.
 pub async fn list_completion_metadata_core(
     state: &AppState,
@@ -605,16 +609,51 @@ async fn list_completion_metadata_once(
         }
     }
 
-    // Engines without a native bulk listing: repeat the per-schema calls within
-    // this single invoke. A failing schema yields an empty group, matching the
-    // completion store's per-schema error handling.
-    let mut groups = Vec::with_capacity(schemas.len());
-    for schema in schemas {
-        let tables = list_tables_core(state, connection_id, database, schema, filter, limit).await.unwrap_or_default();
-        let objects = list_completion_objects_core(state, connection_id, database, schema).await.unwrap_or_default();
-        groups.push(db::SchemaCompletionGroup { schema: schema.clone(), tables, objects });
+    // Engines without a native bulk listing (SQL Server, Oracle, agent
+    // drivers, …): repeat the per-schema calls within this single invoke, a
+    // few schemas at a time — the same bound the frontend used when it fanned
+    // these out as separate invokes, instead of 2×N serial round trips. A
+    // failing schema yields an empty group, matching the completion store's
+    // per-schema error handling.
+    // Collected up front: a lazy `Map` adapter would keep the closure inside
+    // the command future, which trips the Send/higher-ranked lifetime check
+    // on the Tauri command.
+    let per_schema: Vec<_> = schemas
+        .iter()
+        .map(|schema| per_schema_completion_group(state, connection_id, database, schema, filter, limit))
+        .collect();
+    Ok(run_bounded_in_order(per_schema, PER_SCHEMA_FALLBACK_CONCURRENCY).await)
+}
+
+async fn per_schema_completion_group(
+    state: &AppState,
+    connection_id: &str,
+    database: &str,
+    schema: &str,
+    filter: Option<&str>,
+    limit: Option<usize>,
+) -> db::SchemaCompletionGroup {
+    let (tables, objects) = futures::join!(
+        list_tables_core(state, connection_id, database, schema, filter, limit),
+        list_completion_objects_core(state, connection_id, database, schema),
+    );
+    db::SchemaCompletionGroup {
+        schema: schema.to_string(),
+        tables: tables.unwrap_or_default(),
+        objects: objects.unwrap_or_default(),
     }
-    Ok(groups)
+}
+
+const PER_SCHEMA_FALLBACK_CONCURRENCY: usize = 5;
+
+/// Drives `futures` with at most `concurrency` in flight, returning the
+/// results in input order.
+async fn run_bounded_in_order<Fut: Future>(
+    futures: impl IntoIterator<Item = Fut>,
+    concurrency: usize,
+) -> Vec<Fut::Output> {
+    use futures::StreamExt;
+    futures::stream::iter(futures).buffered(concurrency.max(1)).collect().await
 }
 
 /// Re-indexes the two bulk listings (already grouped per schema in the
@@ -2109,6 +2148,30 @@ mod completion_metadata_tests {
 
     fn json_of<T: serde::Serialize>(value: &T) -> serde_json::Value {
         serde_json::to_value(value).expect("serialize for comparison")
+    }
+
+    #[tokio::test]
+    async fn per_schema_fallback_runs_bounded_concurrently_in_schema_order() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let schemas: Vec<String> = (0..12).map(|index| format!("s{index}")).collect();
+        let in_flight = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        let tasks = schemas.iter().map(|schema| {
+            let in_flight = &in_flight;
+            let peak = &peak;
+            async move {
+                let now = in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                // Later schemas finish first: order must still follow `schemas`.
+                let index: u64 = schema[1..].parse().unwrap();
+                tokio::time::sleep(Duration::from_millis(40 - index * 2)).await;
+                in_flight.fetch_sub(1, Ordering::SeqCst);
+                schema.clone()
+            }
+        });
+        let results = run_bounded_in_order(tasks, PER_SCHEMA_FALLBACK_CONCURRENCY).await;
+        assert_eq!(results, schemas, "results keep the requested schema order");
+        assert_eq!(peak.load(Ordering::SeqCst), PER_SCHEMA_FALLBACK_CONCURRENCY, "bounded, but not serial");
     }
 
     #[test]
