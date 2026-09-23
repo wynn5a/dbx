@@ -790,6 +790,7 @@ async fn agent_loop_runs_two_tool_rounds_against_sqlite_then_answers() {
         state,
         connection_id: AGENT_CONN.to_string(),
         database: String::new(),
+        schema: None,
         db_type: DatabaseType::Sqlite,
     };
     let final_text = run_agent_loop(
@@ -946,6 +947,7 @@ async fn agent_loop_pauses_a_write_until_the_confirmation_is_approved() {
         state,
         connection_id: AGENT_CONN.to_string(),
         database: String::new(),
+        schema: None,
         db_type: DatabaseType::Sqlite,
     };
     let run = tokio::time::timeout(
@@ -1034,6 +1036,7 @@ async fn agent_loop_feeds_a_rejected_write_back_as_a_tool_error() {
         state,
         connection_id: AGENT_CONN.to_string(),
         database: String::new(),
+        schema: None,
         db_type: DatabaseType::Sqlite,
     };
     let run = tokio::time::timeout(

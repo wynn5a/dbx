@@ -61,7 +61,7 @@ fn list_tables_tool() -> ToolDefinition {
         parameters: json!({
             "type": "object",
             "properties": {
-                "schema": { "type": "string", "description": "Schema to list (defaults to the current database/schema)" }
+                "schema": { "type": "string", "description": "Schema to list (defaults to the current schema)" }
             },
             "required": []
         }),
@@ -80,7 +80,7 @@ fn search_tables_tool() -> ToolDefinition {
             "type": "object",
             "properties": {
                 "search": { "type": "string", "description": "Substring to match against table names and comments (case-insensitive)" },
-                "schema": { "type": "string", "description": "Schema to search (defaults to the current database/schema)" },
+                "schema": { "type": "string", "description": "Schema to search (defaults to every schema on engines with schemas, otherwise the current database)" },
                 "limit": { "type": "integer", "description": "Max matches to return (default 50, capped at 100)" }
             },
             "required": ["search"]
@@ -98,7 +98,7 @@ fn get_columns_tool() -> ToolDefinition {
             "type": "object",
             "properties": {
                 "table": { "type": "string", "description": "Table name" },
-                "schema": { "type": "string", "description": "Schema (defaults to the current database/schema)" }
+                "schema": { "type": "string", "description": "Schema (defaults to the current schema)" }
             },
             "required": ["table"]
         }),
@@ -133,7 +133,7 @@ fn get_sample_data_tool() -> ToolDefinition {
             "type": "object",
             "properties": {
                 "table": { "type": "string", "description": "Table name" },
-                "schema": { "type": "string", "description": "Schema (defaults to the current database/schema)" },
+                "schema": { "type": "string", "description": "Schema (defaults to the current schema)" },
                 "limit": { "type": "integer", "description": "Number of rows (capped at 100)" }
             },
             "required": ["table"]
@@ -168,15 +168,22 @@ fn explain_query_tool() -> ToolDefinition {
 /// their statement in `RunningQueries` and race the token, so an in-flight
 /// query aborts — and is stopped on the database server via the T02 checkout
 /// registration — instead of running to its 30s timeout in the background.
+///
+/// `schema_hint` is the editor tab's current schema, if it has one: the default
+/// scope for tools the model calls without a `schema` argument (see
+/// [`default_schema`]).
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_tool(
     tool_call: &ToolCall,
     state: &Arc<AppState>,
     connection_id: &str,
     database: &str,
+    schema_hint: Option<&str>,
     db_type: &DatabaseType,
     session_id: &str,
     cancel: &CancellationToken,
 ) -> ToolResult {
+    let scope = ToolScope { state, connection_id, database, schema_hint, db_type: *db_type };
     if tool_call.name == "explain_query" {
         let (text, explain_data) =
             execute_explain_query(tool_call, state, connection_id, database, db_type, session_id, cancel).await;
@@ -187,13 +194,11 @@ pub async fn execute_tool(
     }
 
     let result = match tool_call.name.as_str() {
-        "list_tables" => execute_list_tables(tool_call, state, connection_id, database).await,
-        "search_tables" => execute_search_tables(tool_call, state, connection_id, database, db_type).await,
-        "get_columns" => execute_get_columns(tool_call, state, connection_id, database).await,
+        "list_tables" => execute_list_tables(tool_call, &scope).await,
+        "search_tables" => execute_search_tables(tool_call, &scope).await,
+        "get_columns" => execute_get_columns(tool_call, &scope).await,
         "execute_query" => execute_execute_query(tool_call, state, connection_id, database, session_id, cancel).await,
-        "get_sample_data" => {
-            execute_get_sample_data(tool_call, state, connection_id, database, db_type, session_id, cancel).await
-        }
+        "get_sample_data" => execute_get_sample_data(tool_call, &scope, session_id, cancel).await,
         other => Err(format!("Unknown tool: {other}")),
     };
 
@@ -205,6 +210,76 @@ pub async fn execute_tool(
 
 fn arg_str<'a>(tool_call: &'a ToolCall, key: &str) -> Option<&'a str> {
     tool_call.arguments.get(key).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// Where the metadata tools look when the model names no schema.
+struct ToolScope<'a> {
+    state: &'a Arc<AppState>,
+    connection_id: &'a str,
+    database: &'a str,
+    schema_hint: Option<&'a str>,
+    db_type: DatabaseType,
+}
+
+/// The schema a tool uses when the model passes none. Flat-namespace engines
+/// (MySQL, SQLite, DuckDB…) address tables by database, so it is the database.
+/// Schema-aware engines (PostgreSQL, SQL Server, Oracle…) don't have a schema
+/// named after the database by default, so it is the tab's schema when known,
+/// otherwise the engine's usual default among the listed schemas.
+async fn default_schema(scope: &ToolScope<'_>) -> String {
+    resolve_default_schema(scope.state, scope.connection_id, scope.database, scope.schema_hint, scope.db_type).await
+}
+
+/// [`default_schema`] without a [`ToolScope`], for the agent loop's
+/// schema-in-prompt fallback.
+pub(crate) async fn resolve_default_schema(
+    state: &AppState,
+    connection_id: &str,
+    database: &str,
+    schema_hint: Option<&str>,
+    db_type: DatabaseType,
+) -> String {
+    if !is_schema_aware(db_type) {
+        return database.to_string();
+    }
+    if let Some(hint) = schema_hint.map(str::trim).filter(|s| !s.is_empty()) {
+        return hint.to_string();
+    }
+    let schemas = schema::list_schemas_core(state, connection_id, database).await.unwrap_or_default();
+    pick_default_schema(&schemas, database).unwrap_or_else(|| database.to_string())
+}
+
+/// Preferred default among `schemas`: one named after the database (Oracle-style
+/// user schemas), then `public` / `dbo` / `main` (the frontend's schema-context
+/// priority), then the first listed.
+fn pick_default_schema(schemas: &[String], database: &str) -> Option<String> {
+    let find = |name: &str| schemas.iter().find(|s| s.eq_ignore_ascii_case(name)).cloned();
+    Some(database)
+        .filter(|d| !d.trim().is_empty())
+        .and_then(find)
+        .or_else(|| find("public"))
+        .or_else(|| find("dbo"))
+        .or_else(|| find("main"))
+        .or_else(|| schemas.first().cloned())
+}
+
+/// Schemas `search_tables` scans when the model names none: every schema on a
+/// schema-aware engine (the default one first, so its matches lead and survive
+/// the limit), else just the default scope.
+async fn search_schemas(scope: &ToolScope<'_>) -> Vec<String> {
+    let default = default_schema(scope).await;
+    if !is_schema_aware(scope.db_type) {
+        return vec![default];
+    }
+    let schemas = schema::list_schemas_core(scope.state, scope.connection_id, scope.database).await.unwrap_or_default();
+    order_search_schemas(schemas, &default)
+}
+
+/// `default` first, then the remaining listed schemas in listing order.
+fn order_search_schemas(schemas: Vec<String>, default: &str) -> Vec<String> {
+    let mut ordered = vec![default.to_string()];
+    ordered.extend(schemas.into_iter().filter(|s| s != default));
+    ordered
 }
 
 fn requested_limit(tool_call: &ToolCall, default: usize) -> usize {
@@ -231,15 +306,20 @@ fn validate_table_name(table: &str) -> Result<(), String> {
     Ok(())
 }
 
-async fn execute_list_tables(
-    tool_call: &ToolCall,
-    state: &Arc<AppState>,
-    connection_id: &str,
-    database: &str,
-) -> Result<String, String> {
-    let schema = arg_str(tool_call, "schema").unwrap_or(database);
-    let tables =
-        schema::list_tables_core(state, connection_id, database, schema, None, Some(LIST_TABLES_LIMIT + 1)).await?;
+async fn execute_list_tables(tool_call: &ToolCall, scope: &ToolScope<'_>) -> Result<String, String> {
+    let schema = match arg_str(tool_call, "schema") {
+        Some(schema) => schema.to_string(),
+        None => default_schema(scope).await,
+    };
+    let tables = schema::list_tables_core(
+        scope.state,
+        scope.connection_id,
+        scope.database,
+        &schema,
+        None,
+        Some(LIST_TABLES_LIMIT + 1),
+    )
+    .await?;
     if tables.is_empty() {
         return Ok("(no tables found)".to_string());
     }
@@ -266,21 +346,51 @@ async fn execute_list_tables(
 /// comment. The listing is fetched without `list_tables`' filter/limit so a
 /// capped listing cannot hide a match — the whole point on schemas with
 /// thousands of tables — and matches are reported schema-qualified so the
-/// model can query them directly.
-async fn execute_search_tables(
-    tool_call: &ToolCall,
-    state: &Arc<AppState>,
-    connection_id: &str,
-    database: &str,
-    db_type: &DatabaseType,
-) -> Result<String, String> {
+/// model can query them directly. Without a `schema` argument a schema-aware
+/// engine is searched across all its schemas (one bulk listing), so a PG
+/// `public.orders` is found from a database named `mydb`.
+async fn execute_search_tables(tool_call: &ToolCall, scope: &ToolScope<'_>) -> Result<String, String> {
     let query = arg_str(tool_call, "search").ok_or("Missing required parameter: search")?;
-    let schema = arg_str(tool_call, "schema").unwrap_or(database);
     let limit = requested_limit(tool_call, SEARCH_TABLES_LIMIT);
 
-    let tables = schema::list_tables_core(state, connection_id, database, schema, None, None).await?;
-    let (matches, truncated) = search_table_infos(&tables, query, limit);
-    Ok(format_table_search_results(schema, db_type, &matches, query, truncated))
+    let schemas = match arg_str(tool_call, "schema") {
+        Some(schema) => vec![schema.to_string()],
+        None => search_schemas(scope).await,
+    };
+    let groups: Vec<(String, Vec<db::TableInfo>)> = if let [schema] = schemas.as_slice() {
+        let tables =
+            schema::list_tables_core(scope.state, scope.connection_id, scope.database, schema, None, None).await?;
+        vec![(schema.clone(), tables)]
+    } else {
+        schema::list_completion_metadata_core(scope.state, scope.connection_id, scope.database, &schemas, None, None)
+            .await?
+            .into_iter()
+            .map(|group| (group.schema, group.tables))
+            .collect()
+    };
+    let (matches, truncated) = search_table_groups(&groups, query, limit);
+    Ok(format_table_search_results(&scope.db_type, &matches, query, truncated))
+}
+
+/// [`search_table_infos`] over several schemas' listings, in group order; each
+/// match keeps the schema it came from. `truncated` as for a single listing.
+fn search_table_groups<'a>(
+    groups: &'a [(String, Vec<db::TableInfo>)],
+    query: &str,
+    limit: usize,
+) -> (Vec<(&'a str, &'a db::TableInfo)>, bool) {
+    let mut matches = Vec::new();
+    for (schema, tables) in groups {
+        // Ask each schema for one more than still fits so overflow is detectable.
+        let (hits, _) = search_table_infos(tables, query, limit + 1 - matches.len());
+        matches.extend(hits.into_iter().map(|table| (schema.as_str(), table)));
+        if matches.len() > limit {
+            break;
+        }
+    }
+    let truncated = matches.len() > limit;
+    matches.truncate(limit);
+    (matches, truncated)
 }
 
 /// Case-insensitive substring match over table names and comments, in listing
@@ -302,9 +412,8 @@ fn search_table_infos<'a>(tables: &'a [db::TableInfo], query: &str, limit: usize
 /// Render matches as `- table (type) -- comment` lines (schema-qualified on
 /// schema-aware engines), with a truncation marker when hits exceeded the limit.
 fn format_table_search_results(
-    schema: &str,
     db_type: &DatabaseType,
-    matches: &[&db::TableInfo],
+    matches: &[(&str, &db::TableInfo)],
     query: &str,
     truncated: bool,
 ) -> String {
@@ -313,7 +422,7 @@ fn format_table_search_results(
     }
     let mut lines: Vec<String> = matches
         .iter()
-        .map(|table| {
+        .map(|(schema, table)| {
             let name = if is_schema_aware(*db_type) && !schema.trim().is_empty() {
                 format!("{schema}.{}", table.name)
             } else {
@@ -336,17 +445,15 @@ fn format_table_search_results(
     lines.join("\n")
 }
 
-async fn execute_get_columns(
-    tool_call: &ToolCall,
-    state: &Arc<AppState>,
-    connection_id: &str,
-    database: &str,
-) -> Result<String, String> {
+async fn execute_get_columns(tool_call: &ToolCall, scope: &ToolScope<'_>) -> Result<String, String> {
     let table = arg_str(tool_call, "table").ok_or("Missing required parameter: table")?;
     validate_table_name(table)?;
-    let schema = arg_str(tool_call, "schema").unwrap_or(database);
+    let schema = match arg_str(tool_call, "schema") {
+        Some(schema) => schema.to_string(),
+        None => default_schema(scope).await,
+    };
 
-    let columns = schema::get_columns_core(state, connection_id, database, schema, table).await?;
+    let columns = schema::get_columns_core(scope.state, scope.connection_id, scope.database, &schema, table).await?;
     if columns.is_empty() {
         return Ok(format!("(no columns found for {table})"));
     }
@@ -467,21 +574,22 @@ async fn execute_execute_query(
 
 async fn execute_get_sample_data(
     tool_call: &ToolCall,
-    state: &Arc<AppState>,
-    connection_id: &str,
-    database: &str,
-    db_type: &DatabaseType,
+    scope: &ToolScope<'_>,
     session_id: &str,
     cancel: &CancellationToken,
 ) -> Result<String, String> {
+    let ToolScope { state, connection_id, database, db_type, .. } = *scope;
     let table = arg_str(tool_call, "table").ok_or("Missing required parameter: table")?;
     validate_table_name(table)?;
-    let schema = arg_str(tool_call, "schema").or(Some(database));
+    let schema = match arg_str(tool_call, "schema") {
+        Some(schema) => schema.to_string(),
+        None => default_schema(scope).await,
+    };
     let limit = requested_limit(tool_call, SAMPLE_DATA_LIMIT);
 
     let sql = build_table_select_sql(TableSelectSqlOptions {
-        database_type: Some(*db_type),
-        schema,
+        database_type: Some(db_type),
+        schema: Some(&schema),
         table_name: table,
         columns: &[],
         order_columns: &[],
@@ -826,7 +934,7 @@ mod tests {
         assert!(matches.is_empty());
         assert!(!truncated);
         assert_eq!(
-            format_table_search_results("public", &DatabaseType::Postgres, &matches, "does_not_exist", truncated),
+            format_table_search_results(&DatabaseType::Postgres, &[], "does_not_exist", truncated),
             "(no tables matching \"does_not_exist\")"
         );
     }
@@ -842,15 +950,57 @@ mod tests {
         assert!(truncated);
 
         // Schema-aware engines get qualified names the model can query as-is.
-        let text = format_table_search_results("billing", &DatabaseType::Postgres, &matches, "payment", truncated);
+        let matches: Vec<(&str, &db::TableInfo)> = matches.into_iter().map(|t| ("billing", t)).collect();
+        let text = format_table_search_results(&DatabaseType::Postgres, &matches, "payment", truncated);
         assert!(text.contains("- billing.payment_transactions_2024 (BASE TABLE) -- Settled card payments"), "{text}");
         assert!(text.contains("truncated"), "{text}");
 
         // Flat-namespace engines (MySQL/SQLite: the schema is the database) get
         // bare names, matching what their queries accept.
-        let text = format_table_search_results("mydb", &DatabaseType::Mysql, &matches, "payment", false);
+        let matches: Vec<(&str, &db::TableInfo)> = matches.into_iter().map(|(_, t)| ("mydb", t)).collect();
+        let text = format_table_search_results(&DatabaseType::Mysql, &matches, "payment", false);
         assert!(text.contains("- payment_transactions_2024 (BASE TABLE)"), "{text}");
         assert!(!text.contains("truncated"), "{text}");
+    }
+
+    #[test]
+    fn default_schema_on_schema_aware_engines_is_never_just_the_database_name() {
+        let pg = vec!["analytics".to_string(), "public".to_string()];
+        // PG database `mydb` has no `mydb` schema: the default is `public`.
+        assert_eq!(pick_default_schema(&pg, "mydb").as_deref(), Some("public"));
+        let mssql = vec!["dbo".to_string(), "sales".to_string()];
+        assert_eq!(pick_default_schema(&mssql, "Northwind").as_deref(), Some("dbo"));
+        // Oracle-style: the user's own schema is named after the login/database.
+        let oracle = vec!["HR".to_string(), "SCOTT".to_string()];
+        assert_eq!(pick_default_schema(&oracle, "scott").as_deref(), Some("SCOTT"));
+        assert_eq!(pick_default_schema(&["x".to_string()], "mydb").as_deref(), Some("x"));
+        assert_eq!(pick_default_schema(&[], "mydb"), None);
+    }
+
+    #[test]
+    fn multi_schema_search_leads_with_the_default_schema_and_qualifies_every_match() {
+        // PG-shaped: database `mydb`, schemas `analytics` and `public`, the
+        // target `public.orders` — the case the old default (schema = `mydb`)
+        // answered with "no tables matching".
+        let ordered = order_search_schemas(vec!["analytics".into(), "public".into()], "public");
+        assert_eq!(ordered, vec!["public", "analytics"]);
+        let groups = vec![
+            ("public".to_string(), vec![listed_table("orders", None), listed_table("users", None)]),
+            ("analytics".to_string(), vec![listed_table("orders_daily", Some("rollup"))]),
+        ];
+        let (matches, truncated) = search_table_groups(&groups, "orders", 50);
+        assert!(!truncated);
+        let text = format_table_search_results(&DatabaseType::Postgres, &matches, "orders", truncated);
+        assert_eq!(text, "- public.orders (BASE TABLE)\n- analytics.orders_daily (BASE TABLE) -- rollup");
+
+        // The limit spans schemas; overflow in a later schema still reports truncation.
+        let (matches, truncated) = search_table_groups(&groups, "orders", 1);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].0, "public");
+        assert!(truncated);
+        let (matches, truncated) = search_table_groups(&groups, "orders", 2);
+        assert_eq!(matches.len(), 2);
+        assert!(!truncated);
     }
 
     #[tokio::test]
@@ -879,6 +1029,7 @@ mod tests {
             &state,
             CONN_ID,
             "",
+            None,
             &DatabaseType::Sqlite,
             "session-1",
             &cancel,
@@ -893,6 +1044,7 @@ mod tests {
             &state,
             CONN_ID,
             "",
+            None,
             &DatabaseType::Sqlite,
             "session-1",
             &cancel,
@@ -907,6 +1059,7 @@ mod tests {
             &state,
             CONN_ID,
             "",
+            None,
             &DatabaseType::Sqlite,
             "session-1",
             &cancel,
@@ -921,8 +1074,7 @@ mod tests {
     async fn search_tables_scopes_to_the_requested_schema() {
         // DuckDB exposes real schemas, so the optional `schema` parameter is
         // observable end-to-end: the same search over different schemas returns
-        // disjoint tables, and the default scope (the current database's schema,
-        // here `main`) sees only its own tables.
+        // disjoint tables, while a search without one spans every schema.
         let con = db::duckdb_driver::connect_path(":memory:").expect("connect duckdb");
         con.lock()
             .expect("duckdb lock")
@@ -954,6 +1106,7 @@ mod tests {
                     &state,
                     CONN_ID,
                     "main",
+                    None,
                     &DatabaseType::DuckDb,
                     "session-1",
                     &cancel,
@@ -973,13 +1126,45 @@ mod tests {
         assert!(sales.content.contains("region_payment_targets"), "{}", sales.content);
         assert!(!sales.content.contains("fact_payment_events"), "{}", sales.content);
 
-        // Default scope is the current database's schema — `main` here — so only
-        // the unqualified table matches, never the other schemas'.
-        let main = search("call-m", json!({"search": "payment"})).await;
-        assert!(!main.is_error, "{}", main.content);
-        assert!(main.content.contains("payment_draft"), "{}", main.content);
-        assert!(!main.content.contains("fact_payment_events"), "{}", main.content);
-        assert!(!main.content.contains("region_payment_targets"), "{}", main.content);
+        // Without a schema the search spans every schema (one bulk listing),
+        // the default schema's matches first, each qualified so it is queryable.
+        let all = search("call-m", json!({"search": "payment"})).await;
+        assert!(!all.is_error, "{}", all.content);
+        assert_eq!(
+            all.content,
+            "- main.payment_draft (BASE TABLE)\n\
+             - analytics.fact_payment_events (BASE TABLE)\n\
+             - sales.region_payment_targets (BASE TABLE)"
+        );
+
+        // list_tables without a schema lists the default schema only.
+        let listed = execute_tool(
+            &named_tool_call("call-l", "list_tables", json!({})),
+            &state,
+            CONN_ID,
+            "main",
+            None,
+            &DatabaseType::DuckDb,
+            "session-1",
+            &cancel,
+        )
+        .await;
+        assert_eq!(listed.content, "- payment_draft (BASE TABLE)");
+
+        // Same from the real catalog name (`memory` for an in-memory DuckDB),
+        // which is no schema: the default resolves to `main`, not `memory`.
+        let listed = execute_tool(
+            &named_tool_call("call-l2", "list_tables", json!({})),
+            &state,
+            CONN_ID,
+            "memory",
+            None,
+            &DatabaseType::DuckDb,
+            "session-1",
+            &cancel,
+        )
+        .await;
+        assert_eq!(listed.content, "- payment_draft (BASE TABLE)");
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -1027,7 +1212,7 @@ mod tests {
         let tc = tool_call("call-1", json!({"sql": "SELECT 1 AS one"}));
         let cancel = CancellationToken::new();
 
-        let result = execute_tool(&tc, &state, CONN_ID, "", &DatabaseType::Sqlite, "session-1", &cancel).await;
+        let result = execute_tool(&tc, &state, CONN_ID, "", None, &DatabaseType::Sqlite, "session-1", &cancel).await;
 
         assert!(!result.is_error, "{}", result.content);
         assert!(result.content.contains("| one |"), "{}", result.content);
@@ -1042,7 +1227,7 @@ mod tests {
         let cancel = CancellationToken::new();
         cancel.cancel(); // Chat Cancel arrived before the statement ran
 
-        let result = execute_tool(&tc, &state, CONN_ID, "", &DatabaseType::Sqlite, "session-1", &cancel).await;
+        let result = execute_tool(&tc, &state, CONN_ID, "", None, &DatabaseType::Sqlite, "session-1", &cancel).await;
 
         assert!(result.is_error);
         assert_eq!(result.content, format!("Error: {}", query::QUERY_CANCELED));

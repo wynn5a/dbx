@@ -731,6 +731,7 @@ async function runBackendAgent(params: RunTurnParams & { token: number }) {
     temperature: 0.15,
     connectionId: props.tab.connectionId,
     database: props.tab.database,
+    schema: props.tab.schema || undefined,
     dbType: props.connection.db_type,
     mode: "agent",
   };

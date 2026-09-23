@@ -3,7 +3,8 @@
 //! cancelled — via the run's tool-cancellation token (the Chat Cancel path) and
 //! via the standard `cancel_running_query` registry path. T02 supplies the
 //! server-side stop (`pg_cancel_backend`); this drives the agent tool layer the
-//! same way `run_agent_loop` does, without needing an LLM.
+//! same way `run_agent_loop` does, without needing an LLM. A second test checks
+//! the metadata tools' default schema scope on PostgreSQL.
 //!
 //! Run with: DBX_TEST_POSTGRES_URL=postgres://... cargo test -p dbx-core \
 //!   --test live_agent_tool_query_cancel -- --ignored
@@ -165,6 +166,7 @@ async fn live_agent_tool_query_cancel_stops_the_statement_on_the_server() {
             &tool_state,
             CONNECTION_ID,
             DATABASE,
+            None,
             &DatabaseType::Postgres,
             SESSION,
             &tool_cancel,
@@ -203,6 +205,7 @@ async fn live_agent_tool_query_cancel_stops_the_statement_on_the_server() {
             &tool_state,
             CONNECTION_ID,
             DATABASE,
+            None,
             &DatabaseType::Postgres,
             SESSION,
             &tool_cancel,
@@ -232,4 +235,74 @@ async fn live_agent_tool_query_cancel_stops_the_statement_on_the_server() {
     );
     wait_for_probe(&pool, false, "gone after registry cancel").await;
     println!("phase 2 (RunningQueries cancel_running_query) ok");
+}
+
+fn metadata_tool_call(id: &str, name: &str, arguments: serde_json::Value) -> ToolCall {
+    ToolCall { id: id.to_string(), name: name.to_string(), arguments, thought_signature: None }
+}
+
+/// The metadata tools' default scope on PostgreSQL (review finding T20): with
+/// no `schema` argument they must not look in a schema named after the
+/// database. `search_tables` spans every schema, the others use `public` (or
+/// the tab's schema when the frontend sends one).
+#[tokio::test]
+#[ignore = "requires DBX_TEST_POSTGRES_URL pointing at a writable PostgreSQL database"]
+async fn live_agent_metadata_tools_default_to_real_postgres_schemas() {
+    let url = std::env::var("DBX_TEST_POSTGRES_URL").expect("DBX_TEST_POSTGRES_URL");
+    let database = tokio_postgres::Config::from_str(&url)
+        .expect("parse PostgreSQL URL")
+        .get_dbname()
+        .unwrap_or(DATABASE)
+        .to_string();
+    let state = app_state(&url).await;
+    let pool = probe_pool(&url).await;
+    let setup = "DROP SCHEMA IF EXISTS dbx_t20 CASCADE; DROP TABLE IF EXISTS public.dbx_t20_orders; \
+                 CREATE SCHEMA dbx_t20; \
+                 CREATE TABLE public.dbx_t20_orders (id int); \
+                 CREATE TABLE dbx_t20.dbx_t20_orders_archive (archived_id int);";
+    pool.get().await.expect("setup connection").batch_execute(setup).await.expect("seed schemas");
+
+    let run = |call: ToolCall, hint: Option<&'static str>| {
+        let state = Arc::clone(&state);
+        let database = database.clone();
+        async move {
+            let cancel = CancellationToken::new();
+            agent_tools::execute_tool(
+                &call,
+                &state,
+                CONNECTION_ID,
+                &database,
+                hint,
+                &DatabaseType::Postgres,
+                SESSION,
+                &cancel,
+            )
+            .await
+        }
+    };
+
+    let found =
+        run(metadata_tool_call("s1", "search_tables", serde_json::json!({ "search": "dbx_t20_orders" })), None).await;
+    assert!(!found.is_error, "{}", found.content);
+    assert!(found.content.contains("- public.dbx_t20_orders ("), "{}", found.content);
+    assert!(found.content.contains("- dbx_t20.dbx_t20_orders_archive ("), "{}", found.content);
+
+    let listed = run(metadata_tool_call("l1", "list_tables", serde_json::json!({})), None).await;
+    assert!(listed.content.contains("- dbx_t20_orders ("), "{}", listed.content);
+    assert!(!listed.content.contains("dbx_t20_orders_archive"), "{}", listed.content);
+
+    let columns =
+        run(metadata_tool_call("c1", "get_columns", serde_json::json!({ "table": "dbx_t20_orders" })), None).await;
+    assert!(columns.content.contains("id"), "{}", columns.content);
+
+    // The tab's schema, when sent, is the default scope instead.
+    let hinted = run(metadata_tool_call("l2", "list_tables", serde_json::json!({})), Some("dbx_t20")).await;
+    assert!(hinted.content.contains("dbx_t20_orders_archive"), "{}", hinted.content);
+
+    pool.get()
+        .await
+        .expect("cleanup connection")
+        .batch_execute("DROP SCHEMA dbx_t20 CASCADE; DROP TABLE public.dbx_t20_orders;")
+        .await
+        .expect("cleanup");
 }

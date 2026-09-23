@@ -66,6 +66,9 @@ pub struct AgentLoopContext {
     pub state: Arc<AppState>,
     pub connection_id: String,
     pub database: String,
+    /// The editor tab's current schema (schema-aware engines), used as the
+    /// default scope for tools called without a `schema` argument.
+    pub schema: Option<String>,
     pub db_type: DatabaseType,
 }
 
@@ -83,6 +86,9 @@ pub struct AgentStreamRequest {
     pub temperature: Option<f32>,
     pub connection_id: String,
     pub database: String,
+    /// The tab's current schema, when it has one (absent on older clients).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
     pub db_type: DatabaseType,
     /// "agent" exposes execution tools; anything else (incl. absent) is Ask mode.
     #[serde(default)]
@@ -99,6 +105,7 @@ impl AgentStreamRequest {
             state,
             connection_id: self.connection_id.clone(),
             database: self.database.clone(),
+            schema: self.schema.clone().filter(|s| !s.trim().is_empty()),
             db_type: self.db_type,
         }
     }
@@ -284,11 +291,22 @@ async fn execute_tool_calls(
         let state = Arc::clone(&ctx.state);
         let connection_id = ctx.connection_id.clone();
         let database = ctx.database.clone();
+        let schema = ctx.schema.clone();
         let db_type = ctx.db_type;
         let session_id = session_id.to_string();
         let tool_cancel = tool_cancel.clone();
         async move {
-            agent_tools::execute_tool(&tc, &state, &connection_id, &database, &db_type, &session_id, &tool_cancel).await
+            agent_tools::execute_tool(
+                &tc,
+                &state,
+                &connection_id,
+                &database,
+                schema.as_deref(),
+                &db_type,
+                &session_id,
+                &tool_cancel,
+            )
+            .await
         }
     });
     let parallel_results = join_all(parallel_futures).await;
@@ -326,8 +344,17 @@ async fn run_with_confirmation(
             }
         }
     }
-    agent_tools::execute_tool(tc, &ctx.state, &ctx.connection_id, &ctx.database, &ctx.db_type, session_id, tool_cancel)
-        .await
+    agent_tools::execute_tool(
+        tc,
+        &ctx.state,
+        &ctx.connection_id,
+        &ctx.database,
+        ctx.schema.as_deref(),
+        &ctx.db_type,
+        session_id,
+        tool_cancel,
+    )
+    .await
 }
 
 /// Fallback for providers without native function calling: a single completion
@@ -387,8 +414,16 @@ async fn run_agent_loop_text_only(
 
 async fn build_schema_prompt(ctx: &AgentLoopContext, system_prompt: &str) -> String {
     let mut enriched = system_prompt.to_string();
+    let default_schema = agent_tools::resolve_default_schema(
+        &ctx.state,
+        &ctx.connection_id,
+        &ctx.database,
+        ctx.schema.as_deref(),
+        ctx.db_type,
+    )
+    .await;
     if let Ok(tables) =
-        schema::list_tables_core(&ctx.state, &ctx.connection_id, &ctx.database, &ctx.database, None, Some(50)).await
+        schema::list_tables_core(&ctx.state, &ctx.connection_id, &ctx.database, &default_schema, None, Some(50)).await
     {
         if !tables.is_empty() {
             enriched.push_str("\n\n## Database Schema (for context — no tools available)\n");

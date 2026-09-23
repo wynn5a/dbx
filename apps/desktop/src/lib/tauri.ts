@@ -320,6 +320,8 @@ export interface AgentStreamRequest {
   temperature?: number;
   connectionId: string;
   database: string;
+  /** The tab's current schema: default scope for agent tools called without one. */
+  schema?: string;
   dbType: string;
   mode?: "ask" | "agent";
 }
