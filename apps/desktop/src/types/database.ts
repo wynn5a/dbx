@@ -301,6 +301,17 @@ export interface SqlColumnReference {
   span: SqlTextSpan;
 }
 
+export interface SqlCteDefinition {
+  name: string;
+  /** Explicit column list, or the body's top-level select output names. */
+  columns: string[];
+}
+
+export interface SqlDerivedTable {
+  alias: string;
+  columns: string[];
+}
+
 export interface SqlReferenceAnalysis {
   tables: SqlTableReference[];
   columns: SqlColumnReference[];
@@ -308,6 +319,10 @@ export interface SqlReferenceAnalysis {
   select_aliases: string[];
   /** Table-alias column lists (`FROM t AS t(a, b)`): same class as select_aliases. */
   alias_columns: string[];
+  /** CTE definitions — completion columns and schema-table shadows for the gate. */
+  cte_definitions: SqlCteDefinition[];
+  /** Derived tables (`FROM (SELECT …) x`): alias plus output columns. */
+  derived_tables: SqlDerivedTable[];
 }
 
 export type TreeNodeType =

@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sqlparser::ast::{
-    Expr, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr, Ident, JoinConstraint, JoinOperator,
-    ObjectName, ObjectNamePart, OrderByKind, Query, Select, SelectItem, SetExpr, Statement, TableAlias, TableFactor,
-    TableWithJoins,
+    Delete, Expr, FunctionArg, FunctionArgExpr, FunctionArguments, GroupByExpr, Ident, Insert, JoinConstraint,
+    JoinOperator, ObjectName, ObjectNamePart, OrderByKind, Query, Select, SelectItem, SetExpr, Statement, TableAlias,
+    TableFactor, TableObject, TableWithJoins, Update,
 };
 use sqlparser::dialect::{
     ClickHouseDialect, DuckDbDialect, GenericDialect, MsSqlDialect, MySqlDialect, PostgreSqlDialect, SQLiteDialect,
@@ -24,6 +24,26 @@ pub struct SqlReferenceAnalysis {
     /// (`FROM generate_series(1,3) AS g(n)`, `UNNEST(...) AS u(tag)`): the
     /// same "visible but not a schema column" class as `select_aliases`.
     pub alias_columns: Vec<String>,
+    /// CTE definitions (`WITH name (a, b) AS (SELECT …)`): the name plus the
+    /// output column list — explicit when given, otherwise derived from the
+    /// body's top-level select list. Completion uses these as completable
+    /// "tables"; the confidence gate uses the names as schema-table shadows.
+    pub cte_definitions: Vec<SqlCteDefinition>,
+    /// Derived tables (`FROM (SELECT id, name FROM t) x`): the alias plus the
+    /// same output column derivation as CTEs.
+    pub derived_tables: Vec<SqlDerivedTable>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SqlCteDefinition {
+    pub name: String,
+    pub columns: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SqlDerivedTable {
+    pub alias: String,
+    pub columns: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +86,8 @@ struct Analyzer {
     columns: Vec<SqlColumnReference>,
     select_aliases: Vec<String>,
     alias_columns: Vec<String>,
+    cte_definitions: Vec<SqlCteDefinition>,
+    derived_tables: Vec<SqlDerivedTable>,
 }
 
 pub fn analyze_sql_references(sql: &str, dialect: Option<&str>) -> Result<SqlReferenceAnalysis, String> {
@@ -76,6 +98,8 @@ pub fn analyze_sql_references(sql: &str, dialect: Option<&str>) -> Result<SqlRef
             columns: vec![],
             select_aliases: vec![],
             alias_columns: vec![],
+            cte_definitions: vec![],
+            derived_tables: vec![],
         });
     }
 
@@ -103,6 +127,8 @@ pub fn analyze_sql_references(sql: &str, dialect: Option<&str>) -> Result<SqlRef
         columns: analyzer.columns,
         select_aliases: analyzer.select_aliases,
         alias_columns: analyzer.alias_columns,
+        cte_definitions: analyzer.cte_definitions,
+        derived_tables: analyzer.derived_tables,
     })
 }
 
@@ -130,14 +156,115 @@ fn normalize_dialect(dialect: Option<&str>) -> String {
 
 impl Analyzer {
     fn visit_statement(&mut self, statement: &Statement) {
-        if let Statement::Query(query) = statement {
-            self.visit_query(query);
+        match statement {
+            Statement::Query(query) => self.visit_query(query),
+            Statement::Insert(insert) => self.visit_insert(insert),
+            Statement::Update(update) => self.visit_update(update),
+            Statement::Delete(delete) => self.visit_delete(delete),
+            _ => {}
+        }
+    }
+
+    // DML targets are table references too: completion suggests the target's
+    // columns in `INSERT INTO t (…)`, `UPDATE t SET …` and `DELETE FROM t …`.
+    fn visit_insert(&mut self, insert: &Insert) {
+        if let TableObject::TableName(name) = &insert.table {
+            let alias = insert.table_alias.as_ref().map(|table_alias| table_alias.alias.value.clone());
+            self.push_table_reference(name, alias);
+        }
+        for assignment in &insert.assignments {
+            self.visit_assignment(assignment);
+        }
+        if let Some(source) = &insert.source {
+            self.visit_query(source);
+        }
+        self.visit_returning(insert.returning.as_ref());
+    }
+
+    fn visit_update(&mut self, update: &Update) {
+        self.visit_table_with_joins(&update.table);
+        if let Some(from) = &update.from {
+            let tables = match from {
+                sqlparser::ast::UpdateTableFromKind::BeforeSet(tables)
+                | sqlparser::ast::UpdateTableFromKind::AfterSet(tables) => tables,
+            };
+            for table in tables {
+                self.visit_table_with_joins(table);
+            }
+        }
+        for assignment in &update.assignments {
+            self.visit_assignment(assignment);
+        }
+        if let Some(selection) = &update.selection {
+            self.visit_expr(selection);
+        }
+        self.visit_returning(update.returning.as_ref());
+    }
+
+    fn visit_delete(&mut self, delete: &Delete) {
+        // MySQL multi-table delete names the targets before FROM.
+        for name in &delete.tables {
+            self.push_table_reference(name, None);
+        }
+        let from_tables = match &delete.from {
+            sqlparser::ast::FromTable::WithFromKeyword(tables) | sqlparser::ast::FromTable::WithoutKeyword(tables) => {
+                tables
+            }
+        };
+        for table in from_tables {
+            self.visit_table_with_joins(table);
+        }
+        if let Some(using) = &delete.using {
+            for table in using {
+                self.visit_table_with_joins(table);
+            }
+        }
+        if let Some(selection) = &delete.selection {
+            self.visit_expr(selection);
+        }
+        self.visit_returning(delete.returning.as_ref());
+    }
+
+    fn visit_assignment(&mut self, assignment: &sqlparser::ast::Assignment) {
+        // The SET target is a column reference (and the one users most often
+        // typo), unlike a select-list item it has no alias indirection.
+        match &assignment.target {
+            sqlparser::ast::AssignmentTarget::ColumnName(name) => {
+                if let Some(ident) = object_name_last_ident(name) {
+                    let qualifier = name
+                        .0
+                        .len()
+                        .checked_sub(2)
+                        .and_then(|index| name.0.get(index))
+                        .and_then(object_name_part_ident)
+                        .map(|ident| ident.value.clone());
+                    self.push_column(qualifier, ident);
+                }
+            }
+            sqlparser::ast::AssignmentTarget::Tuple(names) => {
+                for name in names {
+                    if let Some(ident) = object_name_last_ident(name) {
+                        self.push_column(None, ident);
+                    }
+                }
+            }
+        }
+        self.visit_expr(&assignment.value);
+    }
+
+    fn visit_returning(&mut self, items: Option<&Vec<SelectItem>>) {
+        for item in items.into_iter().flatten() {
+            if let SelectItem::UnnamedExpr(expr) = item {
+                self.visit_expr(expr);
+            }
         }
     }
 
     fn visit_query(&mut self, query: &Query) {
         if let Some(with) = &query.with {
             for cte in &with.cte_tables {
+                self.cte_definitions
+                    .push(SqlCteDefinition { name: cte.alias.name.value.clone(), columns: cte_output_columns(cte) });
                 self.visit_query(&cte.query);
             }
         }
@@ -272,6 +399,16 @@ impl Analyzer {
             }
             TableFactor::Derived { subquery, alias, .. } => {
                 self.push_alias_columns(alias.as_ref());
+                // A derived table is referenced by its alias, and its output
+                // columns are what completion should suggest for that alias.
+                if let Some(alias) = alias {
+                    let columns = if alias.columns.is_empty() {
+                        query_output_columns(subquery)
+                    } else {
+                        alias.columns.iter().map(|column| column.name.value.clone()).collect()
+                    };
+                    self.derived_tables.push(SqlDerivedTable { alias: alias.name.value.clone(), columns });
+                }
                 self.visit_query(subquery);
             }
             TableFactor::NestedJoin { table_with_joins, .. } => self.visit_table_with_joins(table_with_joins),
@@ -431,6 +568,61 @@ impl Analyzer {
     fn push_column(&mut self, qualifier: Option<String>, ident: &Ident) {
         self.columns.push(SqlColumnReference { name: ident.value.clone(), qualifier, span: ident.span.into() });
     }
+
+    fn push_table_reference(&mut self, name: &ObjectName, alias: Option<String>) {
+        if let Some(table) = table_reference_from_name(name, alias) {
+            self.tables.push(table);
+        }
+    }
+}
+
+/// Output columns of a CTE: the explicit column list when given, otherwise
+/// derived from the body's top-level select list.
+fn cte_output_columns(cte: &sqlparser::ast::Cte) -> Vec<String> {
+    if !cte.alias.columns.is_empty() {
+        return cte.alias.columns.iter().map(|column| column.name.value.clone()).collect();
+    }
+    query_output_columns(&cte.query)
+}
+
+fn query_output_columns(query: &Query) -> Vec<String> {
+    set_expr_output_columns(&query.body)
+}
+
+// UNION/INTERSECT/EXCEPT bodies expose the left side's columns; follow it down
+// to the first select (this is what `WITH RECURSIVE … AS (SELECT … UNION ALL
+// SELECT …)` needs).
+fn set_expr_output_columns(set_expr: &SetExpr) -> Vec<String> {
+    match set_expr {
+        SetExpr::Select(select) => select_output_columns(select),
+        SetExpr::Query(query) => query_output_columns(query),
+        SetExpr::SetOperation { left, .. } => set_expr_output_columns(left),
+        _ => vec![],
+    }
+}
+
+// Visible output names of a select list: bare and compound identifiers, plus
+// aliases. Stars and computed expressions have no single name to expose.
+fn select_output_columns(select: &Select) -> Vec<String> {
+    let mut columns = Vec::new();
+    for item in &select.projection {
+        match item {
+            SelectItem::UnnamedExpr(Expr::Identifier(ident)) => columns.push(ident.value.clone()),
+            SelectItem::UnnamedExpr(Expr::CompoundIdentifier(idents)) => {
+                if let Some(last) = idents.last() {
+                    columns.push(last.value.clone());
+                }
+            }
+            SelectItem::ExprWithAlias { alias, .. } => columns.push(alias.value.clone()),
+            SelectItem::ExprWithAliases { aliases, .. } => {
+                for alias in aliases {
+                    columns.push(alias.value.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    columns
 }
 
 fn table_reference_from_name(name: &ObjectName, alias: Option<String>) -> Option<SqlTableReference> {
@@ -445,6 +637,13 @@ fn table_reference_from_name(name: &ObjectName, alias: Option<String>) -> Option
 
 fn object_name_last_ident(name: &ObjectName) -> Option<&Ident> {
     name.0.iter().rev().find_map(ObjectNamePart::as_ident)
+}
+
+fn object_name_part_ident(part: &ObjectNamePart) -> Option<&Ident> {
+    match part {
+        ObjectNamePart::Identifier(ident) => Some(ident),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

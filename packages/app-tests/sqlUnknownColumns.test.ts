@@ -294,8 +294,9 @@ test("QueryEditor wires the confidence-gated diagnostics into the debounced pipe
     /const analysis = await api\.analyzeSqlReferences\(sql, props\.dialect \?\? props\.formatDialect \?\? "generic"\);\n\s+if \(runId !== semanticDiagnosticRunId\) return;\n\s+const unknownColumns = await buildUnknownColumnDiagnostics\(analysis, \{/,
   );
   assert.match(source, /if \(runId !== semanticDiagnosticRunId\) return;\n\s+setSemanticDiagnostics\(unknownColumns\);/);
-  // CTE definitions shadow schema tables for the gate.
-  assert.match(source, /cteNames: extractCteDefinitions\(sql\)\.map\(\(cte\) => cte\.name\)/);
+  // CTE definitions shadow schema tables for the gate; they come from the same
+  // AST analysis as the table references, so the two can never disagree.
+  assert.match(source, /cteNames: analysis\.cte_definitions\.map\(\(cte\) => cte\.name\)/);
   // Resolution goes through the loaded schema listing and the completion cache.
   assert.match(source, /resolveColumnDiagnosticTable\(tableRef\)/);
   assert.match(

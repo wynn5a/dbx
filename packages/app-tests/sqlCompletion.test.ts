@@ -5,14 +5,23 @@ import {
   getSqlFunctionSignatureHelp,
   getSqlCompletionResultValidFor,
   shouldAutoOpenSqlCompletion,
-  extractCteDefinitions,
   getSqlCompletionContext,
   recordCompletionSelection,
   type SqlCompletionColumn,
   type SqlCompletionForeignKey,
   type SqlCompletionObject,
+  type SqlCompletionReferencedTable,
   type SqlCompletionTable,
+  type SqlStatementReferences,
 } from "../../apps/desktop/src/lib/sqlCompletion.ts";
+
+// References the backend AST analysis would produce for a statement. The
+// extraction itself (including the CTE/derived edge cases the old regex
+// fumbled) is locked by the Rust suite (crates/dbx-core/tests/sql_analysis.rs)
+// and by sqlReferences.test.ts; completion tests feed them in explicitly.
+function refs(...referencedTables: SqlCompletionReferencedTable[]): SqlStatementReferences {
+  return { referencedTables };
+}
 
 const tables: SqlCompletionTable[] = [
   { name: "users", schema: "public", type: "table" },
@@ -180,6 +189,7 @@ test("quotes PostgreSQL column identifiers when completion inserts them", () => 
     tables: postgresQuotedTables,
     columnsByTable: postgresQuotedColumnsByTable,
     dialect: "postgres",
+    references: refs({ name: "OrderLines", schema: "public" }),
   });
 
   const column = items.find((item) => item.type === "column" && item.label === "OrderId");
@@ -193,6 +203,7 @@ test("leaves safe PostgreSQL column identifiers unquoted when completion inserts
     tables: postgresQuotedTables,
     columnsByTable: postgresQuotedColumnsByTable,
     dialect: "postgres",
+    references: refs({ name: "OrderLines", schema: "public" }),
   });
 
   const column = items.find((item) => item.type === "column" && item.label === "article");
@@ -262,6 +273,7 @@ test("quotes MySQL column identifiers when completion inserts them", () => {
       tables: dialectQuotedTables,
       columnsByTable: dialectQuotedColumnsByTable,
       dialect: "mysql",
+      references: refs({ name: "archive", schema: "app" }),
     });
   };
 
@@ -383,6 +395,7 @@ test("suggests columns for an explicit alias qualifier", () => {
   const items = buildSqlCompletionItems(sql, cursor, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "u" }),
   });
 
   const columnItems = items.filter((item) => item.type === "column");
@@ -398,6 +411,7 @@ test("suggests only matching columns for an explicit alias qualifier prefix", ()
   const items = buildSqlCompletionItems(sql, cursor, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "u" }, { name: "orders", schema: "public", alias: "o" }),
   });
 
   assert.deepEqual(
@@ -411,6 +425,7 @@ test("keeps explicit alias column suggestions scoped to the alias table", () => 
   const items = buildSqlCompletionItems(sql, sql.length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "u" }, { name: "orders", schema: "public", alias: "o" }),
   });
 
   assert.deepEqual(
@@ -423,6 +438,7 @@ test("shows column comments in WHERE field completions", () => {
   const sql = "select * from public.orders where st";
   const items = buildSqlCompletionItems(sql, sql.length, {
     tables,
+    references: refs({ name: "orders", schema: "public" }),
     columnsByTable: new Map([
       [
         "public.orders",
@@ -452,6 +468,7 @@ test("suggests only fields after numbered table aliases in join conditions", () 
   const items = buildSqlCompletionItems(sql, sql.length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "t1" }, { name: "orders", schema: "public", alias: "t2" }),
   });
 
   assert.deepEqual(
@@ -473,6 +490,7 @@ test("scopes numbered alias field suggestions to the requested joined table", ()
   const items = buildSqlCompletionItems(sql, sql.length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "t1" }, { name: "orders", schema: "public", alias: "t2" }),
   });
 
   assert.deepEqual(
@@ -495,6 +513,7 @@ test("suggests columns from referenced tables in select list", () => {
   const items = buildSqlCompletionItems(sql, cursor, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "u" }, { name: "orders", schema: "public", alias: "o" }),
   });
 
   assert.equal(items[0]?.label, "name");
@@ -845,6 +864,7 @@ test("matches alias qualifier case-insensitively", () => {
   const items = buildSqlCompletionItems(sql, cursor, {
     tables,
     columnsByTable,
+    references: refs({ name: "orders", schema: "public", alias: "o" }),
   });
 
   const columnItems = items.filter((item) => item.type === "column");
@@ -859,6 +879,7 @@ test("suggests referenced columns after ORDER BY", () => {
   const items = buildSqlCompletionItems(sql, sql.length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "u" }),
   });
 
   assert.equal(items[0]?.label, "name");
@@ -897,6 +918,7 @@ test("suggests likely join condition snippets after ON", () => {
   const items = buildSqlCompletionItems(sql, sql.length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "u" }, { name: "orders", schema: "public", alias: "o" }),
   });
 
   const joinCondition = items.find((item) => item.type === "snippet" && item.label === "u.id = o.user_id");
@@ -909,6 +931,7 @@ test("suggests likely join condition snippets when joined table owns the id colu
   const items = buildSqlCompletionItems(sql, sql.length, {
     tables,
     columnsByTable,
+    references: refs({ name: "orders", schema: "public", alias: "o" }, { name: "users", schema: "public", alias: "u" }),
   });
 
   const joinCondition = items.find((item) => item.type === "snippet" && item.label === "o.user_id = u.id");
@@ -934,49 +957,35 @@ test("returns null signature help outside function calls", () => {
 
 // --- CTE support ---
 
-test("extracts CTE names from WITH clause", () => {
-  const ctes = extractCteDefinitions("WITH recent_orders AS (SELECT id FROM orders) SELECT * FROM recent_orders");
-  assert.equal(ctes.length, 1);
-  assert.equal(ctes[0]?.name, "recent_orders");
-});
-
-test("extracts CTE columns from SELECT body", () => {
-  const ctes = extractCteDefinitions("WITH cte AS (SELECT id, name, status FROM users) SELECT * FROM cte");
-  assert.equal(ctes.length, 1);
-  assert.deepEqual(ctes[0]?.columns, ["id", "name", "status"]);
-});
-
-test("extracts CTE explicit column list", () => {
-  const ctes = extractCteDefinitions("WITH cte (col1, col2) AS (SELECT 1, 2) SELECT * FROM cte");
-  assert.equal(ctes.length, 1);
-  assert.deepEqual(ctes[0]?.columns, ["col1", "col2"]);
-});
-
-test("extracts multiple CTEs", () => {
-  const ctes = extractCteDefinitions(
-    "WITH first AS (SELECT id FROM users), second AS (SELECT id FROM orders) SELECT * FROM first JOIN second",
-  );
-  assert.equal(ctes.length, 2);
-  assert.equal(ctes[0]?.name, "first");
-  assert.equal(ctes[1]?.name, "second");
-});
-
-test("handles WITH RECURSIVE", () => {
-  const ctes = extractCteDefinitions(
-    "WITH RECURSIVE tree AS (SELECT id, parent_id FROM categories UNION ALL SELECT c.id, c.parent_id FROM categories c JOIN tree t ON c.parent_id = t.id) SELECT * FROM tree",
-  );
-  assert.equal(ctes.length, 1);
-  assert.equal(ctes[0]?.name, "tree");
-});
+// --- CTE support ---
+// CTE name/column extraction from SQL text lives in the backend AST analyzer
+// now (locked by crates/dbx-core/tests/sql_analysis.rs, including explicit
+// column lists, multiple CTEs and WITH RECURSIVE); the frontend consumes the
+// analysis through the per-statement reference cache.
 
 test("adds CTE tables to referenced tables in context", () => {
   const sql = "WITH cte AS (SELECT id, name FROM users) SELECT * FROM cte";
-  const context = getSqlCompletionContext(sql, sql.length);
+  const context = getSqlCompletionContext(sql, sql.length, refs({ name: "cte", columns: ["id", "name"] }));
   const cteRef = context.referencedTables.find((t) => t.name.toLowerCase() === "cte");
   assert.ok(cteRef);
   assert.ok(cteRef.columns);
   assert.ok(cteRef.columns!.includes("id"));
   assert.ok(cteRef.columns!.includes("name"));
+});
+
+test("suggests CTE columns through the completion pipeline", () => {
+  // The editor maps refTable.columns into columnsByTable exactly like this
+  // (buildLocalSqlCompletionResult) — lock that columns flow from the
+  // AST-derived reference into suggestions.
+  const cteRef = { name: "cte", columns: ["id", "name"] };
+  const items = buildSqlCompletionItems("select  from cte", "select ".length, {
+    tables: [],
+    columnsByTable: new Map([[cteRef.name, cteRef.columns!.map((name) => ({ name, table: cteRef.name }))]]),
+    references: refs(cteRef),
+  });
+  const columnLabels = items.filter((item) => item.type === "column").map((item) => item.label);
+  assert.ok(columnLabels.includes("id"));
+  assert.ok(columnLabels.includes("name"));
 });
 
 // --- INSERT column list detection ---
@@ -997,6 +1006,7 @@ test("suggests columns for INSERT INTO target table", () => {
   const items = buildSqlCompletionItems("INSERT INTO users (", "INSERT INTO users (".length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public" }),
   });
   const columnItems = items.filter((item) => item.type === "column");
   assert.ok(columnItems.length >= 3);
@@ -1014,6 +1024,7 @@ test("shows column data type in detail", () => {
     {
       tables,
       columnsByTable,
+      references: refs({ name: "users", schema: "public", alias: "u" }),
     },
   );
   const emailColumn = items.find((item) => item.label === "email");
@@ -1025,6 +1036,7 @@ test("key columns get priority boost in column suggestions", () => {
   const items = buildSqlCompletionItems("select  from public.users u", "select ".length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "u" }),
   });
   const columns = items.filter((item) => item.type === "column");
   // id column may be qualified as "users.id" if duplicate exists across tables
@@ -1039,6 +1051,7 @@ test("referenced-table columns rank above keywords (#801)", () => {
   const items = buildSqlCompletionItems("select  from public.users u", "select ".length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "u" }),
   });
   const column = items.find((item) => item.type === "column");
   assert.ok(column, "should suggest columns when a table is referenced");
@@ -1153,6 +1166,7 @@ test("shows qualified column names when multiple tables share column name", () =
   const items = buildSqlCompletionItems(sql, "select ".length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "u" }, { name: "orders", schema: "public", alias: "o" }),
   });
   const columns = items.filter((item) => item.type === "column");
   assert.ok(
@@ -1200,14 +1214,22 @@ test("suggests RANK with OVER clause", () => {
 
 test("extracts subquery alias as referenced table", () => {
   const sql = "select * from (select id, name from users) sub";
-  const context = getSqlCompletionContext(sql, sql.length);
+  const context = getSqlCompletionContext(
+    sql,
+    sql.length,
+    refs({ name: "sub", alias: "sub", columns: ["id", "name"] }),
+  );
   const subRef = context.referencedTables.find((t) => t.name === "sub");
   assert.ok(subRef, "subquery alias should be in referenced tables");
 });
 
 test("extracts subquery alias columns", () => {
   const sql = "select s. from (select id, name from users) s";
-  const context = getSqlCompletionContext(sql, "select s.".length);
+  const context = getSqlCompletionContext(
+    sql,
+    "select s.".length,
+    refs({ name: "s", alias: "s", columns: ["id", "name"] }),
+  );
   const sqRef = context.referencedTables.find((t) => t.name === "s");
   assert.ok(sqRef);
   assert.ok(sqRef.columns!.includes("id"));
@@ -1220,6 +1242,7 @@ test("suggests table alias after FROM table", () => {
   const items = buildSqlCompletionItems("select * from users ", "select * from users ".length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public" }),
   });
   const aliasItem = items.find((item) => item.type === "snippet" && item.detail?.includes("alias for"));
   assert.ok(aliasItem, "should suggest alias for table");
@@ -1312,6 +1335,7 @@ test("prefers explicit foreign-key join condition with table aliases", () => {
       { name: "customers", schema: "public", type: "table" },
     ],
     columnsByTable,
+    references: refs({ name: "orders", schema: "public", alias: "o" }, { name: "customers", schema: "public", alias: "c" }),
     foreignKeysByTable,
   });
 
@@ -1338,6 +1362,7 @@ test("suggests explicit foreign-key join when the joined table owns the key", ()
       { name: "orders", schema: "public", type: "table" },
     ],
     columnsByTable,
+    references: refs({ name: "customers", schema: "public", alias: "c" }, { name: "orders", schema: "public", alias: "o" }),
     foreignKeysByTable,
   });
 
@@ -1378,6 +1403,7 @@ test("suggests composite explicit foreign-key join conditions", () => {
       { name: "products", schema: "public", type: "table" },
     ],
     columnsByTable: colsWithCompositeFk,
+    references: refs({ name: "order_lines", schema: "public", alias: "ol" }, { name: "products", schema: "public", alias: "p" }),
     foreignKeysByTable,
   });
 
@@ -1409,6 +1435,7 @@ test("uses referenced schema to disambiguate explicit foreign-key joins", () => 
       { name: "customers", schema: "crm", type: "table" },
     ],
     columnsByTable,
+    references: refs({ name: "orders", schema: "sales", alias: "o" }, { name: "customers", schema: "public", alias: "pc" }),
     foreignKeysByTable,
   });
 
@@ -1443,6 +1470,7 @@ test("suggests likely composite joins from shared scope columns and id naming", 
       { name: "order_lines", schema: "public", type: "table" },
     ],
     columnsByTable: colsWithTenantRelationship,
+    references: refs({ name: "orders", schema: "public", alias: "o" }, { name: "order_lines", schema: "public", alias: "ol" }),
   });
 
   const compositeJoin = items.find((item) => item.label === "o.tenant_id = ol.tenant_id AND o.id = ol.order_id");
@@ -1474,6 +1502,7 @@ test("does not suggest heuristic joins for incompatible column types", () => {
       { name: "orders", schema: "public", type: "table" },
     ],
     columnsByTable: colsWithIncompatibleIds,
+    references: refs({ name: "users", schema: "public", alias: "u" }, { name: "orders", schema: "public", alias: "o" }),
   });
 
   assert.equal(
@@ -1510,6 +1539,7 @@ test("suggests join condition for same FK column in both tables", () => {
       { name: "books", schema: "public", type: "table" },
     ],
     columnsByTable: colsWithFk,
+    references: refs({ name: "authors", schema: "public", alias: "a" }, { name: "books", schema: "public", alias: "b" }),
   });
   const fkJoin = items.find((item) => item.label === "a.publisher_id = b.publisher_id");
   assert.ok(fkJoin, "should suggest join on shared FK column publisher_id");
@@ -1531,6 +1561,7 @@ test("suggests join condition for parent_id self-reference", () => {
   const items = buildSqlCompletionItems(sql, sql.length, {
     tables: [{ name: "categories", schema: "public", type: "table" }],
     columnsByTable: colsWithParent,
+    references: refs({ name: "categories", schema: "public", alias: "c1" }, { name: "categories", schema: "public", alias: "c2" }),
   });
   const parentJoin = items.find(
     (item) => item.label === "c1.parent_id = c2.id" || item.label === "c2.parent_id = c1.id",
@@ -1562,6 +1593,7 @@ test("suggests join condition for created_by → id pattern", () => {
       { name: "documents", schema: "public", type: "table" },
     ],
     columnsByTable: colsWithCreator,
+    references: refs({ name: "users", schema: "public", alias: "u" }, { name: "documents", schema: "public", alias: "d" }),
   });
   const creatorJoin = items.find((item) => item.label === "u.id = d.created_by");
   assert.ok(creatorJoin, "should suggest id = created_by join");
@@ -1591,6 +1623,7 @@ test("suggests generic foreign-key to id join when table names differ from colum
       { name: "second_table", schema: "public", type: "table" },
     ],
     columnsByTable: colsWithGenericFk,
+    references: refs({ name: "first_table", schema: "public", alias: "t1" }, { name: "second_table", schema: "public", alias: "t2" }),
   });
 
   const genericJoin = items.find((item) => item.label === "t1.user_id = t2.id");
@@ -1618,6 +1651,7 @@ test("fuzzy matches columns with abbreviation pattern", () => {
   const items = buildSqlCompletionItems(sql, "select nm".length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "u" }),
   });
   // "nm" should fuzzy-match "name"
   assert.ok(
@@ -1632,6 +1666,7 @@ test("prefix matches still rank above fuzzy matches", () => {
   const items = buildSqlCompletionItems(sql, "select na".length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "u" }),
   });
   // Prefix match "name" should be first
   assert.equal(items[0]?.label, "name");
@@ -1660,6 +1695,7 @@ test("suggests string snippet for varchar column after =", () => {
   const items = buildSqlCompletionItems(sql, sql.length, {
     tables,
     columnsByTable,
+    references: refs({ name: "users", schema: "public", alias: "u" }),
   });
   const strSnippet = items.find((item) => item.label === "''");
   assert.ok(strSnippet, "should suggest string literal snippet for varchar column");

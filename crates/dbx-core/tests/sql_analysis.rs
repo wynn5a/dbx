@@ -88,3 +88,144 @@ fn duckdb_parser_gap_queries_do_not_raise_syntax_errors() {
         assert!(analysis.columns.is_empty());
     }
 }
+
+#[test]
+fn collects_cte_definitions_with_explicit_column_lists() {
+    let analysis =
+        analyze_sql_references("WITH cte (col1, col2) AS (SELECT 1, 2) SELECT * FROM cte", Some("postgres")).unwrap();
+
+    assert_eq!(analysis.cte_definitions.len(), 1);
+    assert_eq!(analysis.cte_definitions[0].name, "cte");
+    assert_eq!(analysis.cte_definitions[0].columns, vec!["col1".to_string(), "col2".to_string()]);
+    // The CTE reference itself is still a (shadowing) table reference.
+    assert_eq!(analysis.tables.len(), 1);
+    assert_eq!(analysis.tables[0].name, "cte");
+}
+
+#[test]
+fn derives_cte_columns_from_the_body_select_list() {
+    let analysis =
+        analyze_sql_references("WITH cte AS (SELECT id, name, status FROM users) SELECT * FROM cte", Some("postgres"))
+            .unwrap();
+
+    assert_eq!(analysis.cte_definitions[0].name, "cte");
+    assert_eq!(analysis.cte_definitions[0].columns, vec!["id".to_string(), "name".to_string(), "status".to_string()]);
+}
+
+#[test]
+fn recursive_cte_columns_come_from_the_first_select_of_the_union() {
+    let sql = "WITH RECURSIVE tree AS (SELECT id, parent_id FROM categories \
+               UNION ALL SELECT c.id, c.parent_id FROM categories c JOIN tree t ON c.parent_id = t.id) \
+               SELECT * FROM tree";
+    let analysis = analyze_sql_references(sql, Some("postgres")).unwrap();
+
+    assert_eq!(analysis.cte_definitions.len(), 1);
+    assert_eq!(analysis.cte_definitions[0].name, "tree");
+    assert_eq!(analysis.cte_definitions[0].columns, vec!["id".to_string(), "parent_id".to_string()]);
+}
+
+#[test]
+fn collects_multiple_cte_definitions_in_order() {
+    let sql = "WITH first AS (SELECT id FROM users), second AS (SELECT id FROM orders) \
+               SELECT * FROM first JOIN second";
+    let analysis = analyze_sql_references(sql, Some("postgres")).unwrap();
+
+    let names: Vec<_> = analysis.cte_definitions.iter().map(|cte| cte.name.as_str()).collect();
+    assert_eq!(names, vec!["first", "second"]);
+}
+
+#[test]
+fn collects_derived_table_aliases_with_output_columns() {
+    let analysis =
+        analyze_sql_references("SELECT * FROM (SELECT id, name FROM users) sub WHERE sub.id = 1", Some("postgres"))
+            .unwrap();
+
+    assert_eq!(analysis.derived_tables.len(), 1);
+    assert_eq!(analysis.derived_tables[0].alias, "sub");
+    assert_eq!(analysis.derived_tables[0].columns, vec!["id".to_string(), "name".to_string()]);
+    // The derived table's inner source is still a table reference.
+    assert_eq!(analysis.tables.len(), 1);
+    assert_eq!(analysis.tables[0].name, "users");
+}
+
+#[test]
+fn derived_table_explicit_column_lists_win_over_the_select_list() {
+    let analysis = analyze_sql_references("SELECT a, b FROM (SELECT 1, 2) AS x(a, b)", Some("postgres")).unwrap();
+
+    assert_eq!(analysis.derived_tables.len(), 1);
+    assert_eq!(analysis.derived_tables[0].alias, "x");
+    assert_eq!(analysis.derived_tables[0].columns, vec!["a".to_string(), "b".to_string()]);
+}
+
+#[test]
+fn nested_subqueries_keep_every_table_reference() {
+    let sql = "SELECT * FROM orders o WHERE o.id IN (SELECT order_id FROM items i \
+               WHERE i.user_id IN (SELECT user_id FROM banned))";
+    let analysis = analyze_sql_references(sql, Some("postgres")).unwrap();
+
+    let names: Vec<_> = analysis.tables.iter().map(|table| table.name.as_str()).collect();
+    assert_eq!(names, vec!["orders", "items", "banned"]);
+}
+
+#[test]
+fn commented_out_references_are_not_extracted() {
+    // The parser skips comments, so "table-like" text inside them is data.
+    let analysis =
+        analyze_sql_references("SELECT a FROM t1 -- , t2 FROM hidden JOIN t3\nWHERE a > 0", Some("postgres")).unwrap();
+    let names: Vec<_> = analysis.tables.iter().map(|table| table.name.as_str()).collect();
+    assert_eq!(names, vec!["t1"]);
+
+    let analysis =
+        analyze_sql_references("SELECT a FROM t1 /* , t2 FROM hidden */ WHERE a > 0", Some("postgres")).unwrap();
+    let names: Vec<_> = analysis.tables.iter().map(|table| table.name.as_str()).collect();
+    assert_eq!(names, vec!["t1"]);
+}
+
+#[test]
+fn dollar_quoted_bodies_are_not_parsed_as_sql() {
+    let analysis = analyze_sql_references(
+        "SELECT x FROM logs WHERE tags = $$-- not a comment$$ AND logs.ok = true",
+        Some("postgres"),
+    )
+    .unwrap();
+    let names: Vec<_> = analysis.tables.iter().map(|table| table.name.as_str()).collect();
+    assert_eq!(names, vec!["logs"]);
+    // The dollar body must not leak identifier references either.
+    assert!(analysis.columns.iter().all(|column| column.name != "not"));
+
+    let analysis = analyze_sql_references(
+        "SELECT x FROM logs WHERE tags = $note$/* still a string */$note$ AND logs.ok = true",
+        Some("postgres"),
+    )
+    .unwrap();
+    let names: Vec<_> = analysis.tables.iter().map(|table| table.name.as_str()).collect();
+    assert_eq!(names, vec!["logs"]);
+}
+
+#[test]
+fn extracts_dml_target_tables() {
+    let insert =
+        analyze_sql_references("INSERT INTO public.users (id, name) SELECT id, name FROM staging_users", None).unwrap();
+    let names: Vec<_> = insert.tables.iter().map(|table| table.name.as_str()).collect();
+    assert_eq!(names, vec!["users", "staging_users"]);
+    assert_eq!(insert.tables[0].schema.as_deref(), Some("public"));
+
+    let update =
+        analyze_sql_references("UPDATE users AS u SET name = 'x' FROM accounts a WHERE u.id = a.user_id", None)
+            .unwrap();
+    let names: Vec<_> = update.tables.iter().map(|table| (table.name.as_str(), table.alias.as_deref())).collect();
+    assert_eq!(names, vec![("users", Some("u")), ("accounts", Some("a"))]);
+
+    let delete = analyze_sql_references("DELETE FROM users WHERE id = 1", None).unwrap();
+    let names: Vec<_> = delete.tables.iter().map(|table| table.name.as_str()).collect();
+    assert_eq!(names, vec!["users"]);
+}
+
+#[test]
+fn update_set_targets_count_as_column_references() {
+    let analysis = analyze_sql_references("UPDATE users SET name = 'x', age = 2 WHERE id = 1", None).unwrap();
+    let names: Vec<_> = analysis.columns.iter().map(|column| column.name.as_str()).collect();
+    assert!(names.contains(&"name"));
+    assert!(names.contains(&"age"));
+    assert!(names.contains(&"id"));
+}

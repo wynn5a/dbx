@@ -3,7 +3,16 @@ import {
   buildSqlCompletionItems,
   getSqlCompletionContext,
   shouldAutoOpenSqlCompletion,
+  type SqlCompletionReferencedTable,
+  type SqlStatementReferences,
 } from "../../apps/desktop/src/lib/sqlCompletion";
+
+// What the backend AST analysis returns for a statement; the extraction itself
+// (comments, dollar bodies, nesting) is locked by the Rust suite and by
+// sqlReferences.test.ts, so context tests feed it in explicitly.
+const refs = (...referencedTables: SqlCompletionReferencedTable[]): SqlStatementReferences => ({
+  referencedTables,
+});
 
 describe("shouldAutoOpenSqlCompletion after numeric literals", () => {
   it("does not auto-open after a completed numeric value in a comparison", () => {
@@ -64,6 +73,7 @@ describe("sqlCompletion column vs snippet ranking", () => {
   const sql = "SELECT * FROM new_test WHERE name = 'eee' AND c";
   const buildItems = () =>
     buildSqlCompletionItems(sql, sql.length, {
+      references: refs({ name: "new_test" }),
       tables: [{ name: "new_test", type: "table" }],
       columnsByTable: new Map([
         [
@@ -105,7 +115,7 @@ describe("sqlCompletion statement boundaries", () => {
       "\n",
     );
     const cursor = sql.indexOf("where t.") + "where t.".length;
-    const context = getSqlCompletionContext(sql, cursor);
+    const context = getSqlCompletionContext(sql, cursor, refs({ name: "AutomationQueue", alias: "t" }));
 
     expect(context.qualifier).toBe("t");
     expect(context.referencedTables.map((table) => table.name)).toEqual(["AutomationQueue"]);
@@ -114,7 +124,12 @@ describe("sqlCompletion statement boundaries", () => {
   it("keeps UNION-ed selects in a single statement", () => {
     const sql = "select a from t1\nunion all\nselect b from t2 where t2.";
     const cursor = sql.indexOf("from t1") + "from t1".length;
-    const context = getSqlCompletionContext(sql, cursor);
+    // The statement under the cursor spans the UNION arms, so both sides count.
+    const context = getSqlCompletionContext(
+      sql,
+      cursor,
+      refs({ name: "t1" }, { name: "t2", alias: "t2" }),
+    );
 
     expect(context.referencedTables.map((table) => table.name)).toEqual(["t1", "t2"]);
   });
@@ -122,7 +137,9 @@ describe("sqlCompletion statement boundaries", () => {
   it("does not bound the outer statement at a subquery select", () => {
     const sql = "select * from orders o where o.id in (\nselect id from items i where i.\n)";
     const cursor = sql.indexOf("where i.") + "where i.".length;
-    const context = getSqlCompletionContext(sql, cursor);
+    // Statement extraction bounds at the subquery's select, so only `items`
+    // (not the outer `orders`) is referenced at this cursor.
+    const context = getSqlCompletionContext(sql, cursor, refs({ name: "items", alias: "i" }));
 
     expect(context.qualifier).toBe("i");
     expect(context.referencedTables.map((table) => table.name)).toEqual(["items"]);
@@ -130,7 +147,7 @@ describe("sqlCompletion statement boundaries", () => {
 
   it("keeps a multi-line single statement intact", () => {
     const sql = "SELECT *\nFROM Automations t where t.";
-    const context = getSqlCompletionContext(sql, sql.length);
+    const context = getSqlCompletionContext(sql, sql.length, refs({ name: "Automations", alias: "t" }));
 
     expect(context.qualifier).toBe("t");
     expect(context.referencedTables.map((table) => table.name)).toEqual(["Automations"]);
@@ -165,7 +182,13 @@ describe("sqlCompletion comment stripping", () => {
       "-- join secret_table on secret_table.id = orders.id",
       "from orders o join items i on i.order_id = o.id where o.",
     ].join("\n");
-    const context = getSqlCompletionContext(sql, sql.length);
+    // The comment line is blanked before the statement is analyzed, so the
+    // references fixture (analysis of the stripped statement) has no secret_table.
+    const context = getSqlCompletionContext(
+      sql,
+      sql.length,
+      refs({ name: "orders", alias: "o" }, { name: "items", alias: "i" }),
+    );
 
     expect(context.qualifier).toBe("o");
     expect(context.referencedTables.map((table) => table.name)).toEqual(["orders", "items"]);
@@ -174,7 +197,7 @@ describe("sqlCompletion comment stripping", () => {
 
   it("keeps a statement intact across a fully commented line", () => {
     const sql = "select *\n-- only active rows below\nfrom users where";
-    const context = getSqlCompletionContext(sql, sql.length);
+    const context = getSqlCompletionContext(sql, sql.length, refs({ name: "users" }));
 
     expect(context.referencedTables.map((table) => table.name)).toEqual(["users"]);
     expect(context.statementKind).toBe("select");
@@ -183,7 +206,7 @@ describe("sqlCompletion comment stripping", () => {
 
   it("does not count commented-out tables as referenced", () => {
     const sql = "select a from t1 -- , t2 from hidden_db join t3\nwhere a > 0";
-    const context = getSqlCompletionContext(sql, sql.length);
+    const context = getSqlCompletionContext(sql, sql.length, refs({ name: "t1" }));
 
     expect(context.referencedTables.map((table) => table.name)).toEqual(["t1"]);
     expect(context.statementKind).toBe("select");
@@ -191,7 +214,7 @@ describe("sqlCompletion comment stripping", () => {
 
   it("does not let a commented-out statement change the statement kind", () => {
     const sql = "-- drop table secret_table;\nselect id from users";
-    const context = getSqlCompletionContext(sql, sql.length);
+    const context = getSqlCompletionContext(sql, sql.length, refs({ name: "users" }));
 
     expect(context.statementKind).toBe("select");
     expect(context.referencedTables.map((table) => table.name)).toEqual(["users"]);
@@ -199,19 +222,19 @@ describe("sqlCompletion comment stripping", () => {
 
   it("does not treat comment openers inside dollar-quoted strings as comments", () => {
     const untagged = "select x from logs where tags = $$-- not a comment$$ and logs.";
-    const untaggedContext = getSqlCompletionContext(untagged, untagged.length);
+    const untaggedContext = getSqlCompletionContext(untagged, untagged.length, refs({ name: "logs" }));
     expect(untaggedContext.qualifier).toBe("logs");
     expect(untaggedContext.referencedTables.map((table) => table.name)).toEqual(["logs"]);
 
     const tagged = "select x from logs where tags = $note$/* still a string */$note$ and logs.";
-    const taggedContext = getSqlCompletionContext(tagged, tagged.length);
+    const taggedContext = getSqlCompletionContext(tagged, tagged.length, refs({ name: "logs" }));
     expect(taggedContext.qualifier).toBe("logs");
     expect(taggedContext.referencedTables.map((table) => table.name)).toEqual(["logs"]);
   });
 
   it("does not treat comment openers inside string literals as comments", () => {
     const sql = "select x from app_logs where msg = 'it''s -- not a comment /* really' and app_logs.";
-    const context = getSqlCompletionContext(sql, sql.length);
+    const context = getSqlCompletionContext(sql, sql.length, refs({ name: "app_logs" }));
 
     expect(context.qualifier).toBe("app_logs");
     expect(context.referencedTables.map((table) => table.name)).toEqual(["app_logs"]);
@@ -219,7 +242,7 @@ describe("sqlCompletion comment stripping", () => {
 
   it("keeps quoted qualifier parsing intact after a trailing comment", () => {
     const sql = 'select *\nfrom events -- recent events only\njoin "my schema".';
-    const context = getSqlCompletionContext(sql, sql.length);
+    const context = getSqlCompletionContext(sql, sql.length, refs({ name: "events" }));
 
     expect(context.qualifier).toBe("my schema");
     expect(context.suggestTables).toBe(true);

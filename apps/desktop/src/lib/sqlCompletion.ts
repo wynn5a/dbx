@@ -1388,6 +1388,24 @@ export interface SqlCompletionReferencedTable {
   columns?: string[];
 }
 
+/**
+ * AST-derived references for one statement (the text `getSqlCompletionContext`
+ * would extract at the cursor). Produced by the backend's `analyze_sql_references`
+ * via the per-statement cache in `sqlReferences.ts`; the completion pipeline
+ * consumes it synchronously on a cache hit and refreshes asynchronously on a
+ * statement change (stale-while-revalidate).
+ */
+export interface SqlStatementReferences {
+  referencedTables: SqlCompletionReferencedTable[];
+}
+
+/**
+ * Resolves references for a statement text. Production wires this to the
+ * statement cache (which kicks the async backend parse on a miss); omitting
+ * it (tests, flag-only consumers) yields an empty reference set.
+ */
+export type SqlReferencesResolver = (statement: string) => SqlStatementReferences | undefined;
+
 export type SqlStatementKind = "select" | "insert" | "update" | "delete" | "create" | "alter" | "drop" | "unknown";
 
 export interface SqlCompletionContext {
@@ -1444,9 +1462,10 @@ export function buildSqlCompletionItems(
     translations?: SqlCompletionTranslations;
     dialect?: SqlDialect;
     databaseType?: DatabaseType;
+    references?: SqlStatementReferences | SqlReferencesResolver;
   },
 ): SqlCompletionItem[] {
-  const context = getSqlCompletionContext(sql, cursor);
+  const context = getSqlCompletionContext(sql, cursor, input.references);
   return buildSqlCompletionItemsFromContext(context, input);
 }
 
@@ -1837,6 +1856,18 @@ function extractStatementAt(sql: string, cursor: number): string {
   return sql.slice(start, end).trim();
 }
 
+/**
+ * The statement text at `cursor` after comment stripping — the same text the
+ * per-statement reference cache (sqlReferences.ts) keys its backend analyses on.
+ * Callers outside `getSqlCompletionContext` (hover, ctrl+click, the explicit
+ * completion await) use this to look references up without re-deriving them.
+ */
+export function extractSqlStatementAt(sql: string, cursor: number): string {
+  const stripped = stripSqlComments(sql, cursor);
+  if (stripped.cursorInComment) return "";
+  return extractStatementAt(stripped.text, cursor);
+}
+
 function detectStatementKind(previousStatements: string): SqlStatementKind {
   const trimmed = previousStatements.trim();
   if (!trimmed) return "unknown";
@@ -1948,7 +1979,11 @@ function skipDollarQuotedSpan(sql: string, start: number): number {
   return close < 0 ? sql.length : close + tag.length;
 }
 
-export function getSqlCompletionContext(sql: string, cursor: number): SqlCompletionContext {
+export function getSqlCompletionContext(
+  sql: string,
+  cursor: number,
+  references?: SqlStatementReferences | SqlReferencesResolver | null,
+): SqlCompletionContext {
   // Commented-out SQL must not poison context detection (referenced tables,
   // statement kind, ...): blank `--` / `/* */` comments once, up front. Bodies
   // become same-length whitespace so every offset stays valid, and a cursor
@@ -1970,28 +2005,18 @@ export function getSqlCompletionContext(sql: string, cursor: number): SqlComplet
   const beforeToken = beforeCursor.slice(0, Math.max(0, bareStart)).trimEnd();
   const lastWord = /([A-Za-z_][\w$]*)$/.exec(beforeToken)?.[1]?.toLowerCase() ?? "";
 
-  const referencedTables = extractReferencedTables(fullStatement);
-
-  // Merge CTE definitions into referenced tables
-  const cteDefs = extractCteDefinitions(fullStatement);
-  for (const cte of cteDefs) {
-    if (!referencedTables.some((rt) => rt.name.toLowerCase() === cte.name.toLowerCase())) {
-      referencedTables.push({ name: cte.name, columns: cte.columns });
-    } else {
-      const existing = referencedTables.find((rt) => rt.name.toLowerCase() === cte.name.toLowerCase());
-      if (existing && !existing.columns) {
-        existing.columns = cte.columns;
-      }
-    }
-  }
-
-  // Merge subquery alias references
-  const subqueryRefs = extractSubqueryReferences(fullStatement);
-  for (const sq of subqueryRefs) {
-    if (!referencedTables.some((rt) => rt.name.toLowerCase() === sq.name.toLowerCase() && rt.alias === sq.alias)) {
-      referencedTables.push(sq);
-    }
-  }
+  // Table/CTE/derived references come from the backend's AST analysis (see
+  // sqlReferences.ts). Everything keyword-shaped below — which suggestion class
+  // the cursor is in — stays local. The resolver form lets the caller drive the
+  // per-statement cache without a second statement scan here.
+  const resolvedReferences = typeof references === "function" ? references(fullStatement) : references;
+  // Clone: the resolved snapshot is cached and shared across keystrokes, while
+  // callers (context merge below, metadata refresh) may mutate entries.
+  const referencedTables: SqlCompletionReferencedTable[] = (resolvedReferences?.referencedTables ?? []).map(
+    (table) => ({
+      ...table,
+    }),
+  );
 
   // Detect INSERT INTO table (column list) context
   const insertInfo = detectInsertColumnListContext(beforeCursor);
@@ -2241,137 +2266,6 @@ function detectInsertColumnListContext(beforeCursor: string): { table: string; s
   return { table: first! };
 }
 
-function extractReferencedTables(sql: string): SqlCompletionReferencedTable[] {
-  // Keywords that should NOT be treated as table aliases
-  const ALIAS_BLACKLIST = new Set([
-    "where",
-    "group",
-    "order",
-    "having",
-    "limit",
-    "offset",
-    "union",
-    "intersect",
-    "except",
-    "and",
-    "or",
-    "not",
-    "is",
-    "like",
-    "in",
-    "between",
-    "exists",
-    "select",
-    "from",
-    "join",
-    "left",
-    "right",
-    "inner",
-    "outer",
-    "cross",
-    "apply",
-    "full",
-    "natural",
-    "on",
-    "as",
-    "set",
-    "insert",
-    "update",
-    "delete",
-    "create",
-    "drop",
-    "alter",
-    "into",
-    "values",
-    "returning",
-    "for",
-    "window",
-    "partition",
-    "over",
-    "with",
-    "recursive",
-    "lateral",
-    "when",
-    "then",
-    "else",
-    "end",
-    "case",
-    "cast",
-    "coalesce",
-    "null",
-    "true",
-    "false",
-    "distinct",
-    "all",
-    "primary",
-    "key",
-    "foreign",
-    "references",
-    "constraint",
-    "default",
-    "check",
-    "unique",
-    "index",
-    "table",
-    "view",
-    "database",
-    "schema",
-    "describe",
-    "explain",
-    "analyze",
-    "pivot",
-    "unpivot",
-    "asof",
-    "positional",
-    "anti",
-    "semi",
-    "sample",
-    "filter",
-    "qualify",
-    "offset",
-    "fetch",
-    "next",
-    "rows",
-    "only",
-    "preceding",
-    "following",
-    "current",
-    "unbounded",
-    "asc",
-    "desc",
-    "nulls",
-    "first",
-    "last",
-    "ignore",
-    "respect",
-  ]);
-
-  const pattern =
-    /\b(?:from|join|update|into|apply)\s+((?:"[^"]+"|`[^`]+`|[^\s,;()]+)(?:\.(?:"[^"]+"|`[^`]+`|[^\s,;()]+))?)(?:\s+(?:as\s+)?([A-Za-z_][\w$]*))?/gi;
-  const referenced: SqlCompletionReferencedTable[] = [];
-  for (const match of sql.matchAll(pattern)) {
-    const rawName = match[1];
-    const alias = match[2];
-    // Filter out SQL keywords that accidentally matched as aliases
-    const cleanAlias = alias && !ALIAS_BLACKLIST.has(alias.toLowerCase()) ? alias : undefined;
-    if (isElasticsearchStyleIndexName(rawName)) {
-      referenced.push({ name: unquoteIdentifier(rawName), alias: cleanAlias });
-      continue;
-    }
-    const [first, second] = splitQualifiedName(rawName);
-    if (!first) continue;
-    const table = second ? { schema: first, name: second, alias: cleanAlias } : { name: first, alias: cleanAlias };
-    referenced.push(table);
-  }
-  return referenced;
-}
-
-function isElasticsearchStyleIndexName(name: string | undefined): name is string {
-  if (!name) return false;
-  if ((name.startsWith('"') && name.endsWith('"')) || (name.startsWith("`") && name.endsWith("`"))) return false;
-  return /[-*]/.test(name);
-}
-
 function extractSelectAliases(sql: string): string[] {
   const selectList = extractSelectList(sql);
   if (!selectList) return [];
@@ -2439,182 +2333,6 @@ function extractSelectAlias(expression: string): string | null {
 function isIdentifierPart(ch: string | undefined): boolean {
   return !!ch && /[A-Za-z0-9_$]/.test(ch);
 }
-
-function findMatchingParen(sql: string, openPos: number): number {
-  if (sql[openPos] !== "(") return -1;
-  let depth = 1;
-  let inSingleQuote = false;
-  let inDoubleQuote = false;
-  for (let i = openPos + 1; i < sql.length; i++) {
-    const ch = sql[i];
-    if (ch === "'" && !inDoubleQuote) {
-      inSingleQuote = !inSingleQuote;
-      continue;
-    }
-    if (ch === '"' && !inSingleQuote) {
-      inDoubleQuote = !inDoubleQuote;
-      continue;
-    }
-    if (inSingleQuote || inDoubleQuote) continue;
-    if (ch === "(") depth++;
-    else if (ch === ")") {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-  return -1;
-}
-
-function extractSelectColumnNames(sql: string): string[] {
-  const selectList = extractSelectList(sql);
-  if (!selectList) return [];
-  const names: string[] = [];
-  for (const expression of splitTopLevel(selectList, ",")) {
-    const trimmed = expression.trim();
-    if (trimmed === "*") continue;
-    if (/^[A-Za-z_][\w$]*$/.test(trimmed)) {
-      names.push(trimmed);
-      continue;
-    }
-    const alias = /\bas\s+([A-Za-z_][\w$]*)$/i.exec(trimmed)?.[1];
-    if (alias) {
-      names.push(alias);
-      continue;
-    }
-    const lastId = /([A-Za-z_][\w$]*)$/.exec(trimmed)?.[1];
-    if (lastId) names.push(lastId);
-  }
-  return names;
-}
-
-export function extractCteDefinitions(sql: string): Array<{ name: string; columns: string[] }> {
-  const ctes: Array<{ name: string; columns: string[] }> = [];
-  let lower = sql.toLowerCase();
-  const withMatch = /\bwith\b/.exec(lower);
-  if (!withMatch) return ctes;
-
-  let pos = withMatch.index + "with".length;
-  lower = lower.slice(pos);
-  const recursiveMatch = /^\s+recursive\b/.exec(lower);
-  if (recursiveMatch) {
-    pos += recursiveMatch[0].length;
-  }
-
-  while (pos < sql.length) {
-    while (pos < sql.length && /\s/.test(sql[pos])) pos++;
-    if (pos >= sql.length) break;
-    if (sql[pos] === "," || sql[pos] === ";") {
-      pos++;
-      continue;
-    }
-
-    const remaining = sql.slice(pos);
-    const nameMatch = /^([A-Za-z_][\w$]*)/.exec(remaining);
-    if (!nameMatch) break;
-    const cteName = nameMatch[1];
-    pos += nameMatch[0].length;
-
-    while (pos < sql.length && /\s/.test(sql[pos])) pos++;
-
-    let columns: string[] = [];
-    if (pos < sql.length && sql[pos] === "(") {
-      const colListEnd = findMatchingParen(sql, pos);
-      if (colListEnd !== -1) {
-        const colList = sql.slice(pos + 1, colListEnd).trim();
-        if (!/\bselect\b/i.test(colList)) {
-          columns = colList
-            .split(",")
-            .map((c) => c.trim())
-            .filter(Boolean);
-          pos = colListEnd + 1;
-          while (pos < sql.length && /\s/.test(sql[pos])) pos++;
-        }
-      }
-    }
-
-    while (pos < sql.length && /\s/.test(sql[pos])) pos++;
-    if (/\bas\b/i.test(sql.slice(pos, pos + 5))) {
-      pos += 2;
-      while (pos < sql.length && /\s/.test(sql[pos])) pos++;
-    }
-
-    if (pos >= sql.length || sql[pos] !== "(") break;
-    const bodyEnd = findMatchingParen(sql, pos);
-    if (bodyEnd === -1) break;
-
-    if (columns.length === 0) {
-      const body = sql.slice(pos + 1, bodyEnd);
-      columns = extractSelectColumnNames(body);
-    }
-
-    ctes.push({ name: cteName, columns });
-    pos = bodyEnd + 1;
-  }
-
-  return ctes;
-}
-
-function extractSubqueryReferences(sql: string): SqlCompletionReferencedTable[] {
-  const refs: SqlCompletionReferencedTable[] = [];
-  const pattern = /\b(?:from|join)\s*\(/gi;
-
-  for (const match of sql.matchAll(pattern)) {
-    const openParen = match.index! + match[0].length - 1;
-    const closeParen = findMatchingParen(sql, openParen);
-    if (closeParen === -1) continue;
-
-    // Extract alias after closing paren
-    let pos = closeParen + 1;
-    while (pos < sql.length && /\s/.test(sql[pos])) pos++;
-    if (/\bas\b/i.test(sql.slice(pos, pos + 4))) {
-      pos += 2;
-      while (pos < sql.length && /\s/.test(sql[pos])) pos++;
-    }
-    const aliasMatch = /^([A-Za-z_][\w$]*)/.exec(sql.slice(pos));
-    if (!aliasMatch) continue;
-    const alias = aliasMatch[1];
-    if (ALIAS_BLACKLIST_FOR_REF.has(alias.toLowerCase())) continue;
-
-    // Extract SELECT columns from subquery body
-    const body = sql.slice(openParen + 1, closeParen);
-    const columns = extractSelectColumnNames(body);
-
-    refs.push({ name: alias, alias, columns });
-  }
-
-  return refs;
-}
-
-const ALIAS_BLACKLIST_FOR_REF = new Set([
-  "where",
-  "group",
-  "order",
-  "having",
-  "limit",
-  "offset",
-  "union",
-  "intersect",
-  "except",
-  "and",
-  "or",
-  "not",
-  "is",
-  "like",
-  "in",
-  "between",
-  "exists",
-  "select",
-  "on",
-  "set",
-  "left",
-  "right",
-  "inner",
-  "outer",
-  "cross",
-  "full",
-  "natural",
-  "join",
-]);
 
 function splitTopLevel(text: string, separator: string): string[] {
   const parts: string[] = [];

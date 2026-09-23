@@ -26,14 +26,15 @@ import { useTheme } from "@/composables/useTheme";
 import { useToast } from "@/composables/useToast";
 import {
   buildSqlCompletionItemsFromContext,
+  extractSqlStatementAt,
   getSqlFunctionSignatureHelp,
   getSqlCompletionContext,
   getSqlCompletionResultValidFor,
   isSqlLikeCompletionStatement,
   recordCompletionSelection,
   shouldAutoOpenSqlCompletion,
-  extractCteDefinitions,
 } from "@/lib/sqlCompletion";
+import { ensureSqlStatementReferences, getSqlStatementReferences, subscribeSqlReferences } from "@/lib/sqlReferences";
 import {
   buildElasticsearchCompletionItemsFromContext,
   getElasticsearchCompletionContext,
@@ -741,7 +742,11 @@ async function resolveSqlHoverTooltip(currentView: EditorViewType, pos: number) 
       };
     }
 
-    const context = getSqlCompletionContext(sql, pos);
+    const references = await ensureSqlStatementReferences(
+      extractSqlStatementAt(sql, pos),
+      props.dialect ?? props.formatDialect ?? "generic",
+    );
+    const context = getSqlCompletionContext(sql, pos, references);
     const candidates = qualifier
       ? context.referencedTables.filter(
           (rt) =>
@@ -871,7 +876,9 @@ async function refreshSemanticDiagnostics() {
     const analysis = await api.analyzeSqlReferences(sql, props.dialect ?? props.formatDialect ?? "generic");
     if (runId !== semanticDiagnosticRunId) return;
     const unknownColumns = await buildUnknownColumnDiagnostics(analysis, {
-      cteNames: extractCteDefinitions(sql).map((cte) => cte.name),
+      // CTE definitions shadow schema tables for the gate; they come from the
+      // same AST analysis as the table references, so the two can't disagree.
+      cteNames: analysis.cte_definitions.map((cte) => cte.name),
       resolveTable: (tableRef) => resolveColumnDiagnosticTable(tableRef),
       formatMessage: (column, table) => t("editor.diagnostics.unknownColumn", { column, table }),
     });
@@ -1134,7 +1141,16 @@ async function provideSqlCompletions(
   try {
     if (!explicit && !shouldAutoOpenSqlCompletion(fullDoc, position)) return null;
 
-    const completionContext = getSqlCompletionContext(fullDoc, position);
+    // References come from the per-statement AST cache: exact hit serves
+    // synchronously, a statement change kicks the backend parse and serves the
+    // closest analyzed prefix (stale-while-revalidate); when the fresh analysis
+    // lands, the cache subscription retriggers this completion pass.
+    const referenceDialect = props.dialect ?? props.formatDialect ?? "generic";
+    let statementAtCursor = "";
+    const completionContext = getSqlCompletionContext(fullDoc, position, (statement) => {
+      statementAtCursor = statement;
+      return getSqlStatementReferences(statement, referenceDialect);
+    });
 
     if (!hasDatabase) {
       return buildContextOnlyCompletionResult(completionContext, fullDoc, position);
@@ -1167,7 +1183,9 @@ async function provideSqlCompletions(
 
     // Debounce the full async flow and return the promise to CodeMirror.
     // This prevents wasted backend calls during rapid typing while still
-    // showing table/column names in the first popup.
+    // showing table/column names in the first popup. The explicit path also
+    // awaits the statement's reference analysis, so a cold cache still gets
+    // full-fidelity column suggestions.
     return new Promise<ReturnType<typeof buildCompletionResult>>((resolve) => {
       completionDebounceTimer = setTimeout(async () => {
         completionDebounceTimer = null;
@@ -1176,7 +1194,13 @@ async function provideSqlCompletions(
           return;
         }
         try {
-          const result = await performAsyncCompletionWithResult(epoch, completionContext, fullDoc, position);
+          const references = await ensureSqlStatementReferences(statementAtCursor, referenceDialect);
+          if (epoch !== completionEpoch) {
+            resolve(null);
+            return;
+          }
+          const refreshedContext = getSqlCompletionContext(fullDoc, position, references);
+          const result = await performAsyncCompletionWithResult(epoch, refreshedContext, fullDoc, position);
           resolve(result);
         } catch {
           resolve(null);
@@ -1234,6 +1258,9 @@ function buildLocalSqlCompletionResult(
         )
       : [];
 
+  // CTE/derived references already carry their output columns from the AST
+  // analysis (attached by getSqlCompletionContext), so they suggest columns
+  // without any schema lookup; real tables go through the local column cache.
   const columnsByTable = new Map<string, SqlCompletionColumn[]>();
   if (completionContext.insertTable) {
     const insertSchema = completionContext.insertSchema ?? props.schema;
@@ -1251,13 +1278,11 @@ function buildLocalSqlCompletionResult(
     }
   }
 
-  const cteDefs = extractCteDefinitions(fullDoc);
   for (const refTable of completionContext.referencedTables) {
-    const cteDef = cteDefs.find((c) => c.name.toLowerCase() === refTable.name.toLowerCase());
-    if (cteDef) {
+    if (refTable.columns && refTable.columns.length > 0) {
       columnsByTable.set(
         refTable.name,
-        cteDef.columns.map((name) => ({ name, table: refTable.name, dataType: undefined })),
+        refTable.columns.map((name) => ({ name, table: refTable.name, dataType: undefined })),
       );
       continue;
     }
@@ -1573,16 +1598,6 @@ async function performAsyncCompletionWithResult(
     refs = matched.map((t) => ({ name: t.name, schema: t.schema }));
   }
 
-  // Populate CTE columns from parsed definitions
-  const cteDefs = extractCteDefinitions(fullDoc);
-  for (const refTable of refs) {
-    if (refTable.columns) continue;
-    const cteDef = cteDefs.find((c) => c.name.toLowerCase() === refTable.name.toLowerCase());
-    if (cteDef) {
-      refTable.columns = cteDef.columns;
-    }
-  }
-
   await Promise.all(
     refs.map(async (refTable) => {
       if (refTable.columns && refTable.columns.length > 0) return;
@@ -1737,7 +1752,11 @@ async function resolveCtrlClickTarget(doc: string, pos: number, identifier: stri
 
     // 2. Parse SQL at click position to get referenced tables, enriched with
     // schema from cachedTables.
-    const context = getSqlCompletionContext(doc, pos);
+    const references = await ensureSqlStatementReferences(
+      extractSqlStatementAt(doc, pos),
+      props.dialect ?? props.formatDialect ?? "generic",
+    );
+    const context = getSqlCompletionContext(doc, pos, references);
     const referencedTables = context.referencedTables.map((rt) => {
       if (rt.schema) return rt;
       const cached = cachedTables.find((ct) => ct.name.toLowerCase() === rt.name.toLowerCase());
@@ -1824,6 +1843,12 @@ function handleEditorMouseDown(event: MouseEvent): boolean {
   setTimeout(() => void resolveCtrlClickTarget(doc, pos, identifier), 0);
   return true;
 }
+
+// When a background reference analysis settles (statement text changed and the
+// backend AST parse just finished), re-run the completion pass so the fresh
+// table/CTE/derived references show up without waiting for the next keystroke —
+// the same retrigger contract as late-loading column metadata.
+const unsubscribeSqlReferences = subscribeSqlReferences(() => retriggerCompletionAfterMetadata(completionEpoch));
 
 onMounted(async () => {
   if (!editorRef.value) return;
@@ -2337,6 +2362,7 @@ onDeactivated(pauseQueryEditorBackgroundWork);
 onBeforeUnmount(() => {
   pauseQueryEditorBackgroundWork();
   zoomCommitScheduler.dispose();
+  unsubscribeSqlReferences();
   view.value?.destroy();
 });
 
