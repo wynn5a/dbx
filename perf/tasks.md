@@ -62,7 +62,7 @@
 | T41 | 侧栏拖表/列入编辑器 | improvement-plan §6 E7-3 | M | ✅ 8cf4f39f |
 | T42 | 最终 SQL 结构化输出 | improvement-plan §5 D9 | M | ✅ 51803e7b |
 | T43 | Agent loop 端到端测试 | improvement-plan §5 D10 | M | ✅ 4e5a153f |
-| T44 | 命令面板 | improvement-plan §6 E8 | L | ⬜ |
+| T44 | 命令面板 | improvement-plan §6 E8 | L | ✅ 909b8f4f |
 | T45 | AST 驱动的引用提取 | improvement-plan §4 C8 | L | ⬜ |
 
 ---
@@ -494,13 +494,14 @@
   - [x] 无新增重量级依赖（如新增需记录理由）；CI 内通过（计划允许 hyper/wiremock，均未引入——复用文件内既有 raw-TCP mock provider（每请求按序弹出一个 canned 响应），恰为 loop 所需；写确认门控两个方向的测试经真实的 `resolve_confirmation` 旁路（与 Tauri 命令同一路径）解决，零生产代码改动。`cargo fmt --check` + `cargo check --workspace --locked` + `cargo test -p dbx-core` 全绿：lib 862 过，ai_tool_stream 14 过（原 11 + 新 3））
 - **实现说明**：三个测试共一个新 T43 节，工具执行走真实执行层——临时目录建 SQLite 文件（`agent_tools.rs` 单测同款 `AppState` + 预置池手法），种子 `notes` 表后由 loop 的 `execute_tool_calls` 真正执行 SQL，跑完即删。场景 A 断言事件全序列与三轮请求体（含 usage 10+20+30 / 4+3+8 的透传累加）；场景 B 覆盖写确认批准（批准后 INSERT 真落库——跑完后直接查池断言行数，且 follow-up 请求把 "1 affected rows" 回喂模型）与拒绝（模型收到 `Error: User rejected execution of this statement.` 工具错误、数据库零改动、loop 干净收尾）。确认测试外层套 30s 超时防挂起。
 
-### T44 命令面板 ⬜
+### T44 命令面板 ✅ 909b8f4f
 
 - **来源** improvement-plan-2026-09.md §6 E8（Track E）· **规模** L · **依赖** T34/T35（动作注册表就位后建设）
 - **内容** 全局命令面板：快捷键唤起，注册 transfer / diff / compare / driver store / SQL library 等动作，可搜索执行。
 - **验收**
-  - [ ] 快捷键唤起、键入过滤、回车执行
-  - [ ] 动作注册表可扩展（新动作一行注册）；测试通过
+  - [x] 快捷键唤起、键入过滤、回车执行（Mod+K 全局 toggle（快捷键面板可见可重绑，`settings.shortcutCommandPalette` 六 locale）；键入按大小写不敏感子串过滤翻译后的 label、分类与原始 id，空查询按注册表顺序列出全部；↑/↓ 环绕选择（列表收缩时 clamp）、回车执行选中项并关闭面板，Esc/点击遮罩经 Dialog 自身关闭）
+  - [x] 动作注册表可扩展（新动作一行注册）；测试通过（`registerCommand({ id, labelKey, categoryKey, run })` 一行注册即被过滤/渲染覆盖，测试锁定）
+- **实现说明**：设计沿用仓库既有模式——框架无关注册表 + App.vue 注入 context：`lib/commandPalette.ts` 纯数据（11 个内置命令 × 4 分类：工作区 newQuery/newConnection/openSqlFile，工具 dataTransfer/schemaDiff/dataCompare，数据 driverStore/sqlLibrary，视图 queryHistory/aiAssistant/openSettings），`run(context)` 接收 App.vue 注入的 `CommandPaletteContext`，每个动作路由到与工具栏/菜单完全相同的 opener（`dialogs.showTransferDialog` 等 refs、`showDriverStore/showHistory/showSettings`、`newQuery()`、`toggleAiPanel`），零重复路由逻辑；SQL library 经新增 `AppSidebar.openSqlLibrary` expose（侧栏收起时先 `setSidebarOpen(true)`，`v-show` 保证 ref 常驻可调）。过滤/环绕选择/clamp 为纯函数，`CommandPalette.vue` 仅接线（Dialog + 搜索输入 + aria combobox/listbox 语义 + 选中项 scrollIntoView）；组件经 `defineAsyncComponent` 挂载（对齐 UpdateDialog/KillProcessDialog 的 `v-if` + `v-model:open` 先例），不进启动 chunk。Mod+K 注册进 `shortcutRegistry`（global scope，与既有绑定零冲突、逐 scope 唯一性断言覆盖），分发挂在 App.vue 既有 keydown 路径（open-settings 之后、focus-search 之前，无遮蔽）；老用户设置由 `normalizeShortcutSettings` 默认值回填，无迁移。文案落六个 locale（命令 label/分类沿用各语言既有术语：如 es "Transferencia de datos"、zh-CN "比较数据库"）。验证：无 Tauri 运行时，GUI 手工点验不可行，按仓库先例以测试+typecheck+构建佐证——新增 `packages/app-tests/commandPalette.test.ts` 15 例（清单顺序、过滤语义六向、环绕/clamp 边界、一行注册+注册表清理、逐命令 context 路由 stub、六 locale 完整性、App.vue/组件源码契约）+ `keyboardShortcuts.test.ts` Mod+K matcher 3 例 + `shortcutRegistry.test.ts` 清单与回填 2 例（既有逐 scope 唯一性/`findShortcutConflict`/六 locale label 循环自动覆盖新绑定）；`pnpm check` 全绿（format + lint + typecheck + vitest 183 文件 1432 用例）、`pnpm build` 通过。
 
 ### T45 AST 驱动的引用提取 ⬜
 
