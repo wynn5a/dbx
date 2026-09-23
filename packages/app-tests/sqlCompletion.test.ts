@@ -3,9 +3,9 @@ import { test } from "vitest";
 import {
   buildSqlCompletionItems,
   getSqlFunctionSignatureHelp,
-  getSqlCompletionResultValidFor,
   shouldAutoOpenSqlCompletion,
   getSqlCompletionContext,
+  quoteSqlIdentifier,
   recordCompletionSelection,
   type SqlCompletionColumn,
   type SqlCompletionForeignKey,
@@ -340,10 +340,12 @@ test("keeps Postgres quoting independent of the MySQL and SQL Server identifier 
   assert.equal(build("sqlserver").find((item) => item.label === "user")?.apply, "[user]");
 });
 
-test("inserts Oracle and DuckDB identifiers bare instead of falling back to MySQL backticks", () => {
+test("inserts Oracle and DuckDB identifiers without MySQL backticks, ANSI-quoting only what needs it", () => {
   // Before the shared dialect map, every engine outside postgres/sqlserver was
   // typed as mysql, so Oracle inserts came out backtick-quoted (a syntax error
-  // in Oracle). Generic-family dialects stay deliberately unquoted.
+  // in Oracle). Generic-family dialects keep plain identifiers bare (no
+  // per-dialect reserved-word set yet) and wrap anything that cannot be written
+  // bare in ANSI double quotes, which all of them accept.
   for (const dialect of ["oracle", "duckdb", "clickhouse", "sqlite", "generic"] as const) {
     const reservedItems = buildSqlCompletionItems("select * from ord", "select * from ord".length, {
       tables: dialectQuotedTables,
@@ -357,10 +359,29 @@ test("inserts Oracle and DuckDB identifiers bare instead of falling back to MySQ
     });
 
     // `order` is a MySQL reserved word (would have been backtick-quoted before);
-    // `has`tick` would have been backtick-quoted with the backtick doubled.
+    // `has`tick` is not a bare identifier, so it gets ANSI quotes, not backticks.
     assert.equal(reservedItems.find((item) => item.label === "order")?.apply, "order", dialect);
-    assert.equal(specialItems.find((item) => item.label === "has`tick")?.apply, "has`tick", dialect);
+    assert.equal(specialItems.find((item) => item.label === "has`tick")?.apply, '"has`tick"', dialect);
   }
+});
+
+test("quoteSqlIdentifier ANSI-quotes identifiers that cannot be bare on generic-family dialects", () => {
+  // T07 review: `my table` used to be inserted bare on sqlite/duckdb/clickhouse/
+  // oracle/generic — invalid SQL on all five.
+  for (const dialect of ["oracle", "duckdb", "clickhouse", "sqlite", "generic", undefined] as const) {
+    assert.equal(quoteSqlIdentifier("my table", dialect), '"my table"', String(dialect));
+    assert.equal(quoteSqlIdentifier("order-items", dialect), '"order-items"', String(dialect));
+    assert.equal(quoteSqlIdentifier("2024_sales", dialect), '"2024_sales"', String(dialect));
+    assert.equal(quoteSqlIdentifier('say "hi"', dialect), '"say ""hi"""', String(dialect));
+    assert.equal(quoteSqlIdentifier("users", dialect), "users", String(dialect));
+    assert.equal(quoteSqlIdentifier("Order_Items2", dialect), "Order_Items2", String(dialect));
+  }
+  const items = buildSqlCompletionItems("select * from my", "select * from my".length, {
+    tables: [{ name: "my table", type: "table" }],
+    columnsByTable: new Map(),
+    dialect: "sqlite",
+  });
+  assert.equal(items.find((item) => item.label === "my table")?.apply, '"my table"');
 });
 
 test("suggests matching table names after FROM", () => {
@@ -715,57 +736,6 @@ test("ranks exact table matches above prefix and fuzzy matches", () => {
     tableItems.map((item) => item.label),
     ["toh", "toh_archive", "to_his_rec"],
   );
-});
-
-test("does not attach validFor to results with an empty prefix", () => {
-  const validFor = getSqlCompletionResultValidFor("select * from ", "select * from ".length);
-
-  assert.equal(validFor, undefined);
-});
-
-test("does not attach validFor to one-character prefixes", () => {
-  const validFor = getSqlCompletionResultValidFor("select * f", "select * f".length);
-
-  assert.equal(validFor, undefined);
-});
-
-test("reuses results for identifier continuations once the prefix is two characters or more", () => {
-  const keywordValidFor = getSqlCompletionResultValidFor("select * fr", "select * fr".length);
-
-  assert.ok(keywordValidFor instanceof RegExp);
-  // Growing the token with identifier characters only re-offers a superset of
-  // the same results, so the popup may reuse them instead of recomputing. Case
-  // flips reuse too: filtering is case-insensitive and inserted keyword casing
-  // follows the prefix's first letter, which a token extension cannot change.
-  for (const text of ["fro", "from", "FROM", "frOm", "from_2", "from$1"]) {
-    assert.equal(keywordValidFor.test(text), true, `expected ${JSON.stringify(text)} to keep the result valid`);
-  }
-
-  const columnValidFor = getSqlCompletionResultValidFor(
-    "select * from users where na",
-    "select * from users where na".length,
-  );
-  assert.ok(columnValidFor instanceof RegExp);
-  assert.equal(columnValidFor.test("name"), true);
-});
-
-test("stops reuse on characters that switch the completion context", () => {
-  const validFor = getSqlCompletionResultValidFor("select * from us", "select * from us".length);
-
-  assert.ok(validFor instanceof RegExp);
-  // The qualifier dot is the context switch: table/keyword results must not
-  // survive into qualified-column suggestions. Quotes, whitespace, and operators
-  // end the token just the same, and `@` (SQL Server variable tokens) starts
-  // outside the identifier charset, so those results always recompute.
-  for (const text of ["us.", "us ", "us(", "us'", 'us"', "us+", "us;", "@us"]) {
-    assert.equal(validFor.test(text), false, `expected ${JSON.stringify(text)} to invalidate the result`);
-  }
-});
-
-test("does not reuse results when the cursor sits in a comment", () => {
-  const sql = "-- select * from us";
-
-  assert.equal(getSqlCompletionResultValidFor(sql, sql.length), undefined);
 });
 
 test("auto-opens completion after ON whitespace for join conditions", () => {

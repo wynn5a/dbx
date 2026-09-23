@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   applyKeywordCasing,
   applySnippetBodyCasing,
+  buildSnippetItemsForTest,
   buildSqlCompletionItems,
   type SqlCompletionColumn,
   type SqlCompletionTable,
@@ -68,6 +69,24 @@ describe("applySnippetBodyCasing", () => {
 
   it("keeps pre-existing ${name} / #{name} CodeMirror fields untouched", () => {
     expect(applySnippetBodyCasing("SELECT ${table} and #{col}", "sel")).toBe("select ${table} and #{col}");
+  });
+
+  it("never recases quoted identifiers or string literals", () => {
+    // T33 review: PG `"Date"` -> `"date"` is a different identifier and
+    // `'TABLE'` -> `'table'` changes data.
+    expect(
+      applySnippetBodyCasing(`SELECT * FROM "User" WHERE "Date" > {since} AND kind = 'TABLE'`, "sel"),
+    ).toBe(`select * from "User" where "Date" > {since} and kind = 'TABLE'`);
+    expect(applySnippetBodyCasing("SELECT `Order`, [Select] FROM t WHERE s = 'it''s FROM'", "sel")).toBe(
+      "select `Order`, [Select] from t where s = 'it''s FROM'",
+    );
+  });
+
+  it("recases a user snippet end-to-end without touching its literals", () => {
+    const items = buildSnippetItemsForTest("sel", [
+      { id: "u1", prefix: "selu", label: "select users", body: `SELECT * FROM "User" WHERE kind = 'TABLE'` },
+    ]);
+    expect(items[0]?.detail).toBe(`select * from "User" where kind = 'TABLE'`);
   });
 });
 

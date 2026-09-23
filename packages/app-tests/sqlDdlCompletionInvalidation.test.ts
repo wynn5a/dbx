@@ -1,8 +1,10 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createPinia, setActivePinia } from "pinia";
 import { useConnectionStore } from "../../apps/desktop/src/stores/connectionStore.ts";
 import { refreshMetadataAfterExecution } from "../../apps/desktop/src/composables/useSqlExecution.ts";
+import { completionCacheInvalidationAffects } from "../../apps/desktop/src/lib/completionCacheInvalidation.ts";
 import type { ConnectionConfig } from "../../apps/desktop/src/types/database.ts";
 
 // ---------------------------------------------------------------------------
@@ -238,5 +240,64 @@ test("a failed execution never invalidates the completion cache", async () => {
   } finally {
     restoreTauri();
     restoreStorage();
+  }
+});
+
+// T14 review: QueryEditor keeps its own per-editor caches (merged tables,
+// columns and foreign keys per referenced table) on top of the store's. Those
+// must drop on the same invalidations, or `ALTER TABLE … ADD COLUMN` after the
+// columns loaded stays invisible and a dropped table lingers.
+test("DDL publishes a completion-cache invalidation that editors on the same scope act on", async () => {
+  const restoreStorage = installMemoryStorage();
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    if (cmd === "list_tables") return [];
+    throw new Error("unexpected command: " + cmd);
+  });
+
+  try {
+    const store = await freshStore();
+    const before = store.completionCacheInvalidation?.seq ?? 0;
+
+    await execute(store, "SELECT * FROM users", true);
+    await execute(store, "ALTER TABLE users ADD COLUMN age int", false);
+    assert.equal(store.completionCacheInvalidation?.seq ?? 0, before, "no event without successful DDL");
+
+    await execute(store, "ALTER TABLE users ADD COLUMN age int", true);
+    const event = store.completionCacheInvalidation;
+    assert.ok(event);
+    assert.equal(event.seq, before + 1);
+    assert.equal(event.connectionId, CONN_ID);
+    assert.equal(event.database, DATABASE);
+    assert.equal(completionCacheInvalidationAffects(event, CONN_ID, DATABASE), true, "editor on shop drops caches");
+    assert.equal(completionCacheInvalidationAffects(event, CONN_ID, "other"), false, "other database keeps them");
+    assert.equal(completionCacheInvalidationAffects(event, "conn-other", DATABASE), false);
+
+    // Repeating the same DDL still produces a new event (watchers see every one).
+    await execute(store, "DROP TABLE users", true);
+    assert.equal(store.completionCacheInvalidation?.seq, before + 2);
+
+    // Connection-wide DDL affects every database of the connection.
+    await execute(store, "CREATE DATABASE reporting", true);
+    const wide = store.completionCacheInvalidation;
+    assert.equal(wide?.database, undefined);
+    assert.equal(completionCacheInvalidationAffects(wide, CONN_ID, "other"), true);
+  } finally {
+    restoreTauri();
+    restoreStorage();
+  }
+});
+
+test("QueryEditor drops its own completion caches on store invalidations", () => {
+  const source = readFileSync(
+    new URL("../../apps/desktop/src/components/editor/QueryEditor.vue", import.meta.url),
+    "utf8",
+  );
+  const watcher =
+    /watch\(\s*\(\) => connectionStore\.completionCacheInvalidation,\s*\(event\) => \{\s*if \(completionCacheInvalidationAffects\(event, props\.connectionId, props\.database\)\) refreshCompletionCache\(\);/;
+  assert.match(source, watcher);
+  // refreshCompletionCache clears every per-editor completion cache.
+  const body = /function refreshCompletionCache\(\) \{([\s\S]*?)\n\}/.exec(source)?.[1] ?? "";
+  for (const cache of ["cachedTables = []", "cachedCompletionObjects = []", "cachedColumnsByTable.clear()", "cachedForeignKeysByTable.clear()"]) {
+    assert.ok(body.includes(cache), cache);
   }
 });

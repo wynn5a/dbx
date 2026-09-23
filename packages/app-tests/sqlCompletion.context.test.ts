@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSqlCompletionItems,
+  extractSqlStatementAt,
   getSqlCompletionContext,
   shouldAutoOpenSqlCompletion,
   type SqlCompletionReferencedTable,
@@ -249,5 +250,137 @@ describe("sqlCompletion comment stripping", () => {
     const names = context.referencedTables.map((table) => table.name);
     expect(names).toContain("events");
     expect(names.some((name) => name === "recent" || name === "only")).toBe(false);
+  });
+});
+
+// T05 review: the statement handed to the backend reference analysis (the
+// resolver argument) is what decides which tables the cursor can see, so these
+// tests assert on it directly — it is exactly what getSqlCompletionContext
+// sends to sqlReferences.ts.
+function statementSeenBy(sql: string, cursor: number, dialect?: Parameters<typeof extractSqlStatementAt>[2]) {
+  let seen: string | undefined;
+  const context = getSqlCompletionContext(
+    sql,
+    cursor,
+    (statement) => {
+      seen = statement;
+      return refs({ name: "users", alias: "u" });
+    },
+    { dialect },
+  );
+  expect(extractSqlStatementAt(sql, cursor, dialect)).toBe(seen ?? "");
+  return { context, statement: seen ?? "" };
+}
+
+describe("sqlCompletion comment stripping (dialect-aware)", () => {
+  it("keeps the statement intact across a multi-line block comment", () => {
+    const sql = "SELECT u.\n/*\n  old:\n  FROM archived a\n*/\nFROM users u";
+    const cursor = "SELECT u.".length;
+    const { context, statement } = statementSeenBy(sql, cursor);
+
+    expect(statement).toContain("FROM users u");
+    expect(statement).not.toContain("archived");
+    expect(context.qualifier).toBe("u");
+    expect(context.referencedTables.map((table) => table.name)).toEqual(["users"]);
+  });
+
+  it("still ends the statement at a real blank line", () => {
+    const sql = "select * from users u where u.\n\nselect * from archived a";
+    const { statement } = statementSeenBy(sql, "select * from users u where u.".length);
+    expect(statement).not.toContain("archived");
+  });
+
+  it("treats MySQL backslash-escaped quotes as part of the string", () => {
+    const sql = "SELECT 'it\\'s -- x', u. FROM users u";
+    const cursor = sql.indexOf("u.") + 2;
+    const { context, statement } = statementSeenBy(sql, cursor, "mysql");
+
+    expect(context.qualifier).toBe("u");
+    expect(statement).toContain("FROM users u");
+    expect(context.referencedTables.map((table) => table.name)).toEqual(["users"]);
+  });
+
+  it("treats PostgreSQL E'…' backslash escapes as part of the string", () => {
+    const sql = "SELECT E'it\\'s -- x', u. FROM users u";
+    const cursor = sql.indexOf("u.") + 2;
+    const { context, statement } = statementSeenBy(sql, cursor, "postgres");
+    expect(context.qualifier).toBe("u");
+    expect(statement).toContain("FROM users u");
+  });
+
+  it("keeps standard strings standard: a trailing backslash does not escape the quote", () => {
+    // PostgreSQL standard_conforming_strings: 'C:\' is a complete string.
+    const sql = "SELECT 'C:\\' -- FROM archived a\nFROM users u WHERE u.";
+    const { context, statement } = statementSeenBy(sql, sql.length, "postgres");
+    expect(context.qualifier).toBe("u");
+    expect(statement).not.toContain("archived");
+  });
+
+  it("strips MySQL # comments", () => {
+    const sql = "SELECT * FROM users u # FROM archived a\nWHERE u.";
+    const { context, statement } = statementSeenBy(sql, sql.length, "mysql");
+    expect(statement).not.toContain("archived");
+    expect(context.qualifier).toBe("u");
+    // Only MySQL: `#` is an operator elsewhere (e.g. PostgreSQL `#>`).
+    const pgSql = "SELECT data #> '{a}' FROM users u WHERE u.";
+    const pg = statementSeenBy(pgSql, pgSql.length, "postgres");
+    expect(pg.statement).toContain("FROM users u");
+  });
+
+  it("treats a cursor inside a MySQL # comment as neutral", () => {
+    const sql = "SELECT 1 # note from users";
+    expect(getSqlCompletionContext(sql, sql.length - 2, undefined, { dialect: "mysql" }).suggestTables).toBe(false);
+  });
+
+  it("strips nested block comments on PostgreSQL and SQL Server", () => {
+    for (const dialect of ["postgres", "sqlserver"] as const) {
+      const sql = "SELECT * FROM users u /* a /* b */ FROM archived x */ WHERE u.";
+      const { context, statement } = statementSeenBy(sql, sql.length, dialect);
+      expect(statement, dialect).not.toContain("archived");
+      expect(context.qualifier, dialect).toBe("u");
+    }
+  });
+
+  it("does not treat comment openers inside SQL Server bracket identifiers as comments", () => {
+    const sql = "SELECT [a--b], u. FROM users u";
+    const cursor = sql.indexOf("u.") + 2;
+    const { context, statement } = statementSeenBy(sql, cursor, "sqlserver");
+    expect(context.qualifier).toBe("u");
+    expect(statement).toContain("FROM users u");
+  });
+});
+
+// T06 review: identifiers completion inserts as `[…]` on SQL Server must parse
+// back as qualifiers and INSERT targets.
+describe("sqlCompletion SQL Server bracket identifiers", () => {
+  it("resolves a bracketed qualifier", () => {
+    const sql = "SELECT * FROM [order] WHERE [order].";
+    const context = getSqlCompletionContext(sql, sql.length, refs({ name: "order" }), { dialect: "sqlserver" });
+    expect(context.qualifier).toBe("order");
+    expect(context.exclusiveColumnSuggestions).toBe(true);
+  });
+
+  it("resolves an alias of a bracketed table with spaces and suggests its columns", () => {
+    const sql = "SELECT * FROM [Order Details] od WHERE od.";
+    const items = buildSqlCompletionItems(sql, sql.length, {
+      tables: [],
+      columnsByTable: new Map([["Order Details", [{ name: "UnitPrice", table: "Order Details" }]]]),
+      references: refs({ name: "Order Details", alias: "od" }),
+      dialect: "sqlserver",
+    });
+    expect(items.map((item) => item.label)).toContain("UnitPrice");
+  });
+
+  it("parses a bracketed schema-qualified name with an escaped bracket", () => {
+    const sql = "SELECT * FROM [dbo].[we]]ird] WHERE [dbo].[we]]ird].";
+    const context = getSqlCompletionContext(sql, sql.length, undefined, { dialect: "sqlserver" });
+    expect(context.qualifier).toBe("dbo.we]ird");
+  });
+
+  it("detects a bracketed INSERT target", () => {
+    const sql = "INSERT INTO [dbo].[Order Details] (";
+    const context = getSqlCompletionContext(sql, sql.length, undefined, { dialect: "sqlserver" });
+    expect(context.insertSchema).toBe("dbo");
+    expect(context.insertTable?.toLowerCase()).toBe("order details");
   });
 });

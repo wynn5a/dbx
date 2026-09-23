@@ -106,6 +106,40 @@ describe("sqlMetadataRefreshScope", () => {
     );
   });
 
+  it("recognizes modifier-laden DDL forms (T14 review)", () => {
+    for (const sql of [
+      "CREATE UNLOGGED TABLE scratch (id int)",
+      "CREATE VIRTUAL TABLE docs USING fts5(body)",
+      "CREATE FOREIGN TABLE remote_users (id int) SERVER s",
+      "CREATE EXTERNAL TABLE ext_logs (line string) LOCATION 's3://b'",
+      "CREATE UNIQUE INDEX ux_users_email ON users (email)",
+      "CREATE NONCLUSTERED INDEX ix_orders ON orders (created_at)",
+      "CREATE DEFINER=`root`@`localhost` PROCEDURE p() BEGIN END",
+      "CREATE DEFINER='admin'@'%' VIEW v AS SELECT 1",
+      "CREATE DEFINER=CURRENT_USER FUNCTION f() RETURNS int RETURN 1",
+      "CREATE ALGORITHM=MERGE VIEW v AS SELECT 1",
+      "CREATE OR REPLACE ALGORITHM=UNDEFINED DEFINER=root@localhost SQL SECURITY INVOKER VIEW v AS SELECT 1",
+    ]) {
+      expect(sqlMetadataRefreshScope(sql), sql).toBe("database");
+    }
+    expect(sqlMetadataRefreshTarget("CREATE DEFINER=`root`@`localhost` VIEW rep.v AS SELECT 1")).toEqual({
+      scope: "database",
+      schema: "rep",
+    });
+    expect(sqlMetadataRefreshTarget("CREATE UNLOGGED TABLE IF NOT EXISTS rep.scratch (id int)")).toEqual({
+      scope: "database",
+      schema: "rep",
+    });
+  });
+
+  it("does not let PostgreSQL # operators swallow DDL on the same line", () => {
+    expect(sqlMetadataRefreshScope("SELECT data #> '{a}' FROM t; CREATE TABLE x (id int)")).toBe("database");
+    expect(sqlMetadataRefreshScope("SELECT data #>> '{a}', data #- '{b}' FROM t; DROP VIEW v")).toBe("database");
+    // MySQL `#` comments are still stripped.
+    expect(sqlMetadataRefreshScope("SELECT 1 # CREATE TABLE x (id int)")).toBe("none");
+    expect(sqlMetadataRefreshScope("SELECT 1; #CREATE TABLE x (id int)")).toBe("none");
+  });
+
   it("treats TRUNCATE and INSERT as data-only SQL", () => {
     expect(sqlMetadataRefreshScope("INSERT INTO users VALUES (1);")).toBe("none");
     expect(sqlMetadataRefreshScope("TRUNCATE TABLE users;")).toBe("none");

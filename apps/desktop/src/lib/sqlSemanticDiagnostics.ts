@@ -1,4 +1,5 @@
 import { getSqlCompletionContext } from "@/lib/sqlCompletion";
+import { sqlDialectForDatabaseType } from "@/lib/sqlDialect";
 import type { DatabaseType, SqlTextSpan } from "@/types/database";
 
 export interface SqlSemanticDiagnostic {
@@ -58,7 +59,9 @@ export function shouldRunSqlSemanticDiagnostics(
   options: { databaseType?: DatabaseType } = {},
 ): boolean {
   if (options.databaseType === "elasticsearch") return false;
-  const context = getSqlCompletionContext(sql, cursor);
+  const context = getSqlCompletionContext(sql, cursor, undefined, {
+    dialect: sqlDialectForDatabaseType(options.databaseType),
+  });
   if (context.suggestTables || context.exclusiveTableSuggestions || context.exclusiveColumnSuggestions) return false;
   if (context.qualifier) return false;
   return true;

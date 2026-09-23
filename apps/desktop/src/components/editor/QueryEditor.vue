@@ -29,11 +29,12 @@ import {
   extractSqlStatementAt,
   getSqlFunctionSignatureHelp,
   getSqlCompletionContext,
-  getSqlCompletionResultValidFor,
   isSqlLikeCompletionStatement,
   recordCompletionSelection,
   shouldAutoOpenSqlCompletion,
 } from "@/lib/sqlCompletion";
+import { buildReusableSqlCompletionResult } from "@/lib/sqlCompletionReuse";
+import { completionCacheInvalidationAffects } from "@/lib/completionCacheInvalidation";
 import { ensureSqlStatementReferences, getSqlStatementReferences, subscribeSqlReferences } from "@/lib/sqlReferences";
 import {
   buildElasticsearchCompletionItemsFromContext,
@@ -83,6 +84,7 @@ import {
 import { buildUnknownColumnDiagnostics, type SqlTableResolution } from "@/lib/sqlUnknownColumns";
 import type {
   SqlCompletionColumn,
+  SqlCompletionContext,
   SqlCompletionForeignKey,
   SqlCompletionItem,
   SqlCompletionObject,
@@ -743,10 +745,10 @@ async function resolveSqlHoverTooltip(currentView: EditorViewType, pos: number) 
     }
 
     const references = await ensureSqlStatementReferences(
-      extractSqlStatementAt(sql, pos),
+      extractSqlStatementAt(sql, pos, props.dialect),
       props.dialect ?? props.formatDialect ?? "generic",
     );
-    const context = getSqlCompletionContext(sql, pos, references);
+    const context = getSqlCompletionContext(sql, pos, references, { dialect: props.dialect });
     const candidates = qualifier
       ? context.referencedTables.filter(
           (rt) =>
@@ -1014,6 +1016,9 @@ let completionMetadataRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 type QueryCompletionItem = SqlCompletionItem | ElasticsearchCompletionItem;
 
+// Elasticsearch results only. SQL results go through buildSqlCompletionResult,
+// whose `update` hook re-ranks while typing (a `validFor` reuse would keep the
+// stale order under `filter: false`).
 function buildCompletionResult(items: QueryCompletionItem[], from: number, validFor?: RegExp) {
   if (items.length === 0) return null;
   return {
@@ -1022,6 +1027,23 @@ function buildCompletionResult(items: QueryCompletionItem[], from: number, valid
     options: items.map((item) => completionOptionForItem(item)),
     validFor,
   };
+}
+
+// A SQL completion result whose `update` hook rebuilds the ranked items for
+// typed continuations of the token from the same context and metadata
+// (sqlCompletionReuse.ts), so the popup re-narrows and re-ranks without
+// re-running the source on every keystroke.
+function buildSqlCompletionResult(
+  completionContext: SqlCompletionContext,
+  position: number,
+  build: (context: SqlCompletionContext) => SqlCompletionItem[],
+) {
+  return buildReusableSqlCompletionResult(
+    build(completionContext),
+    position - completionContext.prefix.length,
+    completionOptionForItem,
+    { context: completionContext, build },
+  );
 }
 
 function completionOptionForItem(item: QueryCompletionItem) {
@@ -1100,12 +1122,8 @@ async function provideElasticsearchCompletions(
 // Build a completion result from context alone (keywords/snippets/literals),
 // with no table/column/object metadata — used when there is no active database
 // or the cursor position needs nothing from the backend.
-function buildContextOnlyCompletionResult(
-  completionContext: ReturnType<typeof getSqlCompletionContext>,
-  fullDoc: string,
-  position: number,
-) {
-  const items = buildSqlCompletionItemsFromContext(completionContext, {
+function buildContextOnlyCompletionResult(completionContext: SqlCompletionContext, position: number) {
+  const input = {
     tables: [],
     objects: [],
     columnsByTable: new Map(),
@@ -1114,11 +1132,9 @@ function buildContextOnlyCompletionResult(
     snippets: settingsStore.editorSettings.snippets,
     dialect: props.dialect,
     databaseType: props.databaseType,
-  });
-  return buildCompletionResult(
-    items,
-    position - completionContext.prefix.length,
-    getSqlCompletionResultValidFor(fullDoc, position),
+  };
+  return buildSqlCompletionResult(completionContext, position, (context) =>
+    buildSqlCompletionItemsFromContext(context, input),
   );
 }
 
@@ -1139,7 +1155,7 @@ async function provideSqlCompletions(
   const epoch = ++completionEpoch;
 
   try {
-    if (!explicit && !shouldAutoOpenSqlCompletion(fullDoc, position)) return null;
+    if (!explicit && !shouldAutoOpenSqlCompletion(fullDoc, position, props.dialect)) return null;
 
     // References come from the per-statement AST cache: exact hit serves
     // synchronously, a statement change kicks the backend parse and serves the
@@ -1147,13 +1163,18 @@ async function provideSqlCompletions(
     // lands, the cache subscription retriggers this completion pass.
     const referenceDialect = props.dialect ?? props.formatDialect ?? "generic";
     let statementAtCursor = "";
-    const completionContext = getSqlCompletionContext(fullDoc, position, (statement) => {
-      statementAtCursor = statement;
-      return getSqlStatementReferences(statement, referenceDialect);
-    });
+    const completionContext = getSqlCompletionContext(
+      fullDoc,
+      position,
+      (statement) => {
+        statementAtCursor = statement;
+        return getSqlStatementReferences(statement, referenceDialect);
+      },
+      { dialect: props.dialect },
+    );
 
     if (!hasDatabase) {
-      return buildContextOnlyCompletionResult(completionContext, fullDoc, position);
+      return buildContextOnlyCompletionResult(completionContext, position);
     }
 
     const needsAsyncData =
@@ -1166,10 +1187,10 @@ async function provideSqlCompletions(
       completionContext.referencedTables.length > 0;
 
     if (!needsAsyncData) {
-      return buildContextOnlyCompletionResult(completionContext, fullDoc, position);
+      return buildContextOnlyCompletionResult(completionContext, position);
     }
 
-    const localResult = buildLocalSqlCompletionResult(completionContext, fullDoc, position);
+    const localResult = buildLocalSqlCompletionResult(completionContext, position);
     if (localResult || !explicit) {
       scheduleCompletionMetadataRefresh(completionContext, epoch);
     }
@@ -1186,7 +1207,7 @@ async function provideSqlCompletions(
     // showing table/column names in the first popup. The explicit path also
     // awaits the statement's reference analysis, so a cold cache still gets
     // full-fidelity column suggestions.
-    return new Promise<ReturnType<typeof buildCompletionResult>>((resolve) => {
+    return new Promise<ReturnType<typeof buildSqlCompletionResult>>((resolve) => {
       completionDebounceTimer = setTimeout(async () => {
         completionDebounceTimer = null;
         if (epoch !== completionEpoch) {
@@ -1199,8 +1220,8 @@ async function provideSqlCompletions(
             resolve(null);
             return;
           }
-          const refreshedContext = getSqlCompletionContext(fullDoc, position, references);
-          const result = await performAsyncCompletionWithResult(epoch, refreshedContext, fullDoc, position);
+          const refreshedContext = getSqlCompletionContext(fullDoc, position, references, { dialect: props.dialect });
+          const result = await performAsyncCompletionWithResult(epoch, refreshedContext, position);
           resolve(result);
         } catch {
           resolve(null);
@@ -1214,7 +1235,6 @@ async function provideSqlCompletions(
 
 function buildLocalSqlCompletionResult(
   completionContext: ReturnType<typeof getSqlCompletionContext>,
-  fullDoc: string,
   position: number,
 ) {
   if (!props.connectionId || props.database == null) return null;
@@ -1315,7 +1335,7 @@ function buildLocalSqlCompletionResult(
     return null;
   }
 
-  const items = buildSqlCompletionItemsFromContext(completionContext, {
+  const input = {
     tables,
     objects: completionObjects,
     columnsByTable,
@@ -1325,12 +1345,9 @@ function buildLocalSqlCompletionResult(
     snippets: settingsStore.editorSettings.snippets,
     dialect: props.dialect,
     databaseType: props.databaseType,
-  });
-
-  return buildCompletionResult(
-    items,
-    position - completionContext.prefix.length,
-    getSqlCompletionResultValidFor(fullDoc, position),
+  };
+  return buildSqlCompletionResult(completionContext, position, (context) =>
+    buildSqlCompletionItemsFromContext(context, input),
   );
 }
 
@@ -1463,7 +1480,6 @@ function mergeCompletionTables(
 async function performAsyncCompletionWithResult(
   epoch: number,
   completionContext: ReturnType<typeof getSqlCompletionContext>,
-  fullDoc: string,
   position: number,
 ) {
   // Handle INSERT column list: fetch columns for the target table
@@ -1663,17 +1679,7 @@ async function performAsyncCompletionWithResult(
     }
   }
 
-  const effectiveContext = qualifierIsSchema
-    ? {
-        ...completionContext,
-        qualifier: undefined,
-        suggestTables: true,
-        suggestColumns: false,
-        exclusiveColumnSuggestions: false,
-      }
-    : completionContext;
-
-  const items = buildSqlCompletionItemsFromContext(effectiveContext, {
+  const input = {
     tables,
     objects: completionObjects,
     columnsByTable,
@@ -1683,12 +1689,20 @@ async function performAsyncCompletionWithResult(
     snippets: settingsStore.editorSettings.snippets,
     dialect: props.dialect,
     databaseType: props.databaseType,
-  });
-
-  return buildCompletionResult(
-    items,
-    position - completionContext.prefix.length,
-    getSqlCompletionResultValidFor(fullDoc, position),
+  };
+  return buildSqlCompletionResult(completionContext, position, (context) =>
+    buildSqlCompletionItemsFromContext(
+      qualifierIsSchema
+        ? {
+            ...context,
+            qualifier: undefined,
+            suggestTables: true,
+            suggestColumns: false,
+            exclusiveColumnSuggestions: false,
+          }
+        : context,
+      input,
+    ),
   );
 }
 
@@ -1753,10 +1767,10 @@ async function resolveCtrlClickTarget(doc: string, pos: number, identifier: stri
     // 2. Parse SQL at click position to get referenced tables, enriched with
     // schema from cachedTables.
     const references = await ensureSqlStatementReferences(
-      extractSqlStatementAt(doc, pos),
+      extractSqlStatementAt(doc, pos, props.dialect),
       props.dialect ?? props.formatDialect ?? "generic",
     );
-    const context = getSqlCompletionContext(doc, pos, references);
+    const context = getSqlCompletionContext(doc, pos, references, { dialect: props.dialect });
     const referencedTables = context.referencedTables.map((rt) => {
       if (rt.schema) return rt;
       const cached = cachedTables.find((ct) => ct.name.toLowerCase() === rt.name.toLowerCase());
@@ -2235,6 +2249,16 @@ watch(
   () => props.executionError,
   () => {
     reconfigureDiagnostics();
+  },
+);
+
+// The store's completion caches were dropped (successful DDL, reconnect, …):
+// drop this editor's own table/column/foreign-key copies for the same scope so
+// `ALTER TABLE … ADD COLUMN` / `DROP TABLE` show up on the next completion.
+watch(
+  () => connectionStore.completionCacheInvalidation,
+  (event) => {
+    if (completionCacheInvalidationAffects(event, props.connectionId, props.database)) refreshCompletionCache();
   },
 );
 

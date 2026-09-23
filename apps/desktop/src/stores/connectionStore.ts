@@ -86,6 +86,7 @@ import { sortSidebarTreeChildrenForParent } from "@/lib/sidebarNodeOrdering";
 import { prunePinnedTreeNodeIdsForConnection } from "@/lib/pinnedTreeNodeIds";
 import { useSavedSqlStore } from "@/stores/savedSqlStore";
 import { supportsDatabaseUserAdmin } from "@/lib/databaseUserAdmin";
+import type { CompletionCacheInvalidation } from "@/lib/completionCacheInvalidation";
 import { useSettingsStore } from "@/stores/settingsStore";
 
 const PINNED_TREE_NODES_STORAGE_KEY = "dbx-pinned-tree-nodes";
@@ -213,6 +214,9 @@ export const useConnectionStore = defineStore("connection", () => {
   // one invoke per (connection, database) instead of one per schema (B1).
   const completionMetadataCache = ref<Record<string, SchemaCompletionGroup[]>>({});
   const elasticsearchCompletionIndicesCache = ref<Record<string, string[]>>({});
+  // Last completion-cache invalidation, watched by QueryEditor to drop its own
+  // per-editor caches (see completionCacheInvalidation.ts).
+  const completionCacheInvalidation = ref<CompletionCacheInvalidation | null>(null);
   const schemaListCache = ref<Record<string, string[]>>({});
   const completionTableIndex = new Map<string, { touched: number; tables: IndexedCompletionTable[] }>();
   const completionObjectIndex = new Map<string, { touched: number; objects: IndexedCompletionObject[] }>();
@@ -225,6 +229,12 @@ export const useConnectionStore = defineStore("connection", () => {
     { filter: string; candidates: IndexedCompletionTable[]; truncated: boolean }
   >();
   const completionInFlight = new Map<string, Promise<unknown>>();
+  // Server-filtered table listings for a TRUNCATED superset (the only path
+  // where a typed filter still round-trips), keyed by scope + limit + filter.
+  // A small LRU so backspace/retype over a very large schema reuses answers
+  // instead of paying one IPC per keystroke; invalidated with the rest.
+  const completionFilteredTablesCache = new Map<string, SqlCompletionTable[]>();
+  const COMPLETION_FILTERED_TABLES_MAX = 64;
   const createTableSource = ref<{ connectionId: string; database: string; schema?: string } | null>(null);
   const transferSource = ref<{ connectionId: string; database: string } | null>(null);
   const schemaDiffSource = ref<{ connectionId: string; database: string; schema?: string } | null>(null);
@@ -910,6 +920,11 @@ export const useConnectionStore = defineStore("connection", () => {
   }
 
   function invalidateCompletionCache(connectionId: string, database?: string) {
+    completionCacheInvalidation.value = {
+      seq: (completionCacheInvalidation.value?.seq ?? 0) + 1,
+      connectionId,
+      database,
+    };
     const cachePrefix = database == null ? `${connectionId}:` : `${connectionId}:${database}:`;
     const exactCacheKey = database == null ? null : `${connectionId}:${database}`;
     for (const key of Object.keys(completionTablesSupersetCache.value)) {
@@ -941,6 +956,9 @@ export const useConnectionStore = defineStore("connection", () => {
     }
     for (const key of completionInFlight.keys()) {
       if (key.startsWith(cachePrefix)) completionInFlight.delete(key);
+    }
+    for (const key of completionFilteredTablesCache.keys()) {
+      if (key.startsWith(cachePrefix)) completionFilteredTablesCache.delete(key);
     }
   }
 
@@ -2652,11 +2670,34 @@ export const useConnectionStore = defineStore("connection", () => {
       );
     }
 
-    return withCompletionInFlight(
-      `${connectionId}:${database}:${schema ?? ""}:${limit ?? ""}:${normalizedFilter}:filtered`,
-      () =>
-        listFilteredCompletionTablesFromServer(connectionId, database, schema, normalizedFilter, relaxedFilter, limit),
-    );
+    const filteredKey = `${connectionId}:${database}:${schema ?? ""}:${limit ?? ""}:${normalizedFilter}:filtered`;
+    const cachedFiltered = completionFilteredTablesCache.get(filteredKey);
+    if (cachedFiltered) {
+      // LRU touch: re-insert as the newest entry.
+      completionFilteredTablesCache.delete(filteredKey);
+      completionFilteredTablesCache.set(filteredKey, cachedFiltered);
+      return cachedFiltered;
+    }
+    return withCompletionInFlight(filteredKey, async () => {
+      const generation = completionCacheInvalidation.value?.seq;
+      const tables = await listFilteredCompletionTablesFromServer(
+        connectionId,
+        database,
+        schema,
+        normalizedFilter,
+        relaxedFilter,
+        limit,
+      );
+      // An invalidation while the listing was in flight makes it stale.
+      if (completionCacheInvalidation.value?.seq !== generation) return tables;
+      completionFilteredTablesCache.set(filteredKey, tables);
+      while (completionFilteredTablesCache.size > COMPLETION_FILTERED_TABLES_MAX) {
+        const oldest = completionFilteredTablesCache.keys().next().value;
+        if (oldest === undefined) break;
+        completionFilteredTablesCache.delete(oldest);
+      }
+      return tables;
+    });
   }
 
   function relaxedCompletionTableFilter(filter: string): string | undefined {
@@ -3303,6 +3344,7 @@ export const useConnectionStore = defineStore("connection", () => {
     refreshCompletionColumns,
     refreshCompletionSchemas,
     invalidateCompletionCache,
+    completionCacheInvalidation,
     listElasticsearchCompletionIndices,
     exportConnectionsToFile,
     readImportFile,

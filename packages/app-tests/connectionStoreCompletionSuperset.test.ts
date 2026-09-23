@@ -314,6 +314,18 @@ test("a capped superset falls back to the server filter and still matches it", a
     const beta = await store.listCompletionTables(MY_ID, "big", "beta", 1);
     assert.deepEqual(beta, serverFiltered(MY_TABLES, "big", "beta", 1));
     assert.equal(counter.list_tables, 5);
+
+    // T09 review: repeating a filter (backspace + retype) on the capped path is
+    // answered from the small filtered LRU, not another round trip.
+    assert.deepEqual(await store.listCompletionTables(MY_ID, "big", "delta", 1), delta);
+    assert.deepEqual(await store.listCompletionTables(MY_ID, "big", "beta", 1), beta);
+    assert.deepEqual(await store.listCompletionTables(MY_ID, "big", "alphx", 1), alphx);
+    assert.equal(counter.list_tables, 5, "repeated filters on a capped superset reuse the filtered cache");
+
+    // ...and it is dropped with the rest of the completion caches.
+    store.invalidateCompletionCache(MY_ID, "big");
+    await store.listCompletionTables(MY_ID, "big", "delta", 1);
+    assert.equal(counter.list_tables, 7, "invalidation refetches the superset and the filtered listing");
   } finally {
     restoreTauri();
     storage.restore();

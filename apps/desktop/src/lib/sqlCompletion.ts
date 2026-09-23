@@ -1086,6 +1086,59 @@ const ORACLE_FUNCTION_SIGNATURES = new Map<string, string[]>([
 // item detail. Every key must exist in the matching signature catalog (locked by
 // sqlCompletion.dialectFunctions.test.ts). Both catalogs are exported so the test
 // suite can lock their structure and content.
+const ORACLE_FUNCTION_DESCRIPTIONS = new Map<string, string>([
+  ["LISTAGG", "Concatenates group values, ordered WITHIN GROUP"],
+  ["MEDIAN", "Median of the values"],
+  ["STDDEV", "Sample standard deviation"],
+  ["STDDEV_POP", "Population standard deviation"],
+  ["STDDEV_SAMP", "Sample standard deviation"],
+  ["VARIANCE", "Sample variance"],
+  ["VAR_POP", "Population variance"],
+  ["VAR_SAMP", "Sample variance"],
+  ["GROUPING", "Whether a ROLLUP/CUBE row is aggregated"],
+  ["INITCAP", "Capitalizes the first letter of each word"],
+  ["TRANSLATE", "Maps characters from search to replacement"],
+  ["REGEXP_LIKE", "TRUE when the expression matches the pattern"],
+  ["REGEXP_INSTR", "Position of the first pattern match"],
+  ["REGEXP_COUNT", "Number of pattern matches"],
+  ["CHR", "Character for the given code"],
+  ["ASCII", "ASCII code of the first character"],
+  ["SOUNDEX", "Phonetic representation of the string"],
+  ["ASCIISTR", "ASCII approximation with \\xxxx escapes"],
+  ["SYSDATE", "Server date and time"],
+  ["SYSTIMESTAMP", "Server timestamp with time zone"],
+  ["CURRENT_DATE", "Session date in the session time zone"],
+  ["CURRENT_TIMESTAMP", "Session timestamp with time zone"],
+  ["LOCALTIMESTAMP", "Session timestamp without time zone"],
+  ["SESSIONTIMEZONE", "Session time zone offset"],
+  ["DBTIMEZONE", "Database time zone offset"],
+  ["ADD_MONTHS", "Adds months to a date"],
+  ["MONTHS_BETWEEN", "Months between two dates"],
+  ["NEXT_DAY", "First given weekday after the date"],
+  ["FROM_TZ", "Attaches a time zone to a timestamp"],
+  ["TO_CHAR", "Formats a value as a string"],
+  ["TO_DATE", "Parses a string to a date"],
+  ["TO_NUMBER", "Parses a string to a number"],
+  ["TO_TIMESTAMP", "Parses a string to a timestamp"],
+  ["TO_DSINTERVAL", "Parses an INTERVAL DAY TO SECOND literal"],
+  ["TO_YMINTERVAL", "Parses an INTERVAL YEAR TO MONTH literal"],
+  ["NUMTODSINTERVAL", "Converts a number to a DAY TO SECOND interval"],
+  ["NUMTOYMINTERVAL", "Converts a number to a YEAR TO MONTH interval"],
+  ["TRUNC", "Truncates a date or number"],
+  ["NVL", "Returns fallback when the expression is NULL"],
+  ["NVL2", "not_null_value when the expression is not NULL, else null_value"],
+  ["DECODE", "Chained search/result comparison with a default"],
+  ["LNNVL", "TRUE when the condition is FALSE or unknown"],
+  ["RATIO_TO_REPORT", "Value's ratio to the group total (analytic)"],
+  ["SYS_CONNECT_BY_PATH", "Path from the hierarchy root to the row"],
+  ["JSON_EXISTS", "Whether the JSON contains the path"],
+  ["SYS_GUID", "Globally unique identifier (RAW)"],
+  ["SYS_CONTEXT", "Value of a namespace attribute"],
+  ["BITAND", "Bitwise AND of two numbers"],
+  ["EMPTY_BLOB", "Empty BLOB locator"],
+  ["EMPTY_CLOB", "Empty CLOB locator"],
+]);
+
 export const DATABASE_FUNCTION_DESCRIPTIONS: Partial<Record<DatabaseType, Map<string, string>>> = {
   clickhouse: new Map<string, string>([
     ["countIf", "Counts rows matching the condition"],
@@ -1241,58 +1294,11 @@ export const DATABASE_FUNCTION_DESCRIPTIONS: Partial<Record<DatabaseType, Map<st
     ["json_valid", "Whether the value is valid JSON"],
     ["ifnull", "Returns fallback when the expression is NULL"],
   ]),
-  oracle: new Map<string, string>([
-    ["LISTAGG", "Concatenates group values, ordered WITHIN GROUP"],
-    ["MEDIAN", "Median of the values"],
-    ["STDDEV", "Sample standard deviation"],
-    ["STDDEV_POP", "Population standard deviation"],
-    ["STDDEV_SAMP", "Sample standard deviation"],
-    ["VARIANCE", "Sample variance"],
-    ["VAR_POP", "Population variance"],
-    ["VAR_SAMP", "Sample variance"],
-    ["GROUPING", "Whether a ROLLUP/CUBE row is aggregated"],
-    ["INITCAP", "Capitalizes the first letter of each word"],
-    ["TRANSLATE", "Maps characters from search to replacement"],
-    ["REGEXP_LIKE", "TRUE when the expression matches the pattern"],
-    ["REGEXP_INSTR", "Position of the first pattern match"],
-    ["REGEXP_COUNT", "Number of pattern matches"],
-    ["CHR", "Character for the given code"],
-    ["ASCII", "ASCII code of the first character"],
-    ["SOUNDEX", "Phonetic representation of the string"],
-    ["ASCIISTR", "ASCII approximation with \\xxxx escapes"],
-    ["SYSDATE", "Server date and time"],
-    ["SYSTIMESTAMP", "Server timestamp with time zone"],
-    ["CURRENT_DATE", "Session date in the session time zone"],
-    ["CURRENT_TIMESTAMP", "Session timestamp with time zone"],
-    ["LOCALTIMESTAMP", "Session timestamp without time zone"],
-    ["SESSIONTIMEZONE", "Session time zone offset"],
-    ["DBTIMEZONE", "Database time zone offset"],
-    ["ADD_MONTHS", "Adds months to a date"],
-    ["MONTHS_BETWEEN", "Months between two dates"],
-    ["NEXT_DAY", "First given weekday after the date"],
-    ["FROM_TZ", "Attaches a time zone to a timestamp"],
-    ["TO_CHAR", "Formats a value as a string"],
-    ["TO_DATE", "Parses a string to a date"],
-    ["TO_NUMBER", "Parses a string to a number"],
-    ["TO_TIMESTAMP", "Parses a string to a timestamp"],
-    ["TO_DSINTERVAL", "Parses an INTERVAL DAY TO SECOND literal"],
-    ["TO_YMINTERVAL", "Parses an INTERVAL YEAR TO MONTH literal"],
-    ["NUMTODSINTERVAL", "Converts a number to a DAY TO SECOND interval"],
-    ["NUMTOYMINTERVAL", "Converts a number to a YEAR TO MONTH interval"],
-    ["TRUNC", "Truncates a date or number"],
-    ["NVL", "Returns fallback when the expression is NULL"],
-    ["NVL2", "not_null_value when the expression is not NULL, else null_value"],
-    ["DECODE", "Chained search/result comparison with a default"],
-    ["LNNVL", "TRUE when the condition is FALSE or unknown"],
-    ["RATIO_TO_REPORT", "Value's ratio to the group total (analytic)"],
-    ["SYS_CONNECT_BY_PATH", "Path from the hierarchy root to the row"],
-    ["JSON_EXISTS", "Whether the JSON contains the path"],
-    ["SYS_GUID", "Globally unique identifier (RAW)"],
-    ["SYS_CONTEXT", "Value of a namespace attribute"],
-    ["BITAND", "Bitwise AND of two numbers"],
-    ["EMPTY_BLOB", "Empty BLOB locator"],
-    ["EMPTY_CLOB", "Empty CLOB locator"],
-  ]),
+  oracle: ORACLE_FUNCTION_DESCRIPTIONS,
+  // Oracle-compatible engines share the Oracle catalog (same dialect family).
+  dameng: ORACLE_FUNCTION_DESCRIPTIONS,
+  yashandb: ORACLE_FUNCTION_DESCRIPTIONS,
+  "oceanbase-oracle": ORACLE_FUNCTION_DESCRIPTIONS,
 };
 
 // Exported so the test suite can lock catalog structure and content.
@@ -1305,7 +1311,35 @@ export const DATABASE_FUNCTION_SIGNATURES: Partial<Record<DatabaseType, Map<stri
   clickhouse: CLICKHOUSE_FUNCTION_SIGNATURES,
   duckdb: DUCKDB_FUNCTION_SIGNATURES,
   oracle: ORACLE_FUNCTION_SIGNATURES,
+  // Oracle-compatible engines (T07 maps them to the oracle dialect) share the
+  // Oracle catalog; the catalog is keyed by DatabaseType, not by dialect.
+  dameng: ORACLE_FUNCTION_SIGNATURES,
+  yashandb: ORACLE_FUNCTION_SIGNATURES,
+  "oceanbase-oracle": ORACLE_FUNCTION_SIGNATURES,
 };
+
+// Oracle pseudo-functions that take no argument list: `SYSDATE()` is ORA-00923,
+// so completion inserts the bare name and the signature card skips them.
+const ORACLE_NILADIC_FUNCTIONS = new Set([
+  "SYSDATE",
+  "SYSTIMESTAMP",
+  "CURRENT_DATE",
+  "CURRENT_TIMESTAMP",
+  "LOCALTIMESTAMP",
+  "SESSIONTIMEZONE",
+  "DBTIMEZONE",
+]);
+
+export const DATABASE_NILADIC_FUNCTIONS: Partial<Record<DatabaseType, Set<string>>> = {
+  oracle: ORACLE_NILADIC_FUNCTIONS,
+  dameng: ORACLE_NILADIC_FUNCTIONS,
+  yashandb: ORACLE_NILADIC_FUNCTIONS,
+  "oceanbase-oracle": ORACLE_NILADIC_FUNCTIONS,
+};
+
+function isNiladicFunction(databaseType: DatabaseType | undefined, upperName: string): boolean {
+  return !!databaseType && !!DATABASE_NILADIC_FUNCTIONS[databaseType]?.has(upperName);
+}
 
 const COMMON_SQL_FUNCTION_NAMES = new Set([
   "COUNT",
@@ -1465,7 +1499,7 @@ export function buildSqlCompletionItems(
     references?: SqlStatementReferences | SqlReferencesResolver;
   },
 ): SqlCompletionItem[] {
-  const context = getSqlCompletionContext(sql, cursor, input.references);
+  const context = getSqlCompletionContext(sql, cursor, input.references, { dialect: input.dialect });
   return buildSqlCompletionItemsFromContext(context, input);
 }
 
@@ -1573,13 +1607,13 @@ export function buildSqlCompletionItemsFromContext(
   return dedupeAndSort(items);
 }
 
-export function shouldAutoOpenSqlCompletion(sql: string, cursor: number): boolean {
+export function shouldAutoOpenSqlCompletion(sql: string, cursor: number, dialect?: SqlDialect): boolean {
   const previousChar = sql[cursor - 1];
   if (!previousChar) return false;
   if (/\bon\s+$/i.test(sql.slice(0, cursor))) return true;
   if (/\bcall\s+(?:[A-Za-z_][\w$]*\.)?$/i.test(sql.slice(0, cursor))) return true;
   if (/[,;()[\]]/.test(previousChar)) return false;
-  const context = getSqlCompletionContext(sql, cursor);
+  const context = getSqlCompletionContext(sql, cursor, undefined, { dialect });
   if (
     context.exclusiveTableSuggestions ||
     context.exclusiveColumnSuggestions ||
@@ -1719,51 +1753,7 @@ function currentLineBlockEnd(sql: string, cursor: number, start: number): number
   return null;
 }
 
-// Prefix-continuation regex for CodeMirror's CompletionResult.validFor. While the
-// text between a result's `from` and the cursor keeps matching it, the popup
-// reuses the already-built options instead of re-running the completion source —
-// typing further characters of the same identifier no longer re-parses the
-// statement and rebuilds the item list on every keystroke. `from` is
-// `position - prefix.length` (QueryEditor's buildCompletionResult), so the tested
-// text is exactly the bare trailing identifier token.
-//
-// Results computed for a prefix shorter than 2 characters never reuse:
-// `suggestRoutines` in getSqlCompletionContext turns on at exactly 2 characters,
-// so growing the token there legitimately ADDS function/routine items and reusing
-// the shorter result would hide them. From 2 characters on, the item set is
-// monotone under identifier growth — every candidate filter in
-// buildSqlCompletionItemsFromContext goes through matchesPrefix(), a
-// case-insensitive subsequence/substring test where matching a longer prefix
-// implies matching every shorter one — so a reused list stays a superset of the
-// correct one and no offered item can vanish by typing more letters. (The extra
-// getSqlCompletionContext scan this costs per result build is paid once per
-// popup, while reuse skips the whole source for the keystrokes in between.)
-//
-// Why exactly `[A-Za-z0-9_$]`, case-insensitive:
-// - `.` is excluded on purpose. It is the qualifier separator, and typing it
-//   (`users.`) is precisely where the result must switch from tables/keywords to
-//   qualified columns — breaking the match forces that recompute.
-// - Both letter cases are in the class (the `i` flag records the intent), so
-//   case flips mid-token reuse too: matchesPrefix lowercases both sides, and
-//   applyKeywordCasing derives an inserted keyword's case from the prefix's
-//   FIRST letter, which extending a token cannot change.
-// - `$` is a legal identifier character in this pipeline (`[\w$@]`). `@` is
-//   excluded: it only starts SQL Server variable tokens (`@var`), whose `from`
-//   lands on the `@`, so those results simply recompute every keystroke.
-// - Quoted identifiers eventually contain a quote character, which also breaks
-//   the match, so they recompute instead of reusing.
-//
-// Known trade-off (shared with the Elasticsearch completion's validFor): results
-// are built with `filter: false`, so a reused list is not re-narrowed against the
-// grown prefix — it stays the superset computed when the popup opened until a
-// non-identifier character (or backspacing over the token start) recomputes.
-// Freshly loaded schema metadata is not stuck behind reuse either: the background
-// refresh in QueryEditor re-issues an explicit startCompletion, which builds a
-// fresh result instead of reusing.
-export function getSqlCompletionResultValidFor(sql: string, cursor: number): RegExp | undefined {
-  if (getSqlCompletionContext(sql, cursor).prefix.length < 2) return undefined;
-  return /^[A-Za-z0-9_$]*$/i;
-}
+// Popup reuse while typing (CompletionResult.update) lives in sqlCompletionReuse.ts.
 
 // Dialect catalogs keep the engine's canonical spelling (e.g. ClickHouse's
 // `toYYYYMM`), so resolve by the uppercased name and surface that spelling back.
@@ -1792,6 +1782,7 @@ export function getSqlFunctionSignatureHelp(
   const beforeParen = beforeCursor.slice(0, openParenIndex).trimEnd();
   const upperName = /([A-Za-z_][\w$]*)$/.exec(beforeParen)?.[1]?.toUpperCase();
   if (!upperName) return null;
+  if (isNiladicFunction(databaseType, upperName)) return null;
 
   const dialectFunction = findDialectFunction(databaseType, upperName);
   const parameters = dialectFunction?.parameters ?? SQL_FUNCTION_SIGNATURES.get(upperName);
@@ -1862,8 +1853,8 @@ function extractStatementAt(sql: string, cursor: number): string {
  * Callers outside `getSqlCompletionContext` (hover, ctrl+click, the explicit
  * completion await) use this to look references up without re-deriving them.
  */
-export function extractSqlStatementAt(sql: string, cursor: number): string {
-  const stripped = stripSqlComments(sql, cursor);
+export function extractSqlStatementAt(sql: string, cursor: number, dialect?: SqlDialect): string {
+  const stripped = stripSqlComments(sql, cursor, dialect);
   if (stripped.cursorInComment) return "";
   return extractStatementAt(stripped.text, cursor);
 }
@@ -1904,17 +1895,46 @@ interface StrippedSql {
 const DOLLAR_QUOTED_TAG = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/;
 const DOLLAR_TAG_LOOKAHEAD = 64;
 
+/** Dialect-specific lexical rules for comment stripping. */
+interface SqlLexicalRules {
+  /** `\` escapes the next character inside '…' / "…" (MySQL family, ClickHouse). */
+  backslashEscapes: boolean;
+  /** `#` starts a line comment (MySQL family). */
+  hashComments: boolean;
+  /** Block comments nest (PostgreSQL, SQL Server). */
+  nestedBlockComments: boolean;
+  /** `[…]` is a quoted identifier (SQL Server). */
+  bracketIdentifiers: boolean;
+  /** `E'…'` strings use backslash escapes (PostgreSQL). */
+  escapeStringPrefix: boolean;
+}
+
+function sqlLexicalRules(dialect?: SqlDialect): SqlLexicalRules {
+  return {
+    backslashEscapes: dialect === "mysql" || dialect === "clickhouse",
+    hashComments: dialect === "mysql",
+    nestedBlockComments: dialect === "postgres" || dialect === "sqlserver",
+    bracketIdentifiers: dialect === "sqlserver",
+    escapeStringPrefix: dialect === "postgres",
+  };
+}
+
 /**
- * Blank out SQL comment bodies (`-- line` and `/* block *\/`) so commented-out
- * SQL never leaks into context detection (referenced tables, statement kind,
- * ...). Each body becomes same-length whitespace (newlines are kept) so every
- * cursor offset in the result stays valid; the comment delimiters (`--`, `/*`
- * and the block closer) stay visible so a fully commented line does not read
- * as a blank line and terminate the current statement block. Quoted spans are
- * skipped: a `--` or `/*` inside `'…'`, `"…"`, backticks or a dollar-quoted
- * string is data, not a comment.
+ * Blank out SQL comment bodies (`-- line`, `/* block *\/`, and MySQL `# line`)
+ * so commented-out SQL never leaks into context detection (referenced tables,
+ * statement kind, ...). Each body becomes same-length whitespace (newlines are
+ * kept) so every cursor offset in the result stays valid; the comment
+ * delimiters (`--`, `#`, `/*` and the block closer) stay visible so a fully
+ * commented line does not read as a blank line and terminate the current
+ * statement block. For the same reason every inner line of a multi-line block
+ * comment keeps a `*` placeholder in its first column. Quoted spans are
+ * skipped: a `--` or `/*` inside `'…'`, `"…"`, backticks, a dollar-quoted
+ * string (or `[…]` on SQL Server) is data, not a comment. The dialect decides
+ * the lexical details: backslash escapes (MySQL/ClickHouse, PG `E'…'`), `#`
+ * comments (MySQL) and nested block comments (PostgreSQL/SQL Server).
  */
-function stripSqlComments(sql: string, cursor: number): StrippedSql {
+function stripSqlComments(sql: string, cursor: number, dialect?: SqlDialect): StrippedSql {
+  const rules = sqlLexicalRules(dialect);
   const chars = sql.split("");
   let cursorInComment = false;
   const coversCursor = (from: number, to: number) => {
@@ -1926,29 +1946,47 @@ function stripSqlComments(sql: string, cursor: number): StrippedSql {
       if (ch !== "\n" && ch !== "\r") chars[i] = " ";
     }
   };
+  const blankBlock = (from: number, to: number) => {
+    blank(from, to);
+    for (let i = from; i < to; i++) {
+      if (sql[i] !== "\n") continue;
+      const lineStart = i + 1;
+      if (lineStart < sql.length && sql[lineStart] !== "\n" && sql[lineStart] !== "\r") chars[lineStart] = "*";
+    }
+  };
+  const skipLineComment = (bodyStart: number) => {
+    // A line comment runs to the newline; the newline itself stays visible.
+    const end = sql.indexOf("\n", bodyStart);
+    const commentEnd = end < 0 ? sql.length : end;
+    coversCursor(bodyStart, commentEnd);
+    blank(bodyStart, commentEnd);
+    return commentEnd;
+  };
   let i = 0;
   while (i < sql.length) {
     const ch = sql[i];
     if (ch === "'" || ch === '"' || ch === "`") {
-      i = skipQuotedSpan(sql, i, ch);
+      const escapeString =
+        ch === "'" && rules.escapeStringPrefix && /[Ee]/.test(sql[i - 1] ?? "") && !isIdentifierPart(sql[i - 2]);
+      const backslashes = ch !== "`" && (rules.backslashEscapes || escapeString);
+      i = skipQuotedSpan(sql, i, ch, backslashes);
+    } else if (ch === "[" && rules.bracketIdentifiers) {
+      i = skipQuotedSpan(sql, i, "]", false);
     } else if (ch === "$") {
       i = skipDollarQuotedSpan(sql, i);
     } else if (ch === "-" && sql[i + 1] === "-") {
-      // A line comment runs to the newline; the newline itself stays visible.
-      const end = sql.indexOf("\n", i + 2);
-      const commentEnd = end < 0 ? sql.length : end;
-      coversCursor(i + 2, commentEnd);
-      blank(i + 2, commentEnd);
-      i = commentEnd;
+      i = skipLineComment(i + 2);
+    } else if (ch === "#" && rules.hashComments) {
+      i = skipLineComment(i + 1);
     } else if (ch === "/" && sql[i + 1] === "*") {
-      const close = sql.indexOf("*/", i + 2);
+      const close = findBlockCommentClose(sql, i + 2, rules.nestedBlockComments);
       if (close < 0) {
         coversCursor(i + 2, sql.length);
-        blank(i + 2, sql.length);
+        blankBlock(i + 2, sql.length);
         i = sql.length;
       } else {
         coversCursor(i + 2, close);
-        blank(i + 2, close);
+        blankBlock(i + 2, close);
         i = close + 2;
       }
     } else {
@@ -1958,9 +1996,34 @@ function stripSqlComments(sql: string, cursor: number): StrippedSql {
   return { text: chars.join(""), cursorInComment };
 }
 
-/** Position right after the quoted span opening at `start`; a doubled quote is an escape. */
-function skipQuotedSpan(sql: string, start: number, quote: string): number {
+/** Index of the `*\/` closing the block comment whose body starts at `from`, or -1. */
+function findBlockCommentClose(sql: string, from: number, nested: boolean): number {
+  if (!nested) return sql.indexOf("*/", from);
+  let depth = 1;
+  for (let i = from; i < sql.length - 1; i++) {
+    if (sql[i] === "/" && sql[i + 1] === "*") {
+      depth += 1;
+      i += 1;
+    } else if (sql[i] === "*" && sql[i + 1] === "/") {
+      depth -= 1;
+      if (depth === 0) return i;
+      i += 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Position right after the quoted span opening at `start` and closed by `quote`;
+ * a doubled closing quote is an escape, and so is a backslash when the dialect
+ * (or a PG `E'…'` string) uses backslash escapes.
+ */
+function skipQuotedSpan(sql: string, start: number, quote: string, backslashEscapes: boolean): number {
   for (let i = start + 1; i < sql.length; i++) {
+    if (backslashEscapes && sql[i] === "\\") {
+      i += 1;
+      continue;
+    }
     if (sql[i] !== quote) continue;
     if (sql[i + 1] === quote) {
       i += 1;
@@ -1983,12 +2046,14 @@ export function getSqlCompletionContext(
   sql: string,
   cursor: number,
   references?: SqlStatementReferences | SqlReferencesResolver | null,
+  options?: { dialect?: SqlDialect },
 ): SqlCompletionContext {
   // Commented-out SQL must not poison context detection (referenced tables,
-  // statement kind, ...): blank `--` / `/* */` comments once, up front. Bodies
-  // become same-length whitespace so every offset stays valid, and a cursor
-  // inside a comment gets the same neutral context as an empty document.
-  const stripped = stripSqlComments(sql, cursor);
+  // statement kind, ...): blank `--` / `/* */` (and dialect-specific) comments
+  // once, up front. Bodies become same-length whitespace so every offset stays
+  // valid, and a cursor inside a comment gets the same neutral context as an
+  // empty document. The dialect decides string escapes and comment syntax.
+  const stripped = stripSqlComments(sql, cursor, options?.dialect);
   if (stripped.cursorInComment) return getSqlCompletionContext("", 0);
 
   // Extract the full statement at cursor position for referenced tables
@@ -2136,6 +2201,15 @@ function parseTrailingIdentifierPart(input: string, endExclusive: number): { sta
     return { start, raw: input.slice(start, endExclusive) };
   }
 
+  // SQL Server bracket identifier (`[Order Details]`, as completion inserts
+  // them for sqlserver). An escaped `]]` never contains `[`, so the nearest
+  // opening bracket is the start.
+  if (tailChar === "]") {
+    const start = input.lastIndexOf("[", end - 1);
+    if (start < 0) return null;
+    return { start, raw: input.slice(start, endExclusive) };
+  }
+
   let start = end;
   while (start >= 0 && /[A-Za-z0-9_$@]/.test(input[start] ?? "")) start -= 1;
   start += 1;
@@ -2252,12 +2326,18 @@ function detectComparisonLeftColumn(beforeCursor: string): string | undefined {
   return match?.[1];
 }
 
+// `INSERT INTO <table> (` with an optional schema; each part may be bare,
+// backtick-quoted or bracket-quoted (SQL Server) — double-quoted parts were
+// already collapsed by the caller's string cleanup.
+const INSERT_COLUMN_LIST_TARGET =
+  /\binsert\s+into\s+((?:\[[^\]]+\]|`[^`]+`|[A-Za-z_][\w$]*)(?:\.(?:\[[^\]]+\]|`[^`]+`|[A-Za-z_][\w$]*))?)\s*\([^)]*$/i;
+
 function detectInsertColumnListContext(beforeCursor: string): { table: string; schema?: string } | null {
   const cleaned = beforeCursor
     .replace(/'[^']*'/g, "''")
     .replace(/"[^"]*"/g, '""')
     .toLowerCase();
-  const match = /\binsert\s+into\s+([A-Za-z_][\w$]*(?:\.[A-Za-z_][\w$]*)?)\s*\([^)]*$/i.exec(cleaned);
+  const match = INSERT_COLUMN_LIST_TARGET.exec(cleaned);
   if (!match) return null;
   const fullTable = match[1];
   if (!fullTable) return null;
@@ -2369,20 +2449,37 @@ function splitQualifiedName(input: string): [string | undefined, string | undefi
   let current = "";
   let inDoubleQuote = false;
   let inBacktick = false;
+  let inBracket = false;
 
   for (let i = 0; i < input.length; i++) {
     const ch = input[i];
-    if (ch === '"' && !inBacktick) {
+    if (ch === '"' && !inBacktick && !inBracket) {
       inDoubleQuote = !inDoubleQuote;
       current += ch;
       continue;
     }
-    if (ch === "`" && !inDoubleQuote) {
+    if (ch === "`" && !inDoubleQuote && !inBracket) {
       inBacktick = !inBacktick;
       current += ch;
       continue;
     }
-    if (ch === "." && !inDoubleQuote && !inBacktick) {
+    if (ch === "[" && !inDoubleQuote && !inBacktick && !inBracket) {
+      inBracket = true;
+      current += ch;
+      continue;
+    }
+    if (ch === "]" && inBracket) {
+      // `]]` is an escaped bracket inside the identifier.
+      if (input[i + 1] === "]") {
+        current += "]]";
+        i += 1;
+        continue;
+      }
+      inBracket = false;
+      current += ch;
+      continue;
+    }
+    if (ch === "." && !inDoubleQuote && !inBacktick && !inBracket) {
       parts.push(current.trim());
       current = "";
     } else {
@@ -2397,9 +2494,10 @@ function splitQualifiedName(input: string): [string | undefined, string | undefi
 }
 
 function unquoteIdentifier(value: string): string {
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("`") && value.endsWith("`"))) {
-    return value.slice(1, -1);
-  }
+  if (value.length < 2) return value;
+  if (value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1).replaceAll('""', '"');
+  if (value.startsWith("`") && value.endsWith("`")) return value.slice(1, -1).replaceAll("``", "`");
+  if (value.startsWith("[") && value.endsWith("]")) return value.slice(1, -1).replaceAll("]]", "]");
   return value;
 }
 
@@ -2418,11 +2516,13 @@ export function quoteSqlIdentifier(identifier: string, dialect?: SqlDialect): st
       if (!requiresSqlServerIdentifierQuote(identifier)) return identifier;
       return `[${identifier.replaceAll("]", "]]")}]`;
     default:
-      // Generic-family dialects (oracle, duckdb, clickhouse, sqlite, generic)
-      // deliberately stay unquoted: there is no per-dialect reserved-word set
-      // for them yet, and a wrong-flavored quote (e.g. MySQL backticks on
-      // Oracle) is worse than a bare identifier.
-      return identifier;
+      // Generic-family dialects (oracle, duckdb, clickhouse, sqlite, generic):
+      // there is no per-dialect reserved-word set for them yet, so plain
+      // identifiers stay bare. Anything that cannot be written bare (spaces,
+      // hyphens, a leading digit, …) gets ANSI double quotes, which all five
+      // accept — a bare `my table` is invalid SQL everywhere.
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) return identifier;
+      return `"${identifier.replaceAll('"', '""')}"`;
   }
 }
 
@@ -3754,21 +3854,26 @@ const SNIPPET_KEYWORD_CANONICAL = new Set<string>([
   ...SQLSERVER_SQL_KEYWORDS,
 ]);
 
-// A snippet body token is either a placeholder (`{name}` and pre-existing `${name}` /
-// `#{name}` CodeMirror fields) or a bare word. Placeholders must win the alternation
-// so the words inside them are never treated as casable keywords.
-const SNIPPET_BODY_TOKEN_PATTERN = /(\$\{[^{}]*\}|#\{[^{}]*\}|\{[^{}]*\})|([A-Za-z_][A-Za-z0-9_$]*)/g;
+// A snippet body token is a placeholder (`{name}` and pre-existing `${name}` /
+// `#{name}` CodeMirror fields), a quoted span (string literal `'…'`, quoted
+// identifier `"…"` / backticks / `[…]`), or a bare word. Placeholders and quoted
+// spans come first in the alternation so the words inside them are never treated
+// as casable keywords: `"Date"` is a different identifier than `"date"` on
+// PostgreSQL, and `'TABLE'` is data.
+const SNIPPET_BODY_TOKEN_PATTERN =
+  /(\$\{[^{}]*\}|#\{[^{}]*\}|\{[^{}]*\}|'(?:[^']|'')*'?|"(?:[^"]|"")*"?|`(?:[^`]|``)*`?|\[[^\]]*\]?)|([A-Za-z_][A-Za-z0-9_$]*)/g;
 
 /**
  * Casing for a snippet body's inserted text: SQL keyword words follow the typed
- * prefix (same rule as `applyKeywordCasing`); placeholders, numbers, punctuation
- * and non-keyword words (e.g. user-authored identifiers) stay exactly as authored.
+ * prefix (same rule as `applyKeywordCasing`); placeholders, quoted identifiers,
+ * string literals, numbers, punctuation and non-keyword words (e.g. user-authored
+ * identifiers) stay exactly as authored.
  */
 export function applySnippetBodyCasing(body: string, prefix: string): string {
   return body.replace(
     SNIPPET_BODY_TOKEN_PATTERN,
-    (match: string, placeholder: string | undefined, word: string | undefined) => {
-      if (placeholder !== undefined) return placeholder;
+    (match: string, verbatim: string | undefined, word: string | undefined) => {
+      if (verbatim !== undefined) return verbatim;
       if (word !== undefined && SNIPPET_KEYWORD_CANONICAL.has(word.toUpperCase())) {
         return applyKeywordCasing(word, prefix);
       }
@@ -3854,7 +3959,7 @@ function buildFunctionSnippetItems(
       label: name,
       type: "function" as const,
       detail: functionDescriptions.get(name) ?? dialectDescriptions?.get(name) ?? "function",
-      apply: `${name}(${paramStr})`,
+      apply: isNiladicFunction(databaseType, name.toUpperCase()) ? name : `${name}(${paramStr})`,
       boost: computeBoost(name, prefix) + 300,
     });
   }

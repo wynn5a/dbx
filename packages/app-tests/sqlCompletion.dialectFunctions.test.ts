@@ -115,13 +115,16 @@ function functionItems(sql: string, databaseType: DatabaseType) {
 test("registers catalogs for ClickHouse, DuckDB and Oracle", () => {
   assert.deepEqual(Object.keys(DATABASE_FUNCTION_SIGNATURES).sort(), [
     "clickhouse",
+    "dameng",
     "duckdb",
     "mysql",
+    "oceanbase-oracle",
     "oracle",
     "postgres",
     "rqlite",
     "sqlite",
     "sqlserver",
+    "yashandb",
   ]);
   for (const { databaseType, signatures } of DIALECT_CATALOGS) {
     assert.ok(signatures && signatures.size > 0, `${databaseType} catalog is registered`);
@@ -356,4 +359,36 @@ test("existing dialect function catalogs are unchanged", () => {
   assert.equal(tryCast?.apply, "TRY_CAST(${expression AS type})");
   const ifnull = functionItems("select ifn", "rqlite").find((item) => item.label === "IFNULL");
   assert.equal(ifnull?.apply, "IFNULL(${expression}, ${fallback})");
+});
+
+test("Oracle niladic pseudo-functions insert without parentheses and get no signature card", () => {
+  // T24 review: `SELECT sysd` used to insert `SYSDATE()` — ORA-00923.
+  for (const name of ["SYSDATE", "SYSTIMESTAMP", "CURRENT_DATE", "CURRENT_TIMESTAMP", "LOCALTIMESTAMP"]) {
+    const sql = `SELECT ${name.slice(0, 5).toLowerCase()}`;
+    const item = functionItems(sql, "oracle").find((candidate) => candidate.label === name);
+    assert.ok(item, `${name} is offered`);
+    assert.equal(item.apply, name, `${name} inserts bare`);
+  }
+  for (const name of ["SESSIONTIMEZONE", "DBTIMEZONE"]) {
+    const item = functionItems(`SELECT ${name.slice(0, 4).toLowerCase()}`, "oracle").find((c) => c.label === name);
+    assert.equal(item?.apply, name);
+  }
+  // Real functions keep their argument list.
+  assert.equal(
+    functionItems("SELECT add_mo", "oracle").find((item) => item.label === "ADD_MONTHS")?.apply,
+    "ADD_MONTHS(${date}, ${months})",
+  );
+  assert.equal(getSqlFunctionSignatureHelp("SELECT SYSDATE(", "SELECT SYSDATE(".length, "oracle"), null);
+  assert.ok(getSqlFunctionSignatureHelp("SELECT ADD_MONTHS(", "SELECT ADD_MONTHS(".length, "oracle"));
+  // Niladic handling is Oracle-only: other engines keep `NOW()`.
+  assert.equal(functionItems("SELECT now", "mysql").find((item) => item.label === "NOW")?.apply, "NOW()");
+});
+
+test("Oracle-family engines get the Oracle function catalog", () => {
+  for (const databaseType of ["dameng", "yashandb", "oceanbase-oracle"] as const) {
+    assert.equal(DATABASE_FUNCTION_SIGNATURES[databaseType], DATABASE_FUNCTION_SIGNATURES.oracle, databaseType);
+    const items = functionItems("SELECT nvl", databaseType);
+    assert.ok(items.some((item) => item.label === "NVL2"), `${databaseType} offers NVL2`);
+    assert.equal(functionItems("SELECT sysd", databaseType).find((item) => item.label === "SYSDATE")?.apply, "SYSDATE");
+  }
 });
