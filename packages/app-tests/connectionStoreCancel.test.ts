@@ -289,6 +289,135 @@ test("a superseded load attempt cannot overwrite the winner's result", async () 
   }
 });
 
+test("cancelling a sidebar expand of an unconnected connection aborts the dial and leaves no state behind", async () => {
+  const restoreStorage = installMemoryStorage();
+  const calls: RecordedCall[] = [];
+  const pendingConnect = deferred<string>();
+  let sentAttemptId = "";
+  const restoreTauri = installTauriInvokeStub(async (cmd, args) => {
+    calls.push({ cmd, args });
+    if (cmd === "connect_db") {
+      sentAttemptId = String(args.attemptId ?? "");
+      return pendingConnect.promise;
+    }
+    if (cmd === "cancel_connection_attempt") return true;
+    if (cmd === "list_databases") return [{ name: "sales" }];
+    return null;
+  });
+
+  try {
+    setActivePinia(createPinia());
+    const store = useConnectionStore();
+    await store.addConnection(conn("conn-1"));
+    const baselineChildren = (findNode(store.treeNodes, "conn-1")?.children ?? []).map((child) => child.id);
+
+    // Expanding the row runs loadDatabases, which must dial first.
+    const loading = store.loadDatabases("conn-1");
+    await vi.waitFor(() => assert.ok(calls.some((call) => call.cmd === "connect_db")));
+    assert.notEqual(sentAttemptId, "", "the expand-triggered dial must carry an attempt id");
+    assert.equal(findNode(store.treeNodes, "conn-1")?.isLoading, true);
+
+    assert.equal(store.cancelTreeNodeLoading("conn-1"), true);
+    assert.equal(findNode(store.treeNodes, "conn-1")?.isLoading, false);
+    await vi.waitFor(() => {
+      assert.ok(
+        calls.some((call) => call.cmd === "cancel_connection_attempt" && call.args.attemptId === sentAttemptId),
+        "cancel must abort the backend dial of the expand",
+      );
+    });
+
+    // The dial completes anyway: nothing may be committed.
+    pendingConnect.resolve("conn-1");
+    await loading;
+    const node = findNode(store.treeNodes, "conn-1");
+    assert.equal(node?.isLoading, false);
+    assert.equal(store.connectedIds.has("conn-1"), false, "a cancelled expand must not mark the connection connected");
+    assert.equal(store.activeConnectionId, null);
+    assert.equal(store.connectionErrors["conn-1"], undefined, "a cancelled expand stays silent");
+    assert.deepEqual((node?.children ?? []).map((child) => child.id), baselineChildren);
+    assert.equal(
+      calls.some((call) => call.cmd === "list_databases"),
+      false,
+      "the cancelled expand must not go on to load databases",
+    );
+  } finally {
+    restoreTauri();
+    restoreStorage();
+  }
+});
+
+test("a late dial failure of a cancelled sidebar expand records no error", async () => {
+  const restoreStorage = installMemoryStorage();
+  const pendingConnect = deferred<string>();
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    if (cmd === "connect_db") return pendingConnect.promise;
+    return null;
+  });
+
+  try {
+    setActivePinia(createPinia());
+    const store = useConnectionStore();
+    await store.addConnection(conn("conn-1"));
+
+    const loading = store.loadDatabases("conn-1");
+    store.cancelTreeNodeLoading("conn-1");
+    pendingConnect.reject(new Error("connection refused"));
+    await loading;
+    assert.equal(store.connectionErrors["conn-1"], undefined);
+    assert.equal(store.connectedIds.has("conn-1"), false);
+    assert.equal(findNode(store.treeNodes, "conn-1")?.isLoading, false);
+  } finally {
+    restoreTauri();
+    restoreStorage();
+  }
+});
+
+test("a superseded attempt settling late keeps the new attempt's spinner and cancel", async () => {
+  const restoreStorage = installMemoryStorage();
+  const pendingLists: Array<ReturnType<typeof deferred<unknown>>> = [];
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    if (cmd === "connect_db") return "conn-1";
+    if (cmd === "list_databases") {
+      const pending = deferred<unknown>();
+      pendingLists.push(pending);
+      return pending.promise;
+    }
+    return null;
+  });
+
+  try {
+    setActivePinia(createPinia());
+    const store = useConnectionStore();
+    await store.addConnection(conn("conn-1"));
+
+    const first = store.loadDatabases("conn-1");
+    await vi.waitFor(() => assert.equal(pendingLists.length, 1));
+    assert.equal(store.cancelTreeNodeLoading("conn-1"), true);
+
+    const second = store.loadDatabases("conn-1", { force: true });
+    await vi.waitFor(() => assert.equal(pendingLists.length, 2));
+    assert.equal(findNode(store.treeNodes, "conn-1")?.isLoading, true);
+
+    // The cancelled attempt settles while the retry is still running.
+    pendingLists[0].resolve([{ name: "stale" }]);
+    await first;
+    assert.equal(
+      findNode(store.treeNodes, "conn-1")?.isLoading,
+      true,
+      "the old attempt's finally must not clear the retry's spinner",
+    );
+    assert.equal(store.cancelTreeNodeLoading("conn-1"), true, "the retry must still be cancellable");
+    assert.equal(findNode(store.treeNodes, "conn-1")?.isLoading, false);
+
+    pendingLists[1].resolve([{ name: "sales" }]);
+    await second;
+    assert.equal(findNode(store.treeNodes, "conn-1")?.isLoading, false);
+  } finally {
+    restoreTauri();
+    restoreStorage();
+  }
+});
+
 test("the connect timeout fires a backend cancel for the attempt", async () => {
   const restoreStorage = installMemoryStorage();
   const calls: RecordedCall[] = [];

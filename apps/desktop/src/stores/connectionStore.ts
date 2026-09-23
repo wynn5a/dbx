@@ -388,6 +388,18 @@ export const useConnectionStore = defineStore("connection", () => {
     if (nodeAttempts.get(attempt.nodeId) === attempt) nodeAttempts.delete(attempt.nodeId);
   }
 
+  // End `attempt` and clear its spinner — unless a newer attempt already owns
+  // the node (cancel + re-expand while the old one was still in flight): the
+  // spinner (and its cancel X) now belongs to that attempt and must stay.
+  function settleNodeAttempt(attempt: NodeAttempt, target: TreeNode | string) {
+    const current = nodeAttempts.get(attempt.nodeId);
+    endNodeAttempt(attempt);
+    if (current && current !== attempt) return;
+    commitTreeNode(target, (draft) => {
+      draft.isLoading = false;
+    });
+  }
+
   // Cancel whatever attempt is showing the spinner on `nodeId` and put the row
   // back to idle immediately, so a new attempt can start right away. For a
   // connect this also tells the backend to abort the dial; the in-flight
@@ -1100,10 +1112,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordConnectionError(config.id, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(config.id, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, config.id);
     }
   }
 
@@ -1164,7 +1173,12 @@ export const useConnectionStore = defineStore("connection", () => {
     invalidateCompletionCache(connectionId, database);
   }
 
-  async function ensureConnected(connectionId: string) {
+  // `attempt` is the tree-node attempt of a loader that needs the connection
+  // first (sidebar expand of an unconnected connection). The dial then runs as
+  // that attempt's cancellable connect: Cancel aborts it on the backend, and a
+  // cancelled/superseded dial never marks the connection connected nor records
+  // an error — it rejects with ConnectionAttemptCancelledError instead.
+  async function ensureConnected(connectionId: string, attempt?: NodeAttempt) {
     if (connectedIds.value.has(connectionId)) return;
     let config = getConfig(connectionId);
     if (!config) {
@@ -1176,15 +1190,29 @@ export const useConnectionStore = defineStore("connection", () => {
       recordConnectionError(connectionId, error);
       throw error;
     }
+    if (attempt && !attemptIsActive(attempt)) throw new ConnectionAttemptCancelledError();
+    const attemptId = attempt ? uuid() : undefined;
+    if (attempt) {
+      attempt.kind = "connect";
+      attempt.attemptId = attemptId;
+    }
     try {
-      await withConnectionAttemptTimeout(api.connectDb(config), config);
+      await withConnectionAttemptTimeout(api.connectDb(config, attemptId), config, attemptId);
+      if (attempt && !attemptIsActive(attempt)) throw new ConnectionAttemptCancelledError();
       connectedIds.value.add(connectionId);
       activeConnectionId.value = connectionId;
       recordConnectionUsed(connectionId);
       clearConnectionError(connectionId);
     } catch (e) {
+      if (attempt && !attemptIsActive(attempt)) throw new ConnectionAttemptCancelledError();
       recordConnectionError(connectionId, e);
       throw e;
+    } finally {
+      // The rest of the loader is a plain metadata read again.
+      if (attempt) {
+        attempt.kind = "load";
+        attempt.attemptId = undefined;
+      }
     }
   }
 
@@ -1196,7 +1224,7 @@ export const useConnectionStore = defineStore("connection", () => {
       draft.isLoading = true;
     });
     try {
-      await ensureConnected(connectionId);
+      await ensureConnected(connectionId, attempt);
       if (!attemptIsActive(attempt)) return;
       if (useCachedChildren(node, options)) return;
 
@@ -1284,10 +1312,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(node, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, node);
     }
   }
 
@@ -1300,7 +1325,7 @@ export const useConnectionStore = defineStore("connection", () => {
       draft.isLoading = true;
     });
     try {
-      await ensureConnected(connectionId);
+      await ensureConnected(connectionId, attempt);
       if (!attemptIsActive(attempt)) return;
       const dbs = await withMetadataLoadTimeout(connectionId, () => api.redisListDatabases(connectionId));
       if (!attemptIsActive(attempt)) return;
@@ -1340,10 +1365,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(node, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, node);
     }
   }
 
@@ -1413,7 +1435,7 @@ export const useConnectionStore = defineStore("connection", () => {
       draft.isLoading = true;
     });
     try {
-      await ensureConnected(connectionId);
+      await ensureConnected(connectionId, attempt);
       if (!attemptIsActive(attempt)) return;
       const dbs = await withMetadataLoadTimeout(connectionId, () => api.mongoListDatabases(connectionId));
       if (!attemptIsActive(attempt)) return;
@@ -1445,10 +1467,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(node, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, node);
     }
   }
 
@@ -1487,10 +1506,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(node, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, node);
     }
   }
 
@@ -1503,7 +1519,7 @@ export const useConnectionStore = defineStore("connection", () => {
       draft.isLoading = true;
     });
     try {
-      await ensureConnected(connectionId);
+      await ensureConnected(connectionId, attempt);
       if (!attemptIsActive(attempt)) return;
       if (useCachedChildren(node, options)) return;
       const cacheKey = schemaCacheKey(connectionId, database, "schemas");
@@ -1541,10 +1557,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(node, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, node);
     }
   }
 
@@ -1557,7 +1570,7 @@ export const useConnectionStore = defineStore("connection", () => {
       draft.isLoading = true;
     });
     try {
-      await ensureConnected(connectionId);
+      await ensureConnected(connectionId, attempt);
       if (!attemptIsActive(attempt)) return;
       if (useCachedChildren(node, options)) return;
       const simpleObjectDisplay = useSettingsStore().editorSettings.sidebarObjectDisplay === "simple";
@@ -1598,10 +1611,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(node, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, node);
     }
   }
 
@@ -1614,7 +1624,7 @@ export const useConnectionStore = defineStore("connection", () => {
       draft.isLoading = true;
     });
     try {
-      await ensureConnected(connectionId);
+      await ensureConnected(connectionId, attempt);
       if (!attemptIsActive(attempt)) return;
       if (useCachedChildren(node, options)) return;
       const simpleObjectDisplay = useSettingsStore().editorSettings.sidebarObjectDisplay === "simple";
@@ -1680,10 +1690,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(node, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, node);
     }
   }
 
@@ -1694,7 +1701,7 @@ export const useConnectionStore = defineStore("connection", () => {
       draft.isLoading = true;
     });
     try {
-      await ensureConnected(node.connectionId);
+      await ensureConnected(node.connectionId, attempt);
       if (!attemptIsActive(attempt)) return;
       if (useCachedChildren(node, options)) return;
       const objectTypes = objectTypesForGroupNode(node.type);
@@ -1755,10 +1762,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordMetadataLoadError(node.connectionId, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(node, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, node);
     }
   }
 
@@ -1879,10 +1883,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(node, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, node);
     }
   }
 
@@ -1928,10 +1929,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(node, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, node);
     }
   }
 
@@ -1983,10 +1981,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(node, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, node);
     }
   }
 
@@ -2032,10 +2027,7 @@ export const useConnectionStore = defineStore("connection", () => {
       recordMetadataLoadError(connectionId, e);
       throw e;
     } finally {
-      endNodeAttempt(attempt);
-      commitTreeNode(node, (draft) => {
-        draft.isLoading = false;
-      });
+      settleNodeAttempt(attempt, node);
     }
   }
 
