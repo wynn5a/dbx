@@ -12,7 +12,10 @@ pub enum ServerCancelBackend {
     /// PostgreSQL: cancel via the frontend cancel protocol. The checked-out
     /// connection's `CancelToken` knows the backend pid + secret, so no helper
     /// session is needed — the cancel dials a short-lived control connection.
-    Postgres(CancelToken),
+    /// `tls` is the pool's own TLS connector: a `CancelToken` keeps the
+    /// connection's `sslmode`, so on `require` the server only accepts the
+    /// cancel over TLS. `None` falls back to a plain-text cancel.
+    Postgres { token: CancelToken, tls: Option<tokio_postgres_rustls::MakeRustlsConnect> },
     /// MySQL `KILL QUERY <id>` / SQL Server `KILL <id>`, routed through the
     /// process helper pool (see crate::process) because the session running
     /// the statement cannot execute the kill itself.
@@ -57,8 +60,8 @@ impl ServerCancelRegistrar {
         Self { execution_id: execution_id.map(str::to_string), running: Some(running.clone()), route }
     }
 
-    pub fn register_postgres(&self, token: CancelToken) {
-        self.store(ServerCancelBackend::Postgres(token));
+    pub fn register_postgres(&self, token: CancelToken, tls: Option<tokio_postgres_rustls::MakeRustlsConnect>) {
+        self.store(ServerCancelBackend::Postgres { token, tls });
     }
 
     pub fn register_mysql_kill(&self, connection_id: u32) {

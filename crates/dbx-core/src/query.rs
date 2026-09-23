@@ -587,6 +587,10 @@ fn resolve_query_timeout(timeout_secs: Option<u64>) -> Option<Duration> {
     }
 }
 
+/// Key of the private server-cancel registration used by queries that carry
+/// no execution id (see do_execute).
+const LOCAL_SERVER_CANCEL_ID: &str = "__dbx_local_timeout_cancel__";
+
 #[allow(clippy::too_many_arguments)]
 pub async fn do_execute(
     state: &AppState,
@@ -599,10 +603,24 @@ pub async fn do_execute(
     options: QueryExecutionOptions,
 ) -> Result<db::QueryResult, String> {
     let query_timeout = resolve_query_timeout(options.timeout_secs);
-    let execution_id_for_cancel = options.execution_id.clone();
+    // Where the server-side cancel captured at checkout is kept. Queries with
+    // an execution id register in the shared RunningQueries so an explicit
+    // cancel can find them. Queries without one (MCP bridge, AI tools,
+    // internal callers) still get a private registry so the timeout path below
+    // can stop the statement on the server instead of only dropping the
+    // future. The process helper's own kill statements are excluded: they are
+    // the cancel mechanism and must not recursively kill themselves.
+    let local_server_cancels = crate::query_cancel::RunningQueries::default();
+    let (server_cancels, server_cancel_id) = match options.execution_id.as_deref() {
+        Some(id) => (&state.running_queries, Some(id.to_string())),
+        None if options.client_session_id.as_deref() == Some(crate::process::PROC_ADMIN_SESSION) => {
+            (&local_server_cancels, None)
+        }
+        None => (&local_server_cancels, Some(LOCAL_SERVER_CANCEL_ID.to_string())),
+    };
     let server_cancel_registrar = crate::query_cancel::ServerCancelRegistrar::new(
-        options.execution_id.as_deref(),
-        &state.running_queries,
+        server_cancel_id.as_deref(),
+        server_cancels,
         options.cancel_route.clone(),
     );
     let duckdb_attached_names = state
@@ -629,12 +647,10 @@ pub async fn do_execute(
     // (ClickHouse/Elasticsearch) and self-recycling native pools (MySQL/Postgres)
     // recover on their own and are left in place.
     let discard_pool_on_timeout = pool_discards_on_query_timeout(pool);
-    // Postgres SELECTs run inside BEGIN…DECLARE…FETCH on a pooled connection.
-    // Once the statement is stopped server-side (cancel or timeout firing the
-    // cancel token), that connection is left inside an aborted transaction,
-    // and fast recycling would hand it straight to the next query. Discard the
-    // pool so the next run starts on a clean connection.
-    let pool_discards_after_server_side_stop = matches!(pool, PoolKind::Postgres(_));
+    // Postgres needs no pool-level treatment after a cancel/timeout: the
+    // driver's per-statement guard (db::postgres::StatementClient) closes just
+    // the connection whose statement future was dropped mid-flight, so a dirty
+    // session never reaches another waiter and the rest of the pool stays up.
 
     let result = match pool {
         PoolKind::DuckDb(con) => {
@@ -872,33 +888,17 @@ pub async fn do_execute(
         }
     };
 
-    if let Err(e) = &result {
-        let timed_out = is_query_execution_timeout(e);
-        let canceled = e == &canceled_error();
-
-        if timed_out {
-            // The local future is gone, but the statement may still be running
-            // server-side. Stop it with the backend id captured at checkout
-            // (best-effort; no-ops when nothing was registered).
-            if let Some(context) =
-                execution_id_for_cancel.as_deref().and_then(|id| state.running_queries.peek_server_cancel(id))
-            {
-                log::warn!("[query][do_execute] firing server-side cancel after execution timeout for '{pool_key}'");
-                crate::process::fire_server_cancel(state, &context).await;
-            }
-            if discard_pool_on_timeout {
-                log::warn!(
-                    "[query][do_execute] discarding protocol-stateful pool '{pool_key}' after query-execution timeout"
-                );
-                state.discard_pool(pool_key).await;
-            }
+    if result.as_ref().is_err_and(|e| is_query_execution_timeout(e)) {
+        // The local future is gone, but the statement may still be running
+        // server-side. Stop it with the backend id captured at checkout
+        // (best-effort; no-ops when nothing was registered).
+        if let Some(context) = server_cancel_id.as_deref().and_then(|id| server_cancels.peek_server_cancel(id)) {
+            log::warn!("[query][do_execute] firing server-side cancel after execution timeout for '{pool_key}'");
+            crate::process::fire_server_cancel(state, &context).await;
         }
-        if (timed_out || canceled) && pool_discards_after_server_side_stop {
-            // The server-side stop aborted the cursor's transaction; the pool
-            // connection must not be reused in that state.
+        if discard_pool_on_timeout {
             log::warn!(
-                "[query][do_execute] discarding Postgres pool '{pool_key}' after statement was {}",
-                if canceled { "cancelled" } else { "stopped on timeout" }
+                "[query][do_execute] discarding protocol-stateful pool '{pool_key}' after query-execution timeout"
             );
             state.discard_pool(pool_key).await;
         }

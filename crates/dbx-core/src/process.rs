@@ -22,7 +22,7 @@ use crate::types::QueryResult;
 /// Reserved `client_session_id` for the shared helper pool used to run the
 /// listing/kill statements. Distinct from any editor tab's session id so it is
 /// reused across calls and never collides with a user query pool.
-const PROC_ADMIN_SESSION: &str = "__dbx_proc_admin";
+pub(crate) const PROC_ADMIN_SESSION: &str = "__dbx_proc_admin";
 
 /// Upper bound for one server-side cancel attempt (the PostgreSQL cancel
 /// control connection, or a kill statement on the helper pool). A cancel or
@@ -169,8 +169,17 @@ pub async fn cancel_running_query(state: &AppState, execution_id: &str) -> bool 
 /// than the kill's fate.
 pub async fn fire_server_cancel(state: &AppState, context: &ServerCancelContext) {
     match &context.backend {
-        ServerCancelBackend::Postgres(token) => {
-            match tokio::time::timeout(SERVER_CANCEL_TIMEOUT, token.cancel_query(tokio_postgres::NoTls)).await {
+        ServerCancelBackend::Postgres { token, tls } => {
+            // Use the pool's TLS connector: with sslmode=require (or
+            // verify-*), the token negotiates TLS and a NoTls cancel fails
+            // before the request is ever sent.
+            let cancel = async {
+                match tls {
+                    Some(tls) => token.cancel_query(tls.clone()).await,
+                    None => token.cancel_query(tokio_postgres::NoTls).await,
+                }
+            };
+            match tokio::time::timeout(SERVER_CANCEL_TIMEOUT, cancel).await {
                 Ok(Ok(())) => log::info!("[query][server-cancel] PostgreSQL cancel request delivered"),
                 Ok(Err(e)) => log::warn!("[query][server-cancel] PostgreSQL cancel request failed: {e}"),
                 Err(_) => log::warn!("[query][server-cancel] PostgreSQL cancel request timed out"),

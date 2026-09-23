@@ -1090,10 +1090,12 @@ async fn execute_select_query(
     row_limit: usize,
     server_cancel_registrar: &crate::query_cancel::ServerCancelRegistrar,
 ) -> Result<QueryResult, String> {
-    let client = pool.get().await.map_err(|e| e.to_string())?;
-    register_server_cancel(server_cancel_registrar, &client);
+    let client = StatementClient::checkout(pool, server_cancel_registrar).await?;
     match run_select(&client, schema, sql, start, row_limit).await {
-        Ok(result) => Ok(result),
+        Ok(result) => {
+            client.finish();
+            Ok(result)
+        }
         Err(err) if select_error_reconnect_safe(&err) => {
             // Fast recycling does not validate idle connections at checkout, so
             // a connection killed while idle (server restart, network drop)
@@ -1101,22 +1103,101 @@ async fn execute_select_query(
             // checkout transparently absorbs the failure. The cursor's
             // transaction never committed, so re-running is safe.
             log::warn!("[postgres][select] pooled connection lost ({err}); retrying once on a fresh connection");
-            let client = pool.get().await.map_err(|e| e.to_string())?;
-            register_server_cancel(server_cancel_registrar, &client);
-            run_select(&client, schema, sql, start, row_limit).await.map_err(pg_error_to_string)
+            drop(client);
+            let client = StatementClient::checkout(pool, server_cancel_registrar).await?;
+            let result = run_select(&client, schema, sql, start, row_limit).await.map_err(pg_error_to_string);
+            client.finish();
+            result
         }
-        Err(err) => Err(pg_error_to_string(err)),
+        Err(err) => {
+            client.finish();
+            Err(pg_error_to_string(err))
+        }
     }
 }
 
 /// Publish the checked-out connection's cancel token so the cancel/timeout
 /// paths can stop the statement server-side (see crate::process). The token
-/// captures backend pid + secret at connect time — no extra round trip.
+/// captures backend pid + secret at connect time — no extra round trip. The
+/// pool's TLS connector travels with it: on `sslmode=require` (and stricter)
+/// the server only accepts the cancel request over TLS.
 fn register_server_cancel(
     server_cancel_registrar: &crate::query_cancel::ServerCancelRegistrar,
     client: &deadpool_postgres::Client,
 ) {
-    server_cancel_registrar.register_postgres(client.cancel_token());
+    let tls = deadpool_postgres::Object::pool(client).and_then(|pool| pool_cancel_tls(&pool));
+    server_cancel_registrar.register_postgres(client.cancel_token(), tls);
+}
+
+/// TLS connector of every live pool built by [connect], so a server-side
+/// cancel dials its control connection with the same TLS settings (verify
+/// mode, root store, client certificate) as the pool's own connections.
+/// Entries hold a weak pool handle and are pruned once the pool is gone.
+static POOL_CANCEL_TLS: std::sync::LazyLock<
+    std::sync::Mutex<Vec<(deadpool_postgres::WeakPool, tokio_postgres_rustls::MakeRustlsConnect)>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
+
+fn same_pool(a: &Pool, b: &Pool) -> bool {
+    std::ptr::eq(a.manager(), b.manager())
+}
+
+fn remember_pool_cancel_tls(pool: &Pool, tls: tokio_postgres_rustls::MakeRustlsConnect) {
+    let mut entries = POOL_CANCEL_TLS.lock().unwrap_or_else(|e| e.into_inner());
+    entries.retain(|(weak, _)| weak.upgrade().is_some());
+    entries.push((pool.weak(), tls));
+}
+
+/// The TLS connector registered for `pool`, if it was built by [connect].
+pub(crate) fn pool_cancel_tls(pool: &Pool) -> Option<tokio_postgres_rustls::MakeRustlsConnect> {
+    let entries = POOL_CANCEL_TLS.lock().unwrap_or_else(|e| e.into_inner());
+    entries.iter().find_map(|(weak, tls)| weak.upgrade().filter(|live| same_pool(live, pool)).map(|_| tls.clone()))
+}
+
+/// A pooled client checked out for one user statement.
+///
+/// If the statement future is dropped mid-flight (cancel or timeout), the
+/// session may still be inside `BEGIN … DECLARE` with the statement running
+/// server-side. Fast recycling only checks `is_closed`, so returning it would
+/// hand that dirty session to the next waiter on the pool ("current
+/// transaction is aborted"). Unless [StatementClient::finish] is called after
+/// the statement round-tripped, dropping the guard detaches the connection
+/// from the pool and closes it — poisoning only this client instead of
+/// closing the whole pool.
+struct StatementClient {
+    client: Option<deadpool_postgres::Client>,
+}
+
+impl StatementClient {
+    async fn checkout(
+        pool: &Pool,
+        server_cancel_registrar: &crate::query_cancel::ServerCancelRegistrar,
+    ) -> Result<Self, String> {
+        let client = pool.get().await.map_err(|e| e.to_string())?;
+        register_server_cancel(server_cancel_registrar, &client);
+        Ok(Self { client: Some(client) })
+    }
+
+    /// The statement round-tripped: return the connection to the pool.
+    fn finish(mut self) {
+        self.client.take();
+    }
+}
+
+impl std::ops::Deref for StatementClient {
+    type Target = deadpool_postgres::Client;
+
+    fn deref(&self) -> &Self::Target {
+        self.client.as_ref().expect("statement client is present until finish/drop")
+    }
+}
+
+impl Drop for StatementClient {
+    fn drop(&mut self) {
+        if let Some(client) = self.client.take() {
+            // Detach from the pool; dropping the raw client closes the socket.
+            drop(deadpool_postgres::Object::take(client));
+        }
+    }
 }
 
 /// Query pools for one database keep a few connections so metadata loads,
@@ -1164,11 +1245,9 @@ pub async fn connect(url: &str, fallback_timeout: Duration) -> Result<Pool, Stri
             postgres_url.accepts_invalid_certs,
             postgres_url.verifies_hostname,
         )?;
-        let mgr = deadpool_postgres::Manager::from_config(
-            pg_config.clone(),
-            tokio_postgres_rustls::MakeRustlsConnect::new(tls_config),
-            mgr_config,
-        );
+        let tls = tokio_postgres_rustls::MakeRustlsConnect::new(tls_config);
+        let cancel_tls = tls.clone();
+        let mgr = deadpool_postgres::Manager::from_config(pg_config.clone(), tls, mgr_config);
         let pool = Pool::builder(mgr)
             .max_size(QUERY_POOL_MAX_SIZE)
             .runtime(Runtime::Tokio1)
@@ -1180,6 +1259,7 @@ pub async fn connect(url: &str, fallback_timeout: Duration) -> Result<Pool, Stri
         // startup packet, so there is nothing to configure per connection.
         let _client = pool.get().await.map_err(|e| format!("PostgreSQL connection failed: {e}"))?;
 
+        remember_pool_cancel_tls(&pool, cancel_tls);
         Ok(pool)
     })
     .await
@@ -2054,20 +2134,27 @@ pub async fn execute_query_with_max_rows(
     if starts_with_executable_sql_keyword(sql, SELECT_CLASS_KEYWORDS) {
         execute_select_query(pool, None, sql, start, row_limit, server_cancel_registrar).await
     } else {
-        let client = pool.get().await.map_err(|e| e.to_string())?;
-        register_server_cancel(server_cancel_registrar, &client);
-        match client.execute(sql, &[]).await {
-            Ok(affected) => Ok(non_select_result(affected, start)),
+        let client = StatementClient::checkout(pool, server_cancel_registrar).await?;
+        let outcome = client.execute(sql, &[]).await;
+        match outcome {
+            Ok(affected) => {
+                client.finish();
+                Ok(non_select_result(affected, start))
+            }
             Err(err) if err.is_closed() => {
                 // Closed before the statement could be sent (stale idle
                 // connection): retrying cannot double-apply anything.
                 log::warn!("[postgres][execute] pooled connection lost; retrying once on a fresh connection");
-                let client = pool.get().await.map_err(|e| e.to_string())?;
-                register_server_cancel(server_cancel_registrar, &client);
-                let affected = client.execute(sql, &[]).await.map_err(pg_error_to_string)?;
-                Ok(non_select_result(affected, start))
+                drop(client);
+                let client = StatementClient::checkout(pool, server_cancel_registrar).await?;
+                let outcome = client.execute(sql, &[]).await;
+                client.finish();
+                Ok(non_select_result(outcome.map_err(pg_error_to_string)?, start))
             }
-            Err(err) => Err(pg_error_to_string(err)),
+            Err(err) => {
+                client.finish();
+                Err(pg_error_to_string(err))
+            }
         }
     }
 }
@@ -2106,8 +2193,7 @@ pub async fn execute_query_with_schema_and_max_rows(
     let start = Instant::now();
     let row_limit = query_result_row_limit(max_rows);
     let checkout_start = Instant::now();
-    let client = pool.get().await.map_err(|e| e.to_string())?;
-    register_server_cancel(server_cancel_registrar, &client);
+    let client = StatementClient::checkout(pool, server_cancel_registrar).await?;
     log::info!(
         "[postgres][execute_with_schema:pool:done] elapsed_ms={} total_ms={} schema={}",
         checkout_start.elapsed().as_millis(),
@@ -2119,12 +2205,12 @@ pub async fn execute_query_with_schema_and_max_rows(
             "[postgres][execute_with_schema:skip-search-path] total_ms={} reason=transaction-recovery",
             start.elapsed().as_millis()
         );
-        drop(client);
+        client.finish();
         return execute_query_with_max_rows(pool, sql, max_rows, server_cancel_registrar).await;
     }
 
     if starts_with_executable_sql_keyword(sql, SELECT_CLASS_KEYWORDS) {
-        drop(client);
+        client.finish();
         // Schema scoping rides inside the cursor's transaction via
         // `SET LOCAL search_path` — one round trip instead of the old
         // session-level SET + RESET bracket, and no state can leak across
@@ -2133,18 +2219,24 @@ pub async fn execute_query_with_schema_and_max_rows(
     }
 
     let set_schema_start = Instant::now();
-    let query_result = match execute_non_select_with_search_path(&client, schema, sql).await {
-        Ok(affected) => Ok(non_select_result(affected, start)),
+    let outcome = execute_non_select_with_search_path(&client, schema, sql).await;
+    let query_result = match outcome {
+        Ok(affected) => {
+            client.finish();
+            Ok(non_select_result(affected, start))
+        }
         Err(err) if err.is_closed() => {
             log::warn!("[postgres][execute] pooled connection lost; retrying once on a fresh connection");
-            let client = pool.get().await.map_err(|e| e.to_string())?;
-            register_server_cancel(server_cancel_registrar, &client);
-            execute_non_select_with_search_path(&client, schema, sql)
-                .await
-                .map(|affected| non_select_result(affected, start))
-                .map_err(pg_error_to_string)
+            drop(client);
+            let client = StatementClient::checkout(pool, server_cancel_registrar).await?;
+            let outcome = execute_non_select_with_search_path(&client, schema, sql).await;
+            client.finish();
+            outcome.map(|affected| non_select_result(affected, start)).map_err(pg_error_to_string)
         }
-        Err(err) => Err(pg_error_to_string(err)),
+        Err(err) => {
+            client.finish();
+            Err(pg_error_to_string(err))
+        }
     };
     log::info!(
         "[postgres][execute_with_schema:set-search-path:done] elapsed_ms={} total_ms={}",
