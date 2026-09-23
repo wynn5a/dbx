@@ -2685,7 +2685,10 @@ function unquoteIdentifier(value: string): string {
   return value;
 }
 
-function quoteSqlIdentifier(identifier: string, dialect?: SqlDialect): string {
+// Exported for the sidebar drag-to-editor insertion (queryEditorTableDrop.ts):
+// dropped table/column identifiers must be quoted exactly like completion
+// insertions (T06 rules — MySQL backticks, SQL Server brackets, PG double quotes).
+export function quoteSqlIdentifier(identifier: string, dialect?: SqlDialect): string {
   switch (dialect) {
     case "postgres":
       if (!requiresPostgresIdentifierQuote(identifier)) return identifier;

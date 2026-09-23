@@ -71,10 +71,11 @@ import {
 import { buildTableSelectSql } from "@/lib/tableSelectSql";
 import {
   clearActiveTableReferencePayload,
+  createColumnReferencePayload,
   createTableReferencePayload,
   createTableReferenceDropEvent,
   setActiveTableReferencePayload,
-  type QueryEditorTableReferencePayload,
+  type QueryEditorSidebarReferencePayload,
 } from "@/lib/queryEditorTableDrop";
 import { editablePrimaryKeys } from "@/lib/tableEditing";
 import {
@@ -2850,17 +2851,18 @@ const TABLE_REFERENCE_DRAGGING_CLASS = "dbx-table-reference-dragging";
 const canDragTableReference = computed(
   () =>
     !props.dragDisabled &&
-    (props.node.type === "table" || props.node.type === "view") &&
+    (props.node.type === "table" || props.node.type === "view" || props.node.type === "column") &&
     !!props.node.connectionId &&
-    props.node.database != null,
+    props.node.database != null &&
+    (props.node.type !== "column" || !!props.node.tableName),
 );
 
 let pendingTableReferenceDrag: {
-  payload: QueryEditorTableReferencePayload;
+  payload: QueryEditorSidebarReferencePayload;
   startX: number;
   startY: number;
 } | null = null;
-let draggingTableReferencePayload: QueryEditorTableReferencePayload | null = null;
+let draggingTableReferencePayload: QueryEditorSidebarReferencePayload | null = null;
 let suppressNextTableReferenceClick = false;
 // Set when a context-menu gesture opens the menu, so the trailing `click` that
 // some platforms (notably macOS Ctrl+click) fire from the same gesture doesn't
@@ -2868,19 +2870,29 @@ let suppressNextTableReferenceClick = false;
 // left click is never swallowed.
 let suppressNextClickFromContextMenu = false;
 
-function tableReferenceDragPayload(): QueryEditorTableReferencePayload | null {
+function tableReferenceDragPayload(): QueryEditorSidebarReferencePayload | null {
   if (!canDragTableReference.value) return null;
-  const payload = createTableReferencePayload({
+  if (props.node.type === "column") {
+    return createColumnReferencePayload({
+      connectionId: props.node.connectionId,
+      database: props.node.database,
+      schema: props.node.schema,
+      tableName: props.node.tableName,
+      // Column labels carry a " (type)" suffix; meta.name is the clean name.
+      columnName: tableChildDropObjectName(props.node),
+      databaseType: currentDatabaseType(),
+    });
+  }
+  return createTableReferencePayload({
     connectionId: props.node.connectionId,
     database: props.node.database,
     schema: props.node.schema,
     tableName: props.node.label,
     databaseType: currentDatabaseType(),
   });
-  return payload;
 }
 
-function startTableReferenceDrag(payload: QueryEditorTableReferencePayload) {
+function startTableReferenceDrag(payload: QueryEditorSidebarReferencePayload) {
   draggingTableReferencePayload = payload;
   setActiveTableReferencePayload(payload);
   document.getSelection()?.removeAllRanges();

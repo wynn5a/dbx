@@ -51,10 +51,10 @@ import {
   activeTableReferencePayloadValue,
   clearActiveTableReferencePayload,
   hasTableReferencePayloadType,
-  parseTableReferencePayload,
-  tableReferenceInsertText,
+  parseSidebarReferencePayload,
+  sidebarReferenceInsertText,
+  type QueryEditorSidebarReferencePayload,
   type QueryEditorTableReferenceDropDetail,
-  type QueryEditorTableReferencePayload,
 } from "@/lib/queryEditorTableDrop";
 import {
   EDITOR_FONT_FAMILY_CSS_VAR,
@@ -931,10 +931,10 @@ async function formatCurrentSql() {
   }
 }
 
-function droppedTableReference(event: DragEvent) {
+function droppedSidebarReference(event: DragEvent) {
   return (
     activeTableReferencePayloadValue() ??
-    parseTableReferencePayload(event.dataTransfer?.getData(DBX_TABLE_REFERENCE_MIME))
+    parseSidebarReferencePayload(event.dataTransfer?.getData(DBX_TABLE_REFERENCE_MIME))
   );
 }
 
@@ -942,13 +942,13 @@ function hasDroppedTableReference(event: DragEvent) {
   return !!activeTableReferencePayloadValue() || hasTableReferencePayloadType(event.dataTransfer?.types);
 }
 
-function insertTableReferencePayload(
+function insertSidebarReferencePayload(
   currentView: EditorViewType,
-  payload: QueryEditorTableReferencePayload,
+  payload: QueryEditorSidebarReferencePayload,
   coords?: { clientX: number; clientY: number },
 ): boolean {
   if (props.readOnly) return false;
-  const insertText = tableReferenceInsertText(payload, props.databaseType);
+  const insertText = sidebarReferenceInsertText(payload, props.databaseType);
   const dropPos = coords ? currentView.posAtCoords({ x: coords.clientX, y: coords.clientY }) : null;
   const selection = currentView.state.selection.main;
   const from = dropPos ?? selection.from;
@@ -964,13 +964,13 @@ function insertTableReferencePayload(
   return true;
 }
 
-function insertDroppedTableReference(currentView: EditorViewType, event: DragEvent): boolean {
-  const payload = droppedTableReference(event);
+function insertDroppedSidebarReference(currentView: EditorViewType, event: DragEvent): boolean {
+  const payload = droppedSidebarReference(event);
   if (!payload) return false;
 
   event.preventDefault();
   event.stopPropagation();
-  return insertTableReferencePayload(currentView, payload, { clientX: event.clientX, clientY: event.clientY });
+  return insertSidebarReferencePayload(currentView, payload, { clientX: event.clientX, clientY: event.clientY });
 }
 
 function onTableReferenceDropEvent(event: Event) {
@@ -980,7 +980,7 @@ function onTableReferenceDropEvent(event: Event) {
   if (!detail?.payload) return;
   const target = document.elementFromPoint(detail.clientX, detail.clientY);
   if (target instanceof Element && editorRef.value?.contains(target)) {
-    insertTableReferencePayload(currentView, detail.payload, detail);
+    insertSidebarReferencePayload(currentView, detail.payload, detail);
   }
 }
 
@@ -2152,7 +2152,7 @@ onMounted(async () => {
           return true;
         },
         drop(event, currentView) {
-          return insertDroppedTableReference(currentView, event);
+          return insertDroppedSidebarReference(currentView, event);
         },
         wheel(event) {
           if (!event.metaKey && !event.ctrlKey) return false;
