@@ -18,7 +18,7 @@ Back to [index](README.md).
 
 ## T19 — High-risk SQL friction
 
-- [ ] **MEDIUM-HIGH — multi-statement SQL bypasses the acknowledgment**
+- [x] **MEDIUM-HIGH — multi-statement SQL bypasses the acknowledgment** — fixed in 973ebb94 (multi-statement branch returns `schema_change` when any statement is one; unscoped/always-true `DELETE` now `dangerous`; tests in `aiSqlExecutionPolicy.test.ts`)
   - Where: `apps/desktop/src/lib/aiSqlExecutionPolicy.ts:94-96` (`classifyAiSqlExecution`) → `requiresAiConfirmFriction`.
   - Multi-statement with no dangerous/unknown statement collapses to `"write"`. Verified: `CREATE TABLE a(x int); CREATE INDEX i ON a(x)` → `write`; `INSERT …; CREATE TABLE x(a int)` → `write`. Schema change bundled with anything gets one-click Run.
   - Related (pre-existing): `DELETE FROM users` with no WHERE is `write`, while unscoped `UPDATE` is `dangerous`.
@@ -26,39 +26,39 @@ Back to [index](README.md).
 
 ## T17 — Actionable connection errors
 
-- [ ] **MEDIUM — "Connection failed:" framing removed from every connect toast**
+- [x] **MEDIUM — "Connection failed:" framing removed from every connect toast** — fixed in 973ebb94 (`presentConnectionError` title uses `connection.connectFailed`; `formatConnectionError` for the dialog's labelled test result stays unframed)
   - Where: `i18n/backend-errors.ts` `presentConnectionError`; callers `App.vue` `toastConnectError`, `TreeItem.vue:175-184`, `AppSidebar.vue:69-72`, `AiAssistant.vue` `changeConnection`. `connection.connectFailed` is now unused (only locale entries remain).
   - Unclassified errors (`Unknown database 'foo'`, JDBC stack line) show as a bare string with no context; plan said raw text stays as *fallback*, not replacement.
   - Fix: `title: t("connection.connectFailed", { message: translateBackendError(t, message) })`.
-- [ ] **LOW — auth rule misfires on permission errors**
+- [x] **LOW — auth rule misfires on permission errors** — fixed in 973ebb94 (`access denied` excludes `… to database …`; Mongo `not authorized` dropped — bad credentials are `Authentication failed`)
   - Where: `lib/connectionErrorHints.ts:48,51`.
   - Mongo `not authorized on admin to execute command { listDatabases … }` and MySQL `Access denied for user 'u'@'h' to database 'd'` (1044, grant issue) get "check username and password".
   - Fix: Mongo anchor to `Authentication failed`; MySQL exclude `to database` (or match `\(using password:`).
 
 ## T32 — Chart from chat
 
-- [ ] **MEDIUM — chart column choices reset on every assistant re-render**
+- [x] **MEDIUM — chart column choices reset on every assistant re-render** — fixed in 973ebb94 (`createToolStepChartCache` in `lib/aiChartResult.ts` memoizes result + chartable per step id/resultText)
   - Where: `AiAssistant.vue` template `:result="stepChartResult(step)!"`; `QueryChart.vue:35-43` watches `props.result` by identity (immediate) and resets `xColumn`/`yColumns`.
   - Typing one character in the prompt box or any streaming delta snaps chosen X/Y back to defaults and recomputes the ECharts option; also re-parses up to 100 rows per chartable step per keystroke (`isChartableToolStep` parses again).
   - Fix: memoize parsed result per step (key `step.id` + `resultText`, or a computed map).
 
 ## T34 — Tab-switch shortcuts
 
-- [ ] **MEDIUM-LOW — shortcuts misbehave while Driver Store is shown**
+- [x] **MEDIUM-LOW — shortcuts misbehave while Driver Store is shown** — fixed in 973ebb94 (`resolveTabSwitch` in `lib/tabSwitch.ts`: resolves as if no tab were active and dismisses the store)
   - Where: `App.vue` `switchTab` (~801). Opening Driver Store doesn't clear `activeTabId`; `switchTab` only assigns it; hiding relies on a watcher that doesn't fire when target == active. Tab clicks work because `AppTabBar.activateTab` emits `close-driver-store`.
   - Driver Store over tab 1: Mod+1 (or next/prev with one tab) does nothing; next/prev computed from the hidden tab.
   - Fix: `showDriverStore.value = false` in `switchTab` whenever a target resolves.
 
 ## T16 — Global error handler
 
-- [ ] **LOW — every error logged twice when debug logging is on**
+- [x] **LOW — every error logged twice when debug logging is on** — fixed in 973ebb94 (handler uses `uncapturedConsoleError`, the pre-capture `console.error`)
   - Where: `lib/globalErrorHandler.ts:61-64` + install order in `main.ts` (`installDebugLogCapture()` wraps `console.error` before the handler binds it).
   - Handler calls `appendErrorDebugLog` then the wrapped `console.error` → second entry (stack formatted twice); burns the 1500-entry cap twice as fast in render loops.
   - Fix: use the pre-capture original `console.error`, or skip capture for `[vue:error]` messages.
 
 ## T30 — Token usage
 
-- [ ] **LOW — usage of a cancelled run is never persisted**
+- [x] **LOW — usage of a cancelled run is never persisted** — fixed in 973ebb94 (`runBackendAgent` re-persists a superseded run when its message is still shown and received usage — `shouldPersistSupersededAgentRun`)
   - Where: `AiAssistant.vue` `cancelStream` → `finalizeRun` → `persistConversation` (persists immediately); later `AgentEnd` writes `msg.usage` but `runBackendAgent`'s `finalizeRun` is skipped (token bumped). Shown until reload, then lost.
   - Fix: `persistConversation()` in the `agent_end` case when the run is no longer active, or persist in `runBackendAgent`'s finally regardless of token.
 
