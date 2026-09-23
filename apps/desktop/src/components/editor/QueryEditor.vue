@@ -44,9 +44,8 @@ import {
   type SqlReferencesSettledEvent,
 } from "@/lib/sqlReferences";
 import {
-  buildElasticsearchCompletionItemsFromContext,
+  buildReusableElasticsearchCompletionResult,
   getElasticsearchCompletionContext,
-  getElasticsearchCompletionResultValidFor,
   shouldAutoOpenElasticsearchCompletion,
   type ElasticsearchCompletionItem,
 } from "@/lib/elasticsearchCompletion";
@@ -1031,19 +1030,6 @@ let completionMetadataRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 type QueryCompletionItem = SqlCompletionItem | ElasticsearchCompletionItem;
 
-// Elasticsearch results only. SQL results go through buildSqlCompletionResult,
-// whose `update` hook re-ranks while typing (a `validFor` reuse would keep the
-// stale order under `filter: false`).
-function buildCompletionResult(items: QueryCompletionItem[], from: number, validFor?: RegExp) {
-  if (items.length === 0) return null;
-  return {
-    from,
-    filter: false,
-    options: items.map((item) => completionOptionForItem(item)),
-    validFor,
-  };
-}
-
 // A SQL completion result whose `update` hook rebuilds the ranked items for
 // typed continuations of the token from the same context and metadata
 // (sqlCompletionReuse.ts), so the popup re-narrows and re-ranks without
@@ -1130,8 +1116,9 @@ async function provideElasticsearchCompletions(
   }
   if (epoch !== completionEpoch) return null;
 
-  const items = buildElasticsearchCompletionItemsFromContext(completionContext, { indices });
-  return buildCompletionResult(items, completionContext.from, getElasticsearchCompletionResultValidFor());
+  // `update` re-ranks while typing (a `validFor` reuse would keep the stale
+  // order under `filter: false`); see elasticsearchCompletion.ts.
+  return buildReusableElasticsearchCompletionResult(completionContext, { indices }, completionOptionForItem);
 }
 
 // Build a completion result from context alone (keywords/snippets/literals),

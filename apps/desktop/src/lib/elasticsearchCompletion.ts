@@ -173,8 +173,75 @@ export function shouldAutoOpenElasticsearchCompletion(text: string, cursor: numb
   return false;
 }
 
-export function getElasticsearchCompletionResultValidFor(): RegExp {
-  return /[\w/_."]*$/;
+// Popup reuse (CodeMirror `CompletionResult.update`). Results are built with
+// `filter: false` — the order is our own boost ranking — so a plain `validFor`
+// kept the ORIGINAL list and order while the user kept typing: at `GET /s` the
+// top item is the `sales` index, and after typing on to `GET /sea` it would
+// still be selected, so Enter replaced `sea` with `sales` (same issue as T36 for
+// SQL). Instead, each keystroke re-derives the context from the document (a
+// synchronous scan of the current line) and re-runs the item builder over the
+// same input the result was built from — no new backend calls.
+//
+// The input is never prefix-filtered (the index listing is per database), so
+// any prefix within the same token can be rebuilt, including backspacing. The
+// token must stay the same completion slot, though: same mode, same start, same
+// method/path segment, and the text between the start and the cursor must be
+// exactly the new prefix (a space, `/`, `{`, … ends or moves the token). Anything
+// else returns null, and CodeMirror re-runs the source.
+
+/** The subset of CodeMirror's `CompletionContext` the update hook reads. */
+export interface ElasticsearchCompletionUpdateContext {
+  pos: number;
+  state: { sliceDoc(from?: number, to?: number): string };
+}
+
+export interface ReusableElasticsearchCompletionResult<Option> {
+  from: number;
+  filter: false;
+  options: Option[];
+  update: (
+    current: unknown,
+    from: number,
+    to: number,
+    context: ElasticsearchCompletionUpdateContext,
+  ) => ReusableElasticsearchCompletionResult<Option> | null;
+}
+
+function isSameCompletionSlot(original: ElasticsearchCompletionContext, next: ElasticsearchCompletionContext): boolean {
+  return (
+    next.mode === original.mode &&
+    next.from === original.from &&
+    next.method === original.method &&
+    next.segmentIndex === original.segmentIndex
+  );
+}
+
+/**
+ * Build a `filter: false` Elasticsearch completion result for `context`, whose
+ * `update` hook rebuilds and re-ranks the items while the user keeps typing in
+ * the same token (see above), or returns null to have CodeMirror re-query.
+ */
+export function buildReusableElasticsearchCompletionResult<Option>(
+  context: ElasticsearchCompletionContext,
+  input: ElasticsearchCompletionInput,
+  toOption: (item: ElasticsearchCompletionItem) => Option,
+): ReusableElasticsearchCompletionResult<Option> | null {
+  const items = buildElasticsearchCompletionItemsFromContext(context, input);
+  if (items.length === 0) return null;
+  return {
+    from: context.from,
+    filter: false,
+    options: items.map(toOption),
+    update: (_current, from, _to, updateContext) => {
+      // A mapped `from` means text before the token changed — recompute.
+      if (from !== context.from || updateContext.pos < from) return null;
+      const doc = updateContext.state.sliceDoc();
+      const next = getElasticsearchCompletionContext(doc, updateContext.pos);
+      if (!isSameCompletionSlot(context, next)) return null;
+      if (doc.slice(next.from, updateContext.pos) !== next.prefix) return null;
+      return buildReusableElasticsearchCompletionResult(next, input, toOption);
+    },
+  };
 }
 
 function methodItems(prefix: string): ElasticsearchCompletionItem[] {
