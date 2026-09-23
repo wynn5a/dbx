@@ -1,6 +1,7 @@
 //! Mock-SSE tests for the tool-calling stream (perf tasks T21 / plan §5 D5),
-//! the initial-request retry (perf task T31 / plan §5 D6), and structured
-//! output for the final SQL (perf task T42 / plan §5 D9).
+//! the initial-request retry (perf task T31 / plan §5 D6), structured output
+//! for the final SQL (perf task T42 / plan §5 D9), and the agent loop end to
+//! end (perf task T43 / plan §5 D10).
 //!
 //! A tiny HTTP server on a loopback port answers each request with the next
 //! canned response, so Gemini and Ollama provider streams are driven across a
@@ -14,20 +15,31 @@
 //! custom-endpoint request byte-identical (the fence fallback keeps the legacy
 //! traffic), while the native `response_format: json_object` attach for the
 //! official OpenAI API is a pure body-builder check (`openai_stream_body`)
-//! because a loopback mock can never masquerade as the official host.
+//! because a loopback mock can never masquerade as the official host. The T43
+//! section drives `run_agent_loop` itself across three model turns: two tool
+//! rounds whose calls execute against a real SQLite database (not a stub) plus
+//! the final text answer, and the write-confirmation pause with one approve
+//! and one reject run.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use dbx_core::agent_events::{ToolCall, ToolDefinition};
+use dbx_core::agent_events::{AgentEvent, ToolCall, ToolDefinition};
+use dbx_core::agent_loop::{run_agent_loop, AgentLoopContext};
 use dbx_core::ai::{
     self, AiApiStyle, AiCompletionRequest, AiConfig, AiMessage, AiProvider, AiStreamChunk, TokenUsage, ToolCallRef,
     ToolStreamRequest,
 };
+use dbx_core::connection::{AppState, PoolKind};
+use dbx_core::db;
+use dbx_core::models::connection::DatabaseType;
+use dbx_core::storage::Storage;
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
 
 // ---------------------------------------------------------------------------
 // Mock provider server
@@ -647,4 +659,398 @@ async fn structured_opt_in_leaves_gemini_traffic_unchanged() {
     assert!(body.get("response_format").is_none());
     assert!(body["generationConfig"].get("responseMimeType").is_none());
     assert_eq!(body["generationConfig"]["maxOutputTokens"], 256);
+}
+
+// ---------------------------------------------------------------------------
+// T43: the full agent loop — `run_agent_loop` across three model turns over
+// the same mock server, with the tool calls executing against a real SQLite
+// database seeded for the run.
+// ---------------------------------------------------------------------------
+
+/// Connection id the run's SQLite pool is seeded under.
+const AGENT_CONN: &str = "agent-loop-e2e-conn";
+
+/// AppState with a SQLite pool seeded under [`AGENT_CONN`] (same shape as
+/// `agent_tools`' unit-test helper), so the loop's tools hit a real database.
+/// Returns the state, a handle for post-run verification, and the temp dir to
+/// clean up.
+async fn sqlite_agent_state(seed_sql: &str) -> (Arc<AppState>, db::sqlite::SqliteHandle, std::path::PathBuf) {
+    let dir = std::env::temp_dir().join(format!("dbx-agent-loop-e2e-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let storage = Storage::open(&dir.join("storage.db")).await.expect("open storage");
+    let state = Arc::new(AppState::new(storage));
+    let pool = db::sqlite::connect_path_create_if_missing(&dir.join("agent.db").to_string_lossy())
+        .await
+        .expect("connect sqlite");
+    state.connections.write().await.insert(AGENT_CONN.to_string(), PoolKind::Sqlite(pool.clone()));
+    db::sqlite::execute_query(&pool, seed_sql).await.expect("seed sqlite");
+    (state, pool, dir)
+}
+
+/// One OpenAI-compatible tool-call delta carrying the whole call (id, name and
+/// complete JSON arguments), the way a non-fragmenting provider streams it.
+fn openai_tool_call_delta(id: &str, name: &str, arguments: &str) -> Value {
+    json!({ "choices": [{ "delta": { "tool_calls": [
+        { "index": 0, "id": id, "function": { "name": name, "arguments": arguments } }
+    ] } }] })
+}
+
+/// The usage-only trailing chunk OpenAI sends with `stream_options.include_usage`.
+fn openai_usage_chunk(input: u64, output: u64) -> Value {
+    json!({ "choices": [], "usage": { "prompt_tokens": input, "completion_tokens": output } })
+}
+
+/// Serialize every `AgentEvent` the loop emits into JSON, in emission order.
+fn event_collector() -> (Arc<Mutex<Vec<Value>>>, impl Fn(AgentEvent) + Send + Sync + Clone + 'static) {
+    let log: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&log);
+    let on_event = move |event: AgentEvent| {
+        sink.lock().expect("event log").push(serde_json::to_value(&event).expect("serialize event"));
+    };
+    (log, on_event)
+}
+
+fn event_kinds(events: &[Value]) -> Vec<&str> {
+    events.iter().map(|e| e["type"].as_str().expect("event type")).collect()
+}
+
+#[tokio::test]
+async fn agent_loop_runs_two_tool_rounds_against_sqlite_then_answers() {
+    let (state, _pool, dir) = sqlite_agent_state(
+        "CREATE TABLE notes (id INTEGER, title TEXT); INSERT INTO notes VALUES (1, 'alpha'), (2, 'beta');",
+    )
+    .await;
+
+    // Turn 1 streams text plus an execute_query call, turn 2 a search_tables
+    // call, turn 3 the tool-free final answer. Usage rides every turn.
+    let query_args = json!({ "sql": "SELECT COUNT(*) AS total FROM notes" }).to_string();
+    let search_args = json!({ "search": "notes" }).to_string();
+    let turn1 = openai_sse(&[
+        json!({ "choices": [{ "delta": { "content": "Let me count the notes." } }] }),
+        openai_tool_call_delta("call_q1", "execute_query", &query_args),
+        openai_usage_chunk(10, 4),
+    ]);
+    let turn2 =
+        openai_sse(&[openai_tool_call_delta("call_s1", "search_tables", &search_args), openai_usage_chunk(20, 3)]);
+    let turn3 = openai_sse(&[
+        json!({ "choices": [{ "delta": { "content": "There are " } }] }),
+        json!({ "choices": [{ "delta": { "content": "2 notes in total." } }] }),
+        openai_usage_chunk(30, 8),
+    ]);
+    let server = MockProvider::start(vec![turn1, turn2, turn3]).await;
+    let config = openai_config(&server.base_url);
+    assert!(ai::provider_supports_function_calling(&config).await, "the loop must take the tool path");
+
+    let (log, on_event) = event_collector();
+    let ctx = AgentLoopContext {
+        state,
+        connection_id: AGENT_CONN.to_string(),
+        database: String::new(),
+        db_type: DatabaseType::Sqlite,
+    };
+    let final_text = run_agent_loop(
+        &config,
+        "You are DBX's assistant.",
+        &[AiMessage::text("user", "How many notes do I have?")],
+        &ctx,
+        "t43-two-rounds",
+        on_event,
+        &Notify::new(),
+        CancellationToken::new(),
+        Some(512),
+        Some(0.2),
+        true, // agent mode: the full tool set
+    )
+    .await
+    .expect("the agent loop completes");
+    let _ = std::fs::remove_dir_all(dir);
+
+    // The loop returns the model's final answer.
+    assert_eq!(final_text, "There are 2 notes in total.");
+
+    // The full event sequence: turn 1 streams text then calls execute_query
+    // (whose real SQLite result lands on the ToolCallEnd), turn 2 calls
+    // search_tables, turn 3 answers without tools.
+    let events = log.lock().expect("event log").clone();
+    assert_eq!(
+        event_kinds(&events),
+        vec![
+            "turn_start",
+            "text_delta",
+            "turn_end",
+            "tool_call_start",
+            "tool_call_end",
+            "turn_start",
+            "turn_end",
+            "tool_call_start",
+            "tool_call_end",
+            "turn_start",
+            "text_delta",
+            "text_delta",
+            "turn_end",
+            "agent_end",
+        ]
+    );
+    assert_eq!(events[0]["turn"], 0);
+    assert_eq!(events[1]["delta"], "Let me count the notes.");
+    assert_eq!(events[3]["tool_call_id"], "call_q1");
+    assert_eq!(events[3]["tool_name"], "execute_query");
+    assert_eq!(events[3]["args"], json!({ "sql": "SELECT COUNT(*) AS total FROM notes" }));
+    assert_eq!(events[4]["is_error"], false, "the query executed against the seeded database");
+    let query_result = events[4]["result"]["content"].as_str().expect("tool result content");
+    assert!(query_result.contains("| total |"), "{query_result}");
+    assert!(query_result.contains("| 2 |"), "{query_result}");
+    assert_eq!(events[5]["turn"], 1);
+    assert_eq!(events[7]["tool_call_id"], "call_s1");
+    assert_eq!(events[7]["tool_name"], "search_tables");
+    let search_result = events[8]["result"]["content"].as_str().expect("tool result content");
+    assert!(search_result.contains("- notes (BASE TABLE)"), "{search_result}");
+    assert_eq!(events[9]["turn"], 2);
+    assert_eq!(events[10]["delta"], "There are ");
+    assert_eq!(events[11]["delta"], "2 notes in total.");
+    // Usage accumulates across all three turns into the terminal event.
+    assert_eq!(events[13]["input_tokens"], 60);
+    assert_eq!(events[13]["output_tokens"], 15);
+
+    // One model request per turn, all on the completions endpoint.
+    let requests = server.requests();
+    assert_eq!(requests.len(), 3, "one request per model turn");
+    assert!(requests.iter().all(|r| r.path == "/chat/completions"));
+
+    // Turn 1: system + user only, with the SQLite agent tool set declared.
+    let body1: Value = serde_json::from_str(&requests[0].body).expect("turn 1 body is JSON");
+    let messages1 = body1["messages"].as_array().expect("messages");
+    assert_eq!(messages1.len(), 2);
+    assert_eq!(messages1[0]["role"], "system");
+    assert_eq!(messages1[1]["content"], "How many notes do I have?");
+    let tool_names: Vec<&str> = body1["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .map(|t| t["function"]["name"].as_str().expect("name"))
+        .collect();
+    assert_eq!(
+        tool_names,
+        vec!["list_tables", "search_tables", "get_columns", "execute_query", "get_sample_data"],
+        "agent mode exposes the SQLite tool set"
+    );
+
+    // Turn 2 replays the assistant's tool call and the real tool output.
+    let body2: Value = serde_json::from_str(&requests[1].body).expect("turn 2 body is JSON");
+    let messages2 = body2["messages"].as_array().expect("messages");
+    assert_eq!(messages2.len(), 4, "[system, user, assistant(tool_calls), tool(result)]");
+    assert_eq!(messages2[2]["role"], "assistant");
+    assert_eq!(messages2[2]["tool_calls"][0]["id"], "call_q1");
+    assert_eq!(messages2[2]["tool_calls"][0]["function"]["name"], "execute_query");
+    assert_eq!(messages2[3]["role"], "tool");
+    assert_eq!(messages2[3]["tool_call_id"], "call_q1");
+    assert!(
+        messages2[3]["content"].as_str().expect("tool message").contains("| 2 |"),
+        "the executed result is fed back: {}",
+        messages2[3]["content"]
+    );
+
+    // Turn 3 carries both rounds: both assistant calls and both tool results.
+    let body3: Value = serde_json::from_str(&requests[2].body).expect("turn 3 body is JSON");
+    let messages3 = body3["messages"].as_array().expect("messages");
+    assert_eq!(messages3.len(), 6);
+    assert_eq!(messages3[4]["role"], "assistant");
+    assert_eq!(messages3[4]["tool_calls"][0]["id"], "call_s1");
+    assert_eq!(messages3[4]["tool_calls"][0]["function"]["name"], "search_tables");
+    assert_eq!(messages3[5]["role"], "tool");
+    assert_eq!(messages3[5]["tool_call_id"], "call_s1");
+    assert!(
+        messages3[5]["content"].as_str().expect("tool message").contains("- notes (BASE TABLE)"),
+        "{}",
+        messages3[5]["content"]
+    );
+}
+
+/// Resolve the named write confirmation from a background task as soon as the
+/// loop registers it, with the given verdict.
+fn resolve_when_registered(session: &'static str, tool_call_id: &'static str, approved: bool) {
+    tokio::spawn(async move {
+        for _ in 0..1_000 {
+            if ai::resolve_confirmation(session, tool_call_id, approved).await {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("the write confirmation was never registered");
+    });
+}
+
+#[tokio::test]
+async fn agent_loop_pauses_a_write_until_the_confirmation_is_approved() {
+    let (state, pool, dir) =
+        sqlite_agent_state("CREATE TABLE notes (id INTEGER, title TEXT); INSERT INTO notes VALUES (1, 'alpha');").await;
+
+    let insert_args = json!({ "sql": "INSERT INTO notes (id, title) VALUES (2, 'beta')" }).to_string();
+    let turn1 =
+        openai_sse(&[openai_tool_call_delta("call_w1", "execute_query", &insert_args), openai_usage_chunk(10, 4)]);
+    let turn2 = openai_sse(&[
+        json!({ "choices": [{ "delta": { "content": "Inserted the new note." } }] }),
+        openai_usage_chunk(20, 3),
+    ]);
+    let server = MockProvider::start(vec![turn1, turn2]).await;
+    let config = openai_config(&server.base_url);
+
+    resolve_when_registered("t43-write-approved", "call_w1", true);
+
+    let (log, on_event) = event_collector();
+    let ctx = AgentLoopContext {
+        state,
+        connection_id: AGENT_CONN.to_string(),
+        database: String::new(),
+        db_type: DatabaseType::Sqlite,
+    };
+    let run = tokio::time::timeout(
+        Duration::from_secs(30),
+        run_agent_loop(
+            &config,
+            "You are DBX's assistant.",
+            &[AiMessage::text("user", "Add a note titled beta.")],
+            &ctx,
+            "t43-write-approved",
+            on_event,
+            &Notify::new(),
+            CancellationToken::new(),
+            Some(512),
+            Some(0.2),
+            true,
+        ),
+    )
+    .await
+    .expect("the loop finishes once the write is approved")
+    .expect("the approved write completes the loop");
+    let _ = std::fs::remove_dir_all(dir);
+    assert_eq!(run, "Inserted the new note.");
+
+    // The mutating statement pauses for a confirmation card, then executes.
+    let events = log.lock().expect("event log").clone();
+    assert_eq!(
+        event_kinds(&events),
+        vec![
+            "turn_start",
+            "turn_end",
+            "tool_call_start",
+            "tool_confirm_request",
+            "tool_call_end",
+            "turn_start",
+            "text_delta",
+            "turn_end",
+            "agent_end",
+        ]
+    );
+    assert_eq!(events[3]["tool_call_id"], "call_w1");
+    assert_eq!(events[3]["sql"], "INSERT INTO notes (id, title) VALUES (2, 'beta')");
+    assert_eq!(events[4]["is_error"], false, "the approved write executed");
+    assert!(
+        events[4]["result"]["content"].as_str().expect("tool result").contains("1 affected rows"),
+        "{}",
+        events[4]["result"]["content"]
+    );
+
+    // The write really hit the database, not just the event stream.
+    let count = db::sqlite::execute_query(&pool, "SELECT COUNT(*) AS n FROM notes").await.expect("count notes");
+    assert_eq!(count.rows[0][0].as_i64(), Some(2), "the insert landed");
+
+    // The model sees the write's outcome on the follow-up request.
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    let body2: Value = serde_json::from_str(&requests[1].body).expect("turn 2 body is JSON");
+    let messages = body2["messages"].as_array().expect("messages");
+    assert_eq!(messages.len(), 4);
+    assert!(
+        messages[3]["content"].as_str().expect("tool message").contains("1 affected rows"),
+        "{}",
+        messages[3]["content"]
+    );
+}
+
+#[tokio::test]
+async fn agent_loop_feeds_a_rejected_write_back_as_a_tool_error() {
+    let (state, pool, dir) =
+        sqlite_agent_state("CREATE TABLE notes (id INTEGER, title TEXT); INSERT INTO notes VALUES (1, 'alpha');").await;
+
+    let delete_args = json!({ "sql": "DELETE FROM notes" }).to_string();
+    let turn1 =
+        openai_sse(&[openai_tool_call_delta("call_r1", "execute_query", &delete_args), openai_usage_chunk(10, 4)]);
+    let turn2 = openai_sse(&[
+        json!({ "choices": [{ "delta": { "content": "I will not delete the notes." } }] }),
+        openai_usage_chunk(20, 3),
+    ]);
+    let server = MockProvider::start(vec![turn1, turn2]).await;
+    let config = openai_config(&server.base_url);
+
+    resolve_when_registered("t43-write-rejected", "call_r1", false);
+
+    let (log, on_event) = event_collector();
+    let ctx = AgentLoopContext {
+        state,
+        connection_id: AGENT_CONN.to_string(),
+        database: String::new(),
+        db_type: DatabaseType::Sqlite,
+    };
+    let run = tokio::time::timeout(
+        Duration::from_secs(30),
+        run_agent_loop(
+            &config,
+            "You are DBX's assistant.",
+            &[AiMessage::text("user", "Delete all the notes.")],
+            &ctx,
+            "t43-write-rejected",
+            on_event,
+            &Notify::new(),
+            CancellationToken::new(),
+            Some(512),
+            Some(0.2),
+            true,
+        ),
+    )
+    .await
+    .expect("the loop finishes once the write is rejected")
+    .expect("the rejected write still completes the loop");
+    let _ = std::fs::remove_dir_all(dir);
+    assert_eq!(run, "I will not delete the notes.");
+
+    // The rejection is fed back as a tool error for the model to react to.
+    let events = log.lock().expect("event log").clone();
+    assert_eq!(
+        event_kinds(&events),
+        vec![
+            "turn_start",
+            "turn_end",
+            "tool_call_start",
+            "tool_confirm_request",
+            "tool_call_end",
+            "turn_start",
+            "text_delta",
+            "turn_end",
+            "agent_end",
+        ]
+    );
+    assert_eq!(events[3]["tool_call_id"], "call_r1");
+    assert_eq!(events[4]["is_error"], true, "the rejection surfaces as an errored tool result");
+    assert_eq!(
+        events[4]["result"]["content"],
+        json!("Error: User rejected execution of this statement."),
+        "the model is told the user said no"
+    );
+
+    // Nothing was deleted.
+    let count = db::sqlite::execute_query(&pool, "SELECT COUNT(*) AS n FROM notes").await.expect("count notes");
+    assert_eq!(count.rows[0][0].as_i64(), Some(1), "the rejected statement never ran");
+
+    // The follow-up request carries the rejection so the model can adjust.
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    let body2: Value = serde_json::from_str(&requests[1].body).expect("turn 2 body is JSON");
+    let messages = body2["messages"].as_array().expect("messages");
+    assert_eq!(messages.len(), 4);
+    assert!(
+        messages[3]["content"].as_str().expect("tool message").contains("User rejected"),
+        "{}",
+        messages[3]["content"]
+    );
 }
