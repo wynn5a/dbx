@@ -1,12 +1,12 @@
 use crate::models::connection::ConnectionConfig;
 use base64::Engine;
 use redis::{
-    aio::ConnectionLike,
+    aio::{ConnectionLike, ConnectionManagerConfig},
     cluster::ClusterClient,
     cluster_async::ClusterConnection,
     sentinel::{Sentinel, SentinelNodeConnectionInfo},
-    ConnectionAddr, ConnectionInfo, FromRedisValue, ProtocolVersion, RedisConnectionInfo, TlsMode,
-    Value as RedisRawValue,
+    AsyncConnectionConfig, ConnectionAddr, ConnectionInfo, FromRedisValue, ProtocolVersion, RedisConnectionInfo,
+    TlsMode, Value as RedisRawValue,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
@@ -178,16 +178,7 @@ pub async fn connect(url: &str, timeout: std::time::Duration) -> Result<RedisDir
     let initial_db = u32::try_from(client.get_connection_info().redis.db).unwrap_or(0);
     // ConnectionManager re-selects the URL's db and re-authenticates on every
     // automatic reconnect, so the session db from the URL survives restarts.
-    let mut con = tokio::time::timeout(timeout, redis::aio::ConnectionManager::new(client))
-        .await
-        .map_err(|_| format!("Redis connection timed out ({}s)", timeout.as_secs()))?
-        .map_err(|e| format!("Redis connection failed: {e}"))?;
-
-    tokio::time::timeout(timeout, redis::cmd("PING").query_async::<String>(&mut con))
-        .await
-        .map_err(|_| format!("Redis ping timed out ({}s)", timeout.as_secs()))?
-        .map_err(|e| format!("Redis authentication failed or command rejected: {e}"))?;
-
+    let con = connect_manager(client, timeout).await?;
     Ok(RedisDirectConnection::new(con, initial_db))
 }
 
@@ -405,14 +396,68 @@ fn parse_redis_port(port: &str) -> Result<u16, String> {
 }
 
 async fn connect_client(client: redis::Client) -> Result<redis::aio::ConnectionManager, String> {
-    let mut con = tokio::time::timeout(super::connection_timeout(), redis::aio::ConnectionManager::new(client))
-        .await
-        .map_err(|_| format!("Redis connection timed out ({}s)", super::CONNECTION_TIMEOUT_SECS))?
-        .map_err(|e| format!("Redis connection failed: {e}"))?;
+    connect_manager(client, super::connection_timeout()).await
+}
 
-    tokio::time::timeout(super::connection_timeout(), redis::cmd("PING").query_async::<String>(&mut con))
+/// Reconnect budget of a [`redis::aio::ConnectionManager`]: 1 + this many dial
+/// attempts per reconnect. Every command issued while a reconnect is running
+/// awaits it (under the session mutex), so the budget bounds how long a
+/// command can stall during an outage; once it is spent the command fails and
+/// the next one starts a fresh reconnect.
+const RECONNECT_RETRIES: usize = 3;
+/// Backoff growth factor between reconnect attempts. The manager feeds this
+/// straight into backon's `ExponentialBuilder`, whose first delay is 1 s — so
+/// the redis crate's default factor of 100 grows 1 s → 100 s (capped at 60 s).
+const RECONNECT_BACKOFF_GROWTH: u64 = 2;
+/// Cap for a single reconnect delay, in milliseconds (jitter adds up to 100%).
+const RECONNECT_MAX_DELAY_MS: u64 = 1_000;
+/// Upper bound for any single command's reply. Without it a half-open socket
+/// (peer gone without a RST) would park the command — and the session mutex —
+/// until the OS gives up. Generous so slow-but-legitimate commands (KEYS or
+/// large HGETALL on a big instance) still finish.
+const RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Reconnect/timeout policy shared by every direct ConnectionManager. With
+/// these values a command during an outage waits at most roughly
+/// `RECONNECT_RETRIES * 2 s` of backoff plus `(RECONNECT_RETRIES + 1)` dial
+/// timeouts, instead of the default policy's 1–2 s, then 60–120 s sleeps.
+fn connection_manager_config(connect_timeout: std::time::Duration) -> ConnectionManagerConfig {
+    ConnectionManagerConfig::new()
+        .set_factor(RECONNECT_BACKOFF_GROWTH)
+        .set_max_delay(RECONNECT_MAX_DELAY_MS)
+        .set_number_of_retries(RECONNECT_RETRIES)
+        .set_connection_timeout(connect_timeout)
+        .set_response_timeout(RESPONSE_TIMEOUT)
+}
+
+/// Dial once without retries so a real failure (refused, DNS, TLS, wrong
+/// password) surfaces with its own message, then hand the client to a
+/// ConnectionManager for automatic reconnects. The manager's initial connect
+/// runs its reconnect backoff with no error filter, so letting it make the
+/// first dial would retry a wrong password until the outer timeout and report
+/// only "timed out".
+async fn connect_manager(
+    client: redis::Client,
+    timeout: std::time::Duration,
+) -> Result<redis::aio::ConnectionManager, String> {
+    let probe_config = AsyncConnectionConfig::new().set_connection_timeout(timeout).set_response_timeout(timeout);
+    let probe = tokio::time::timeout(timeout, client.get_multiplexed_async_connection_with_config(&probe_config))
         .await
-        .map_err(|_| format!("Redis ping timed out ({}s)", super::CONNECTION_TIMEOUT_SECS))?
+        .map_err(|_| format!("Redis connection timed out ({}s)", timeout.as_secs()))?
+        .map_err(|e| format!("Redis connection failed: {e}"))?;
+    drop(probe);
+
+    let mut con = tokio::time::timeout(
+        timeout,
+        redis::aio::ConnectionManager::new_with_config(client, connection_manager_config(timeout)),
+    )
+    .await
+    .map_err(|_| format!("Redis connection timed out ({}s)", timeout.as_secs()))?
+    .map_err(|e| format!("Redis connection failed: {e}"))?;
+
+    tokio::time::timeout(timeout, redis::cmd("PING").query_async::<String>(&mut con))
+        .await
+        .map_err(|_| format!("Redis ping timed out ({}s)", timeout.as_secs()))?
         .map_err(|e| format!("Redis authentication failed or command rejected: {e}"))?;
 
     Ok(con)
@@ -1950,9 +1995,23 @@ mod tests {
             "standalone and Sentinel connections must wrap redis::aio::ConnectionManager so a \
              lost socket reconnects with backoff instead of dying forever"
         );
+        // The only bare MultiplexedConnection is connect_manager's one-shot
+        // probe (it surfaces the real initial-connect error) and it is dropped
+        // before the ConnectionManager is built.
+        let manager_body = source.split("async fn connect_manager(").nth(1).unwrap();
+        let manager_body = manager_body.split("\n}\n").next().unwrap();
         assert!(
-            !source.contains("get_multiplexed_async_connection"),
-            "no direct path may build a bare MultiplexedConnection; it never reconnects"
+            manager_body.contains("drop(probe)") && manager_body.contains("ConnectionManager::new_with_config"),
+            "connect_manager must drop its probe and hand the client to a configured ConnectionManager"
+        );
+        assert_eq!(
+            source.matches("get_multiplexed_async_connection").count(),
+            manager_body.matches("get_multiplexed_async_connection").count(),
+            "no direct path may keep a bare MultiplexedConnection; it never reconnects"
+        );
+        assert!(
+            !source.contains("ConnectionManager::new(client)"),
+            "the default manager policy sleeps 60–120 s on its second retry; use connection_manager_config"
         );
 
         let error_hook = source.split("fn forget_tracked_db_on_connection_error").nth(1).unwrap();
@@ -1961,6 +2020,37 @@ mod tests {
             "a reconnecting failure starts the session on the configured db, so the tracked \
              SELECT must be invalidated exactly on the errors that trigger reconnection"
         );
+    }
+
+    #[test]
+    fn connection_manager_policy_bounds_reconnect_stalls() {
+        let config = format!("{:?}", super::connection_manager_config(std::time::Duration::from_secs(5)));
+        // Growth 2 from backon's 1 s first delay, each delay capped at 1 s
+        // (+ jitter), 3 retries: an outage stalls a command for seconds, not
+        // the default policy's 60–120 s second sleep.
+        for expected in [
+            "factor: 2",
+            "number_of_retries: 3",
+            "max_delay: Some(1000)",
+            "connection_timeout: Some(5s)",
+            "response_timeout: Some(60s)",
+        ] {
+            assert!(config.contains(expected), "manager config must set {expected}: {config}");
+        }
+    }
+
+    #[tokio::test]
+    async fn refused_initial_connect_reports_the_os_error_fast() {
+        let port = portpicker::pick_unused_port().expect("free port");
+        let started = std::time::Instant::now();
+        let error = super::connect(&format!("redis://127.0.0.1:{port}/"), std::time::Duration::from_secs(5))
+            .await
+            .err()
+            .expect("nothing listens on the port");
+        // Below the 5 s timeout with headroom for Windows, whose refused
+        // connects retry the SYN for ~2 s.
+        assert!(started.elapsed() < std::time::Duration::from_secs(4), "took {:?}", started.elapsed());
+        assert!(error.to_lowercase().contains("refused") && !error.contains("timed out"), "{error}");
     }
 
     #[test]
