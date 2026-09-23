@@ -2,6 +2,7 @@ import * as api from "@/lib/api";
 import { connectionObjectTreeQuerySchema, effectiveDatabaseTypeForConnection } from "@/lib/jdbcDialect";
 import { buildTableSelectSql } from "@/lib/tableSelectSql";
 import { editablePrimaryKeys, usesSyntheticRowIdKey } from "@/lib/tableEditing";
+import { seedDataTabFilterState } from "@/lib/tableDataTabMeta";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useQueryStore } from "@/stores/queryStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -38,6 +39,8 @@ async function openTableTarget(target: NavigationTarget) {
     }
     return queryStore.createTab(target.connectionId, target.database, tabTitle, "data", target.schema);
   })();
+  const openedTab = queryStore.tabs.find((tab) => tab.id === tabId);
+  if (openedTab) seedDataTabFilterState(openedTab, target.whereInput);
   queryStore.setExecuting(tabId, true);
 
   try {

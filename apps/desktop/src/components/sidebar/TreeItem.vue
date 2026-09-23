@@ -78,6 +78,7 @@ import {
   type QueryEditorSidebarReferencePayload,
 } from "@/lib/queryEditorTableDrop";
 import { editablePrimaryKeys } from "@/lib/tableEditing";
+import { seedDataTabFilterState } from "@/lib/tableDataTabMeta";
 import {
   supportsDatabaseCreation,
   supportsDatabaseSearch,
@@ -830,6 +831,8 @@ async function openData() {
     return queryStore.createTab(node.connectionId, node.database, node.label, "data", tableSchema);
   })();
   console.info("[DBX][openData:tab-created]", { traceId, tabId, elapsed: elapsed() });
+  const openedTab = queryStore.tabs.find((tab) => tab.id === tabId);
+  if (openedTab) seedDataTabFilterState(openedTab);
   queryStore.setTableMeta(tabId, {
     schema: tableSchema,
     tableName: node.label,

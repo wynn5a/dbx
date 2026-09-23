@@ -1,5 +1,7 @@
 import { computed, ref, watch, type ComputedRef } from "vue";
 import {
+  canPinColumnName,
+  mergeDataGridColumnOrder,
   normalizeDataGridColumnLayout,
   pinColumnInLayout,
   resolveDataGridColumnRenderOrder,
@@ -13,8 +15,18 @@ import {
  * system the pending-changes/scroll snapshots use. Entries survive DataGrid
  * unmount/remount (tab switches, result re-executions) for the lifetime of the
  * session and are dropped when their tab closes.
+ *
+ * Each entry remembers the grid scope it was saved for: the cache key alone is
+ * reused by every query run in the same tab (`<tab>-0`), so a layout saved for
+ * query A must not be restored onto query B's result.
  */
-const layoutCache = new Map<string, DataGridColumnLayout>();
+interface CachedDataGridColumnLayout {
+  /** Scope key the layout belongs to; undefined = unscoped (tests). */
+  scope?: string;
+  layout: DataGridColumnLayout;
+}
+
+const layoutCache = new Map<string, CachedDataGridColumnLayout>();
 
 function cacheKeyBelongsToTab(cacheKey: string, tabId: string) {
   return cacheKey === tabId || cacheKey.startsWith(`${tabId}-`);
@@ -28,11 +40,18 @@ export function clearDataGridColumnLayoutsForTab(tabId: string) {
 }
 
 export function readDataGridColumnLayoutForTesting(cacheKey: string): DataGridColumnLayout | undefined {
-  return layoutCache.get(cacheKey);
+  return layoutCache.get(cacheKey)?.layout;
 }
 
-export function writeDataGridColumnLayoutForTesting(cacheKey: string, layout: DataGridColumnLayout) {
-  layoutCache.set(cacheKey, normalizeDataGridColumnLayout(layout));
+export function writeDataGridColumnLayoutForTesting(cacheKey: string, layout: DataGridColumnLayout, scope?: string) {
+  layoutCache.set(cacheKey, { scope, layout: normalizeDataGridColumnLayout(layout) });
+}
+
+function restorableLayout(cacheKey: string | undefined, scope: string): DataGridColumnLayout | undefined {
+  const cached = cacheKey ? layoutCache.get(cacheKey) : undefined;
+  if (!cached) return undefined;
+  if (cached.scope !== undefined && cached.scope !== scope) return undefined;
+  return cached.layout;
 }
 
 export interface UseDataGridColumnLayoutOptions {
@@ -52,12 +71,14 @@ export interface UseDataGridColumnLayoutOptions {
 export function useDataGridColumnLayout(options: UseDataGridColumnLayoutOptions) {
   const { cacheKey, columnNames, baseVisibleColumnIndexes, scopeKey } = options;
 
+  // Order keys (`dataGridColumnOrderKeys`): names, disambiguated for duplicates.
   const columnOrderNames = ref<string[] | undefined>(undefined);
   const pinnedColumnNames = ref<string[]>([]);
   const persistedWidths = ref<Record<string, number> | undefined>(undefined);
 
-  // Restore the per-tab layout once per DataGrid instance.
-  const initial = normalizeDataGridColumnLayout(cacheKey.value ? layoutCache.get(cacheKey.value) : undefined);
+  // Restore the per-tab layout once per DataGrid instance — only when it was
+  // saved for this same scope (same table / SQL / column set).
+  const initial = normalizeDataGridColumnLayout(restorableLayout(cacheKey.value, scopeKey.value));
   columnOrderNames.value = initial.order;
   pinnedColumnNames.value = initial.pinned ?? [];
   persistedWidths.value = initial.widths;
@@ -75,7 +96,7 @@ export function useDataGridColumnLayout(options: UseDataGridColumnLayoutOptions)
     if (pinnedColumnNames.value.length > 0) {
       layout.pinned = [...pinnedColumnNames.value];
     }
-    layoutCache.set(key, layout);
+    layoutCache.set(key, { scope: scopeKey.value, layout });
   }
 
   watch([columnOrderNames, pinnedColumnNames], persist);
@@ -103,11 +124,20 @@ export function useDataGridColumnLayout(options: UseDataGridColumnLayoutOptions)
     return pinnedColumnNames.value.includes(name);
   }
 
+  const visibleColumnNames = computed(() =>
+    baseVisibleColumnIndexes.value.map((actualIdx) => columnNames.value[actualIdx] ?? ""),
+  );
+
+  /** Whether pinning `name` still leaves a visible unpinned column (hidden pinned names don't count). */
+  function canPinColumn(name: string): boolean {
+    return canPinColumnName(name, pinnedColumnNames.value, visibleColumnNames.value);
+  }
+
   /** Pin by actual result column index (header menus resolve to indexes). */
   function pinColumn(actualColumnIndex: number): boolean {
     const name = columnNames.value[actualColumnIndex];
     if (!name) return false;
-    const result = pinColumnInLayout(name, pinnedColumnNames.value, baseVisibleColumnIndexes.value.length);
+    const result = pinColumnInLayout(name, pinnedColumnNames.value, visibleColumnNames.value);
     if (!result.changed) return false;
     pinnedColumnNames.value = result.pinned;
     return true;
@@ -128,9 +158,16 @@ export function useDataGridColumnLayout(options: UseDataGridColumnLayoutOptions)
     return isColumnNamePinned(name) ? unpinColumn(actualColumnIndex) : pinColumn(actualColumnIndex);
   }
 
-  /** Replace the manual order with the given render order (actual indexes). */
+  /**
+   * Replace the manual order with the given render order (actual indexes of the
+   * visible columns). Hidden columns keep their previous slot.
+   */
   function setColumnOrder(renderOrder: number[]) {
-    columnOrderNames.value = renderOrder.map((actualIdx) => columnNames.value[actualIdx] ?? "").filter(Boolean);
+    columnOrderNames.value = mergeDataGridColumnOrder({
+      columnNames: columnNames.value,
+      renderOrder,
+      previousOrder: columnOrderNames.value,
+    });
   }
 
   /** Store column widths (name -> px) produced by the resize composable. */
@@ -155,6 +192,7 @@ export function useDataGridColumnLayout(options: UseDataGridColumnLayoutOptions)
     columnOrderNames,
     persistedWidths,
     isColumnNamePinned,
+    canPinColumn,
     togglePinColumn,
     setColumnOrder,
     setColumnWidths,

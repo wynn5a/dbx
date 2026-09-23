@@ -231,6 +231,11 @@ import {
   permutationFromOrders,
   reorderColumnSlots,
 } from "@/lib/dataGridColumnLayout";
+import {
+  dataGridScrollLeftToCenterColumn,
+  dataGridScrollLeftToRevealColumn,
+  type DataGridColumnScrollGeometry,
+} from "@/lib/dataGridColumnScroll";
 import { useDataGridColumnLayout } from "@/composables/useDataGridColumnLayout";
 
 import { useToast } from "@/composables/useToast";
@@ -541,6 +546,23 @@ const orderBySuggestionPosition = ref({ left: 0, top: 0 });
 const orderByInput = ref(props.initialOrderByInput ?? "");
 const hasOrderByInput = computed(() => orderByInput.value.trim().length > 0);
 const whereFilterInput = ref(props.initialWhereInput ?? "");
+// A reused data tab (or a navigation into an already-open tab) re-seeds the
+// tab's WHERE/ORDER BY bar state without remounting the grid; follow it so
+// paging/sorting/refresh rebuild the SQL from the filter that actually ran.
+watch(
+  () => props.initialWhereInput,
+  (value) => {
+    const next = value ?? "";
+    if (next !== whereFilterInput.value) whereFilterInput.value = next;
+  },
+);
+watch(
+  () => props.initialOrderByInput,
+  (value) => {
+    const next = value ?? "";
+    if (next !== orderByInput.value) orderByInput.value = next;
+  },
+);
 const hasWhereFilterInput = computed(() => whereFilterInput.value.trim().length > 0);
 const searchSplitContainerRef = ref<HTMLDivElement>();
 const searchSplitWhereWidth = ref<number | null>(null);
@@ -1580,6 +1602,7 @@ const {
   orderedVisibleColumnIndexes,
   pinnedVisiblePrefixCount: pinnedVisibleColumnCount,
   isColumnNamePinned,
+  canPinColumn,
   togglePinColumn,
   setColumnOrder,
   setColumnWidths,
@@ -1745,14 +1768,7 @@ function scrollToTableInfoColumn(columnName: string) {
 
     // Pinned columns are always on screen — just highlight them.
     if (visibleColIdx >= pinnedVisibleColumnCount.value) {
-      const pinnedTotalWidth = renderedColumnOffsets.value[pinnedVisibleColumnCount.value] ?? 0;
-      const targetLeft = Math.max(
-        0,
-        columnContentOffsetLeft(visibleColIdx) -
-          (scroller.clientWidth - pinnedTotalWidth) / 2 +
-          (renderedColumnWidths.value[visibleColIdx] ?? 0) / 2,
-      );
-      scroller.scrollLeft = targetLeft;
+      scroller.scrollLeft = dataGridScrollLeftToCenterColumn(columnScrollGeometry(visibleColIdx, scroller));
       updateGridHorizontalViewport(scroller);
       if (headerRef.value) {
         headerRef.value.scrollLeft = scroller.scrollLeft;
@@ -1958,6 +1974,17 @@ function columnContentOffsetLeft(visibleColIdx: number): number {
   return DATA_GRID_ROW_NUM_WIDTH + (renderedColumnOffsets.value[visibleColIdx] ?? 0);
 }
 
+function columnScrollGeometry(visibleColIdx: number, scroller: HTMLElement): DataGridColumnScrollGeometry {
+  return {
+    columnLeft: columnContentOffsetLeft(visibleColIdx),
+    columnWidth: renderedColumnWidths.value[visibleColIdx] ?? 0,
+    scrollLeft: scroller.scrollLeft,
+    clientWidth: scroller.clientWidth,
+    rowNumberWidth: DATA_GRID_ROW_NUM_WIDTH,
+    pinnedWidth: pinnedTotalColumnWidth.value,
+  };
+}
+
 // --- Column drag reorder & pin ---
 const COLUMN_DRAG_THRESHOLD_PX = 4;
 const columnDrag = ref<{ fromPos: number; targetPos: number; placeBefore: boolean } | null>(null);
@@ -2024,8 +2051,10 @@ function applyColumnReorder(fromPos: number, targetPos: number, placeBefore: boo
   const before = visibleColumnIndexes.value;
   const slot = columnInsertSlot(targetPos, placeBefore);
   const after = reorderColumnSlots(before, fromPos, slot);
-  applyWidthPermutation(permutationFromOrders(before, after));
   setColumnOrder(after);
+  // Widths follow the order the layout actually resolved to (identical to
+  // `after` unless the stored order cannot express it).
+  applyWidthPermutation(permutationFromOrders(before, visibleColumnIndexes.value));
 }
 
 /** Pin / unpin keeps widths with their columns via the same permutation. */
@@ -4838,16 +4867,8 @@ function scrollGridColumnIntoView(visibleColIdx: number) {
   if (visibleColIdx < pinnedVisibleColumnCount.value) return;
   const scroller = gridRef.value?.querySelector<HTMLElement>(".data-grid-scroller");
   if (!scroller) return;
-  const colLeft = columnContentOffsetLeft(visibleColIdx);
-  const colRight = colLeft + (renderedColumnWidths.value[visibleColIdx] ?? 0);
-  const viewportLeft = scroller.scrollLeft + DATA_GRID_ROW_NUM_WIDTH + pinnedTotalColumnWidth.value;
-  const viewportRight = scroller.scrollLeft + scroller.clientWidth;
-
-  if (colLeft < viewportLeft) {
-    scroller.scrollLeft = Math.max(0, colLeft - DATA_GRID_ROW_NUM_WIDTH);
-  } else if (colRight > viewportRight) {
-    scroller.scrollLeft = Math.max(0, colRight - scroller.clientWidth);
-  }
+  const nextScrollLeft = dataGridScrollLeftToRevealColumn(columnScrollGeometry(visibleColIdx, scroller));
+  if (nextScrollLeft !== null) scroller.scrollLeft = nextScrollLeft;
 
   updateGridHorizontalViewport(scroller);
   if (headerRef.value) headerRef.value.scrollLeft = scroller.scrollLeft;
@@ -5611,13 +5632,10 @@ async function copyHeaderColumn() {
 const isContextHeaderColumnPinned = computed(
   () => !!contextHeaderColumn.value && isColumnNamePinned(contextHeaderColumn.value),
 );
-/** Pinning must keep at least one unpinned (scrolling) column behind. */
-function canPinAdditionalColumn(): boolean {
-  return pinnedVisibleColumnCount.value < visibleColumnIndexes.value.length - 1;
-}
+/** Pinning must keep at least one unpinned (scrolling) column behind — same guard the pin action applies. */
 const canPinContextHeaderColumn = computed(() => {
   if (!contextHeaderColumn.value) return false;
-  return isColumnNamePinned(contextHeaderColumn.value) || canPinAdditionalColumn();
+  return isColumnNamePinned(contextHeaderColumn.value) || canPinColumn(contextHeaderColumn.value);
 });
 function toggleContextHeaderPin() {
   if (contextHeaderColumnIndex.value !== null) toggleColumnPinWithWidths(contextHeaderColumnIndex.value);
@@ -7406,7 +7424,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                             </DropdownMenuItem>
                             <DropdownMenuItem
                               class="gap-1 px-1.5 py-0.5 text-xs"
-                              :disabled="!isColumnNamePinned(col.name) && !canPinAdditionalColumn()"
+                              :disabled="!isColumnNamePinned(col.name) && !canPinColumn(col.name)"
                               @select.prevent="toggleColumnPinWithWidths(col.actualColIdx)"
                             >
                               <PinOff v-if="isColumnNamePinned(col.name)" class="h-3 w-3" />

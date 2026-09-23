@@ -3,8 +3,11 @@ import { strict as assert } from "node:assert";
 import { test } from "vitest";
 import { computed, nextTick, ref } from "vue";
 import {
+  canPinColumnName,
   columnDropTargetAtClientX,
   columnInsertSlot,
+  dataGridColumnOrderKeys,
+  mergeDataGridColumnOrder,
   isNoopColumnDrop,
   normalizeDataGridColumnLayout,
   permutationFromOrders,
@@ -409,6 +412,128 @@ test("layout composable: scope change resets order, pinned and widths", async ()
   assert.equal(stored?.widths, undefined);
 });
 
+test("dataGridColumnOrderKeys disambiguates duplicate names by occurrence", () => {
+  assert.deepEqual(dataGridColumnOrderKeys(["id", "name", "id", "id"]), ["id", "name", "id\u00001", "id\u00002"]);
+});
+
+test("resolveDataGridColumnRenderOrder: legacy name-only orders still rank the first duplicate", () => {
+  const order = resolveDataGridColumnRenderOrder({
+    columnNames: ["id", "name", "id"],
+    visibleColumnIndexes: [0, 1, 2],
+    order: ["name", "id"],
+  });
+  assert.deepEqual(order, [1, 0, 2]);
+});
+
+test("layout composable: dragging one of two duplicate-named columns lands it where dropped", async () => {
+  clearDataGridColumnLayoutsForTab("tab-dup");
+  const layout = useDataGridColumnLayout({
+    cacheKey: computed(() => "tab-dup-0"),
+    columnNames: computed(() => ["id", "name", "id"]),
+    baseVisibleColumnIndexes: computed(() => [0, 1, 2]),
+    scopeKey: ref("scope"),
+  });
+  // Drag position 0 (the first `id`) to the end — the review repro.
+  const before = layout.orderedVisibleColumnIndexes.value;
+  const after = reorderColumnSlots(before, 0, columnInsertSlot(2, false));
+  assert.deepEqual(after, [1, 2, 0]);
+  layout.setColumnOrder(after);
+  assert.deepEqual(layout.orderedVisibleColumnIndexes.value, [1, 2, 0]);
+  // The width permutation DataGrid derives from the resolved order keeps each
+  // width with its own column.
+  assert.deepEqual(permutationFromOrders(before, layout.orderedVisibleColumnIndexes.value), [1, 2, 0]);
+  await nextTick();
+  assert.deepEqual(readDataGridColumnLayoutForTesting("tab-dup-0")?.order, ["name", "id\u00001", "id"]);
+});
+
+test("layout composable: a hidden column keeps its slot across a drag instead of jumping to the far right", () => {
+  clearDataGridColumnLayoutsForTab("tab-hide");
+  const visible = ref([0, 2, 3]); // `b` hidden
+  const layout = useDataGridColumnLayout({
+    cacheKey: computed(() => "tab-hide-0"),
+    columnNames: computed(() => ["a", "b", "c", "d"]),
+    baseVisibleColumnIndexes: computed(() => visible.value),
+    scopeKey: ref("scope"),
+  });
+  layout.setColumnOrder([3, 0, 2]); // drag `d` to the front
+  assert.deepEqual(layout.orderedVisibleColumnIndexes.value, [3, 0, 2]);
+  visible.value = [0, 1, 2, 3]; // show `b` again
+  assert.deepEqual(layout.orderedVisibleColumnIndexes.value, [3, 1, 0, 2]);
+  assert.deepEqual(
+    mergeDataGridColumnOrder({ columnNames: ["a", "b", "c"], renderOrder: [2, 0], previousOrder: ["b", "c", "a"] }),
+    ["b", "c", "a"],
+  );
+});
+
+test("pin guard counts visible columns only, matching the menu guard", () => {
+  // 4 columns, pin a + b, hide a: pinning c still leaves d unpinned.
+  assert.equal(canPinColumnName("c", ["a", "b"], ["b", "c", "d"]), true);
+  assert.equal(canPinColumnName("d", ["a", "b", "c"], ["b", "c", "d"]), false);
+  assert.equal(canPinColumnName("b", ["a", "b"], ["b", "c", "d"]), false); // already pinned
+  // A duplicated name pins every visible column carrying it.
+  assert.equal(canPinColumnName("id", [], ["id", "id"]), false);
+
+  clearDataGridColumnLayoutsForTab("tab-pin");
+  const visible = ref([0, 1, 2, 3]);
+  const layout = useDataGridColumnLayout({
+    cacheKey: computed(() => "tab-pin-0"),
+    columnNames: computed(() => ["a", "b", "c", "d"]),
+    baseVisibleColumnIndexes: computed(() => visible.value),
+    scopeKey: ref("scope"),
+  });
+  assert.equal(layout.togglePinColumn(0), true);
+  assert.equal(layout.togglePinColumn(1), true);
+  visible.value = [1, 2, 3];
+  assert.equal(layout.canPinColumn("c"), true);
+  assert.equal(layout.togglePinColumn(2), true);
+  assert.equal(layout.canPinColumn("d"), false);
+  assert.equal(layout.togglePinColumn(3), false);
+});
+
+test("layout composable: a layout saved for one query is not restored onto another query in the same tab", async () => {
+  clearDataGridColumnLayoutsForTab("tab-scope");
+  const first = useDataGridColumnLayout({
+    cacheKey: computed(() => "tab-scope-0"),
+    columnNames: computed(() => ["id", "name"]),
+    baseVisibleColumnIndexes: computed(() => [0, 1]),
+    scopeKey: ref("select id, name from a"),
+  });
+  first.togglePinColumn(1);
+  first.setColumnWidths({ name: 320 });
+  await nextTick();
+
+  // Query B (same column names) remounts the grid with the same cache key.
+  const other = useDataGridColumnLayout({
+    cacheKey: computed(() => "tab-scope-0"),
+    columnNames: computed(() => ["id", "name"]),
+    baseVisibleColumnIndexes: computed(() => [0, 1]),
+    scopeKey: ref("select id, name from b"),
+  });
+  assert.deepEqual(other.orderedVisibleColumnIndexes.value, [0, 1]);
+  assert.equal(other.pinnedVisiblePrefixCount.value, 0);
+  assert.equal(other.persistedWidths.value, undefined);
+
+  // Re-running query A (same scope) still restores A's layout.
+  clearDataGridColumnLayoutsForTab("tab-scope");
+  const again = useDataGridColumnLayout({
+    cacheKey: computed(() => "tab-scope-0"),
+    columnNames: computed(() => ["id", "name"]),
+    baseVisibleColumnIndexes: computed(() => [0, 1]),
+    scopeKey: ref("select id, name from a"),
+  });
+  again.togglePinColumn(1);
+  again.setColumnWidths({ name: 320 });
+  await nextTick();
+  const rerun = useDataGridColumnLayout({
+    cacheKey: computed(() => "tab-scope-0"),
+    columnNames: computed(() => ["id", "name"]),
+    baseVisibleColumnIndexes: computed(() => [0, 1]),
+    scopeKey: ref("select id, name from a"),
+  });
+  assert.deepEqual(rerun.orderedVisibleColumnIndexes.value, [1, 0]);
+  assert.deepEqual(rerun.persistedWidths.value, { name: 320 });
+});
+
 // ---------------------------------------------------------------------------
 // Canvas renderer: pinned columns paint in a second, scroll-independent pass
 // ---------------------------------------------------------------------------
@@ -571,8 +696,11 @@ test("DataGrid exposes pin/unpin via header context menu and compact header drop
   assert.match(DATA_GRID_SOURCE, /action: toggleContextHeaderPin/);
   assert.match(DATA_GRID_SOURCE, /isColumnNamePinned\(col\.name\) \? t\("grid\.unpinColumn"\) : t\("grid\.pinColumn"\)/);
   assert.match(DATA_GRID_SOURCE, /@select\.prevent="toggleColumnPinWithWidths\(col\.actualColIdx\)"/);
-  // Pinning keeps at least one unpinned column behind.
-  assert.match(DATA_GRID_SOURCE, /function canPinAdditionalColumn\(\): boolean/);
+  // Pinning keeps at least one unpinned column behind — menus use the same
+  // visible-only guard the pin action applies (hidden pinned names don't count).
+  assert.match(DATA_GRID_SOURCE, /canPinColumn\(contextHeaderColumn\.value\)/);
+  assert.match(DATA_GRID_SOURCE, /!isColumnNamePinned\(col\.name\) && !canPinColumn\(col\.name\)/);
+  assert.doesNotMatch(DATA_GRID_SOURCE, /canPinAdditionalColumn/);
 });
 
 test("DataGrid feeds the pinned prefix to the canvas renderer and hit-testing", () => {

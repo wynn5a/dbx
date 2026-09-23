@@ -5,8 +5,10 @@
  * The layout is persisted per tab next to the column widths (see
  * `useDataGridColumnLayout`). Both `order` and `pinned` identify columns by
  * NAME so a stored layout survives result reloads — actual column indexes are
- * unstable across queries, names are not (duplicate names from e.g. joins
- * collapse to their first occurrence; that trade-off is deliberate).
+ * unstable across queries, names are not. `order` disambiguates duplicate
+ * names (e.g. a join returning two `id` columns) with an occurrence key (see
+ * `dataGridColumnOrderKeys`) so each duplicate keeps its own slot; `pinned` is
+ * a name set, so pinning `id` pins every `id` column.
  *
  * Render order is always: pinned columns first (as a prefix, keeping their
  * relative order), then the remaining columns. Pinned is a *set* — dragging a
@@ -65,20 +67,56 @@ export function isColumnPinned(columnName: string, pinned: ReadonlyArray<string>
 }
 
 /**
+ * Order key per actual column index: the plain name for a name's first
+ * occurrence, `name\u0000<k>` for its k-th duplicate. Plain names keep old
+ * (name-only) stored orders valid.
+ */
+export function dataGridColumnOrderKeys(columnNames: ReadonlyArray<string>): string[] {
+  const seen = new Map<string, number>();
+  return columnNames.map((name) => {
+    const occurrence = seen.get(name) ?? 0;
+    seen.set(name, occurrence + 1);
+    return occurrence === 0 ? name : `${name}\u0000${occurrence}`;
+  });
+}
+
+/**
+ * True when pinning `columnName` still leaves at least one visible column
+ * unpinned. Counts visible columns only: pinned names that are currently
+ * hidden (or absent) must not use up the budget, and a duplicated name pins
+ * every visible column carrying it.
+ */
+export function canPinColumnName(
+  columnName: string,
+  pinned: ReadonlyArray<string> | undefined,
+  visibleColumnNames: ReadonlyArray<string>,
+): boolean {
+  if (!columnName || pinned?.includes(columnName)) return false;
+  const pinnedSet = new Set(pinned ?? []);
+  pinnedSet.add(columnName);
+  const pinnedVisible = visibleColumnNames.filter((name) => pinnedSet.has(name)).length;
+  return pinnedVisible <= visibleColumnNames.length - 1;
+}
+
+/**
  * Pin `columnName`. Refuses when every visible column would end up pinned
  * (same guard as column visibility: at least one unpinned column remains).
+ * `visibleColumns` is either the visible column names (preferred — hidden
+ * pinned names then do not count) or just the visible column count.
  */
 export function pinColumnInLayout(
   columnName: string,
   pinned: ReadonlyArray<string> | undefined,
-  visibleColumnCount: number,
+  visibleColumns: number | ReadonlyArray<string>,
 ): { pinned: string[]; changed: boolean } {
   if (!columnName) return { pinned: [...(pinned ?? [])], changed: false };
   if (pinned?.includes(columnName)) return { pinned: [...pinned], changed: false };
   // Pinning must keep at least one unpinned column behind.
-  if (visibleColumnCount > 0 && (pinned?.length ?? 0) + 1 > visibleColumnCount - 1) {
-    return { pinned: [...(pinned ?? [])], changed: false };
-  }
+  const refused =
+    typeof visibleColumns === "number"
+      ? visibleColumns > 0 && (pinned?.length ?? 0) + 1 > visibleColumns - 1
+      : visibleColumns.length > 0 && !canPinColumnName(columnName, pinned, visibleColumns);
+  if (refused) return { pinned: [...(pinned ?? [])], changed: false };
   return { pinned: [...(pinned ?? []), columnName], changed: true };
 }
 
@@ -96,8 +134,9 @@ export function unpinColumnFromLayout(
  *
  * - `visibleColumnIndexes` are actual result column indexes in the original
  *   (post visibility-filter) order.
- * - `order` ranks columns by name; names missing from `order` keep their
- *   original relative order after all ranked ones. Names in `order` that are
+ * - `order` ranks columns by order key (`dataGridColumnOrderKeys`: the name,
+ *   or name + occurrence for duplicates); keys missing from `order` keep their
+ *   original relative order after all ranked ones. Keys in `order` that are
  *   not visible (hidden / stale) are ignored.
  * - `pinned` stable-partitions the result: pinned columns become the prefix,
  *   both groups keep their relative order.
@@ -112,17 +151,18 @@ export function resolveDataGridColumnRenderOrder(options: {
 
   let ordered: Array<{ actualIdx: number; name: string }>;
   if (order && order.length > 0) {
-    const rankByName = new Map<string, number>();
-    order.forEach((name, index) => {
-      if (!rankByName.has(name)) rankByName.set(name, index);
+    const rankByKey = new Map<string, number>();
+    order.forEach((key, index) => {
+      if (!rankByKey.has(key)) rankByKey.set(key, index);
     });
+    const keys = dataGridColumnOrderKeys(columnNames);
     ordered = visibleColumnIndexes
-      .map((actualIdx, position) => ({ actualIdx, name: columnNames[actualIdx] ?? "", position }))
-      .sort((a, b) => {
-        const rankA = rankByName.get(a.name) ?? order.length + a.position;
-        const rankB = rankByName.get(b.name) ?? order.length + b.position;
-        return rankA - rankB;
-      });
+      .map((actualIdx, position) => ({
+        actualIdx,
+        name: columnNames[actualIdx] ?? "",
+        rank: rankByKey.get(keys[actualIdx] ?? "") ?? order.length + position,
+      }))
+      .sort((a, b) => a.rank - b.rank);
   } else {
     ordered = visibleColumnIndexes.map((actualIdx) => ({ actualIdx, name: columnNames[actualIdx] ?? "" }));
   }
@@ -134,6 +174,34 @@ export function resolveDataGridColumnRenderOrder(options: {
   // Stable partition: pinned first, relative order inside both groups intact.
   const sorted = [...ordered].sort((a, b) => (pinnedSet.has(a.name) ? 0 : 1) - (pinnedSet.has(b.name) ? 0 : 1));
   return sorted.map((entry) => entry.actualIdx);
+}
+
+/**
+ * The order keys to store after the visible columns were rearranged into
+ * `renderOrder`. Hidden columns keep their slot from the previous order (they
+ * would otherwise lose their rank and reappear at the far right when shown
+ * again): the previous full sequence is resolved over every column and the
+ * slots of the visible ones are refilled with `renderOrder`.
+ */
+export function mergeDataGridColumnOrder(options: {
+  columnNames: ReadonlyArray<string>;
+  renderOrder: ReadonlyArray<number>;
+  previousOrder?: ReadonlyArray<string>;
+}): string[] {
+  const { columnNames, renderOrder, previousOrder } = options;
+  const keys = dataGridColumnOrderKeys(columnNames);
+  const previousFull = resolveDataGridColumnRenderOrder({
+    columnNames,
+    visibleColumnIndexes: columnNames.map((_, index) => index),
+    order: previousOrder,
+  });
+  const visible = new Set(renderOrder);
+  let next = 0;
+  const merged =
+    visible.size === renderOrder.length && renderOrder.every((index) => index >= 0 && index < columnNames.length)
+      ? previousFull.map((index) => (visible.has(index) ? renderOrder[next++] : index))
+      : [...renderOrder];
+  return merged.map((index) => keys[index] ?? "").filter(Boolean);
 }
 
 /**
