@@ -1891,12 +1891,14 @@ pub async fn get_object_source_core(
         if let Some(pool) = extract_pool!(&connections, &pool_key, SqlServer) {
             drop(connections);
             let (mut lease, _) = pool.lease_checked().await?;
-            let result = first_string_cell(
-                db::sqlserver::execute_query(lease.conn(), &sqlserver_object_source_sql(schema, name, &object_type))
-                    .await?,
-            )?;
-            lease.keep();
-            result
+            let outcome = db::sqlserver::execute_query_with_max_rows(
+                lease.conn(),
+                &sqlserver_object_source_sql(schema, name, &object_type),
+                None,
+            )
+            .await;
+            lease.settle(&outcome);
+            first_string_cell(outcome?.0)?
         } else if let Some(client) = extract_pool!(&connections, &pool_key, Agent) {
             drop(connections);
             if db_config.as_ref().is_some_and(|config| config.db_type == DatabaseType::Oracle)

@@ -50,8 +50,30 @@ pub struct SqlServerPool {
 
 struct SqlServerPoolInner {
     params: SqlServerConnectParams,
-    idle: tokio::sync::Mutex<Vec<SqlServerClient>>,
+    /// Idle sockets. A plain (non-async) mutex so [SqlServerLease]'s `Drop`
+    /// can return its connection synchronously — before the lease's permit is
+    /// released — and the next checkout reliably finds it instead of racing a
+    /// spawned return task and paying a fresh TDS login on another session.
+    /// The lock is never held across an `.await`.
+    idle: std::sync::Mutex<Vec<SqlServerClient>>,
     permits: Arc<tokio::sync::Semaphore>,
+}
+
+impl SqlServerPoolInner {
+    fn pop_idle(&self) -> Option<SqlServerClient> {
+        self.idle.lock().unwrap_or_else(|e| e.into_inner()).pop()
+    }
+
+    /// Return a healthy connection to the idle list, capped at the pool size:
+    /// idle sockets are not counted by the semaphore, so an uncapped list
+    /// could otherwise outgrow [SQLSERVER_POOL_MAX_SIZE].
+    fn push_idle(&self, conn: SqlServerClient) {
+        let mut idle = self.idle.lock().unwrap_or_else(|e| e.into_inner());
+        if idle.len() < SQLSERVER_POOL_MAX_SIZE {
+            idle.push(conn);
+        }
+        // else: dropped here, closing the surplus socket.
+    }
 }
 
 impl SqlServerPool {
@@ -72,7 +94,7 @@ impl SqlServerPool {
         Ok(Self {
             inner: Arc::new(SqlServerPoolInner {
                 params,
-                idle: tokio::sync::Mutex::new(vec![conn]),
+                idle: std::sync::Mutex::new(vec![conn]),
                 permits: Arc::new(tokio::sync::Semaphore::new(SQLSERVER_POOL_MAX_SIZE)),
             }),
         })
@@ -82,11 +104,17 @@ impl SqlServerPool {
         SQLSERVER_POOL_MAX_SIZE
     }
 
+    /// Number of sockets currently parked in the idle list.
+    pub fn idle_count(&self) -> usize {
+        self.inner.idle.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
     /// Check out a raw connection, bounded by the pool's semaphore. Prefer
     /// [Self::lease_checked] on product call paths.
     async fn lease(&self) -> Result<SqlServerLease, String> {
         let permit = self.inner.permits.clone().acquire_owned().await.map_err(|e| e.to_string())?;
-        let conn = match self.inner.idle.lock().await.pop() {
+        let idle = self.inner.pop_idle();
+        let conn = match idle {
             Some(conn) => conn,
             None => {
                 let params = &self.inner.params;
@@ -164,6 +192,20 @@ impl SqlServerLease {
         self.reusable = false;
     }
 
+    /// Settle the lease after a statement that fully round-tripped (result or
+    /// SQL error): keep the socket unless the row limit abandoned the response
+    /// stream or the error itself says the connection is gone. A plain SQL
+    /// error (bad syntax, missing table, constraint violation) leaves a
+    /// perfectly healthy socket that must go back to the pool.
+    pub fn settle<T>(&mut self, outcome: &Result<(T, bool), String>) {
+        match outcome {
+            Ok((_, true)) => self.poison(),
+            Ok((_, false)) => self.keep(),
+            Err(err) if crate::query::is_connection_error(err) => self.poison(),
+            Err(_) => self.keep(),
+        }
+    }
+
     /// Bounded staleness probe (`SELECT @@SPID`): validates the socket and
     /// returns the session id for server-side cancel registration.
     async fn health_check(&mut self) -> Result<Option<String>, String> {
@@ -197,16 +239,75 @@ impl Drop for SqlServerLease {
         if !self.reusable {
             return; // the socket closes with the connection
         }
+        // Runs before the `_permit` field is dropped, so the connection is
+        // back in the idle list by the time a waiter can acquire the slot.
         if let Some(conn) = self.conn.take() {
-            let inner = Arc::clone(&self.inner);
-            // Returning to the idle list needs an async lock; do it off-thread
-            // so Drop stays synchronous. Without a runtime (shutdown, some
-            // tests) the connection is simply closed.
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                handle.spawn(async move { inner.idle.lock().await.push(conn) });
+            self.inner.push_idle(conn);
+        }
+    }
+}
+
+/// Run a transaction-control batch (`BEGIN TRANSACTION`, `COMMIT`, …) as a
+/// plain SQL batch: wrapped in `sp_executesql` it would trip the
+/// "transaction count after EXECUTE" check.
+async fn run_transaction_control(client: &mut SqlServerClient, sql: &str) -> Result<(), String> {
+    let stream = client.simple_query(sql).await.map_err(|e| e.to_string())?;
+    stream.into_results().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Execute `statements` atomically: `BEGIN TRANSACTION`, every statement, and
+/// `COMMIT`/`ROLLBACK` all run on **one** leased session. Routing each piece
+/// through its own checkout would scatter them over different pooled sockets
+/// (BEGIN on A, an autocommitted write on B, a failing COMMIT, and A back in
+/// the pool with an open transaction holding locks).
+///
+/// Returns the total affected-row count. On a statement failure the
+/// transaction is rolled back on the same session before the error is
+/// returned. A lease whose transaction state is uncertain (tx-control failed,
+/// connection error, abandoned wire) is dropped instead of recycled; closing
+/// the session makes SQL Server roll back whatever is still open.
+pub async fn execute_statements_in_transaction(pool: &SqlServerPool, statements: &[String]) -> Result<u64, String> {
+    let (mut lease, _spid) = pool.lease_checked().await?;
+    run_transaction_control(lease.conn(), "BEGIN TRANSACTION")
+        .await
+        .map_err(|e| format!("Failed to begin transaction: {e}"))?;
+
+    let mut total_affected: u64 = 0;
+    let mut abandoned_wire = false;
+    for (i, sql) in statements.iter().enumerate() {
+        match execute_query_with_max_rows(lease.conn(), sql, None).await {
+            Ok((result, abandoned)) => {
+                abandoned_wire |= abandoned;
+                total_affected += result.affected_rows;
+            }
+            Err(e) => {
+                // Some errors already doom/abort the transaction server-side;
+                // guard on @@TRANCOUNT so the rollback itself cannot fail.
+                match run_transaction_control(lease.conn(), "IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION").await {
+                    Ok(()) if !abandoned_wire && !crate::query::is_connection_error(&e) => lease.keep(),
+                    Ok(()) => lease.poison(),
+                    Err(rb_err) => {
+                        log::error!("[sqlserver][tx] ROLLBACK failed after statement {} error: {rb_err}", i + 1);
+                        lease.poison();
+                    }
+                }
+                return Err(format!("Statement {} failed: {}", i + 1, e));
             }
         }
     }
+
+    if let Err(e) = run_transaction_control(lease.conn(), "COMMIT TRANSACTION").await {
+        let _ = run_transaction_control(lease.conn(), "IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION").await;
+        lease.poison();
+        return Err(format!("COMMIT failed: {e}"));
+    }
+    if abandoned_wire {
+        lease.poison();
+    } else {
+        lease.keep();
+    }
+    Ok(total_affected)
 }
 
 // Markers used to wrap an estimated-plan request. Kept in sync with

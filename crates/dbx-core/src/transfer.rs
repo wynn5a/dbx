@@ -1831,15 +1831,12 @@ pub async fn execute_on_pool_with_max_rows(
             // Transfer batches read well under the row limit, so the abandoned-
             // wire flag is not expected here; shedding just this connection
             // (instead of the whole pool) keeps the caller's cached pool handle
-            // intact either way.
-            let (result, abandoned_wire) =
-                db::sqlserver::execute_query_with_max_rows(lease.conn(), sql, max_rows).await?;
-            if abandoned_wire {
-                lease.poison();
-            } else {
-                lease.keep();
-            }
-            Ok(result)
+            // intact either way. A plain SQL error (e.g. a constraint
+            // violation on one batch) round-tripped cleanly, so settle()
+            // keeps that healthy socket instead of dropping it.
+            let outcome = db::sqlserver::execute_query_with_max_rows(lease.conn(), sql, max_rows).await;
+            lease.settle(&outcome);
+            outcome.map(|(result, _)| result)
         }
         PoolKind::Agent(client) => {
             let client = client.clone();

@@ -1466,9 +1466,10 @@ pub async fn execute_statements(
 }
 
 /// Execute multiple SQL statements within a single transaction.
-/// For pooled drivers (Postgres/MySQL), uses the driver transaction API.
-/// For SQLite and already-single-connection drivers (ClickHouse/SqlServer/Agent),
-/// uses explicit BEGIN/COMMIT/ROLLBACK on the shared connection.
+/// For pooled drivers (Postgres/MySQL/SQL Server) and SQLite, pins one
+/// connection for the whole BEGIN … COMMIT/ROLLBACK.
+/// For single-connection drivers (ClickHouse/Rqlite/Agent), uses explicit
+/// BEGIN/COMMIT/ROLLBACK on the shared connection.
 /// For databases that don't support explicit transactions (Redis, MongoDB, Oracle),
 /// executes statements sequentially without transaction.
 /// If BEGIN fails, returns an error instead of silently falling back to auto-commit.
@@ -1494,9 +1495,8 @@ pub async fn execute_statements_in_transaction(
             PoolKind::Postgres(pg) => TxPath::Pg(pg.clone()),
             PoolKind::Mysql(mp, _mode) => TxPath::Mysql(mp.clone(), false),
             PoolKind::Sqlite(sq) => TxPath::Sqlite(sq.clone()),
-            PoolKind::ClickHouse(_) | PoolKind::Rqlite(_) | PoolKind::SqlServer(_) | PoolKind::Agent(_) => {
-                TxPath::Explicit
-            }
+            PoolKind::SqlServer(pool) => TxPath::SqlServer(pool.clone()),
+            PoolKind::ClickHouse(_) | PoolKind::Rqlite(_) | PoolKind::Agent(_) => TxPath::Explicit,
             PoolKind::DuckDb(_)
             | PoolKind::Redis(_)
             | PoolKind::MongoDb(_)
@@ -1509,6 +1509,19 @@ pub async fn execute_statements_in_transaction(
         Some(TxPath::Pg(pool)) => exec_tx_pg_inner(pool, statements, schema, start).await,
         Some(TxPath::Mysql(pool, _bare)) => exec_tx_mysql_inner(pool, statements, start).await,
         Some(TxPath::Sqlite(pool)) => exec_tx_sqlite_inner(pool, statements, start).await,
+        Some(TxPath::SqlServer(pool)) => {
+            let total_affected = db::sqlserver::execute_statements_in_transaction(&pool, statements).await?;
+            Ok(db::QueryResult {
+                columns: vec![],
+                column_types: Vec::new(),
+                rows: vec![],
+                affected_rows: total_affected,
+                execution_time_ms: start.elapsed().as_millis(),
+                truncated: false,
+                session_id: None,
+                has_more: false,
+            })
+        }
         Some(TxPath::Explicit) => {
             let mysql_dialect = connection_mysql_query_dialect(state, connection_id).await;
             exec_tx_explicit_inner(state, &pool_key, mysql_dialect, Some(database), statements, schema, start).await
@@ -1526,6 +1539,8 @@ enum TxPath {
     Pg(deadpool_postgres::Pool),
     Mysql(mysql_async::Pool, bool),
     Sqlite(db::sqlite::SqliteHandle),
+    /// SQL Server holds one pool lease from BEGIN through COMMIT/ROLLBACK.
+    SqlServer(std::sync::Arc<db::sqlserver::SqlServerPool>),
     Explicit,
     None,
 }
