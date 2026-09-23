@@ -61,7 +61,7 @@
 | T40 | 列固定 + 拖拽排序 | improvement-plan §6 E7-2 | M | ✅ 958f01b6 |
 | T41 | 侧栏拖表/列入编辑器 | improvement-plan §6 E7-3 | M | ✅ 8cf4f39f |
 | T42 | 最终 SQL 结构化输出 | improvement-plan §5 D9 | M | ✅ 51803e7b |
-| T43 | Agent loop 端到端测试 | improvement-plan §5 D10 | M | ⬜ |
+| T43 | Agent loop 端到端测试 | improvement-plan §5 D10 | M | ✅ 4e5a153f |
 | T44 | 命令面板 | improvement-plan §6 E8 | L | ⬜ |
 | T45 | AST 驱动的引用提取 | improvement-plan §4 C8 | L | ⬜ |
 
@@ -485,13 +485,14 @@
   - [x] 不支持 provider 回退路径不回退；测试通过：ollama/openai-compatible/custom 的 Ask 提示词与旧版逐字节一致（aiPrompt 测试断言相等）；agent 模式提示词不带契约、agent 文本回退路径 `structured_output: false`；解析端统一"JSON 提取优先、fence 扫描回退"——裸 JSON / ```json 包裹 / 前后带解释文本均可提取，畸形输出（既非 JSON 也无 fence）锁定为与现状一致的单 text 段，legacy fence 回复分段结果不变
 - **实现说明**：解析在 `aiMessageRender.ts` 的 `extractAiStructuredSql`（行首 `{` 自后向前有界扫描 + 括号配平含字符串转义 + 仅接受含 string `sql` 字段的对象，sql 值内包裹的 fence 会被剥除、JSON 自身 wrapper fence 标记从前后散文中剔除）；命中后渲染为 text(前后散文+explanation) + code(sql)，Apply/Execute 按钮作用于 JSON 中的 sql。请求字段 `structuredOutput`（serde default false）向后兼容旧调用方；`AiStreamChunk` 流式协议零改动。老会话内容无尾随 JSON → 走 fence 路径渲染不变。`cargo fmt --check && cargo test -p dbx-core`（862 lib 用例）与 `pnpm check`（format+lint+typecheck+vitest 182 文件 1412 用例）全绿。
 
-### T43 Agent loop 端到端测试 ⬜
+### T43 Agent loop 端到端测试 ✅ 4e5a153f
 
 - **来源** improvement-plan-2026-09.md §5 D10（Track D）· **规模** M
 - **内容** 单测只覆盖 helper，没有跨多轮工具交换驱动 `run_agent_loop` 的测试。加一个用微型 hyper 测试服务器（hyper 已传递依赖则零新增 crate，否则 wiremock）。
 - **验收**
-  - [ ] 测试覆盖至少两轮工具调用 + 最终回答
-  - [ ] 无新增重量级依赖（如新增需记录理由）；CI 内通过
+  - [x] 测试覆盖至少两轮工具调用 + 最终回答（`tests/ai_tool_stream.rs` 新增 T43 节，用 T21/T31 既有 loopback canned-SSE mock 服务器驱动真实 `run_agent_loop` 三轮：turn 1 流出文本 + `execute_query` 调用并在种子好的 SQLite 实库上真跑 SELECT（ToolCallEnd 携带渲染后的行），turn 2 对同一库发起 `search_tables`，turn 3 无工具纯文本收尾。按发射顺序断言完整事件序列（turn 起止、文本 delta、两对 tool_call start/end、usage 三轮累加的 agent_end）、loop 返回的最终文本、每轮恰好一次模型请求，以及后续请求的 wire 形状——turn 2 回放 assistant tool_calls + 携带真实执行结果的 tool 消息、turn 3 携带两轮完整对话、turn 1 声明 SQLite 的 agent 工具集）
+  - [x] 无新增重量级依赖（如新增需记录理由）；CI 内通过（计划允许 hyper/wiremock，均未引入——复用文件内既有 raw-TCP mock provider（每请求按序弹出一个 canned 响应），恰为 loop 所需；写确认门控两个方向的测试经真实的 `resolve_confirmation` 旁路（与 Tauri 命令同一路径）解决，零生产代码改动。`cargo fmt --check` + `cargo check --workspace --locked` + `cargo test -p dbx-core` 全绿：lib 862 过，ai_tool_stream 14 过（原 11 + 新 3））
+- **实现说明**：三个测试共一个新 T43 节，工具执行走真实执行层——临时目录建 SQLite 文件（`agent_tools.rs` 单测同款 `AppState` + 预置池手法），种子 `notes` 表后由 loop 的 `execute_tool_calls` 真正执行 SQL，跑完即删。场景 A 断言事件全序列与三轮请求体（含 usage 10+20+30 / 4+3+8 的透传累加）；场景 B 覆盖写确认批准（批准后 INSERT 真落库——跑完后直接查池断言行数，且 follow-up 请求把 "1 affected rows" 回喂模型）与拒绝（模型收到 `Error: User rejected execution of this statement.` 工具错误、数据库零改动、loop 干净收尾）。确认测试外层套 30s 超时防挂起。
 
 ### T44 命令面板 ⬜
 
