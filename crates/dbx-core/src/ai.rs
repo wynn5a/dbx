@@ -576,32 +576,59 @@ fn is_retryable_status(status: reqwest::StatusCode) -> bool {
 }
 
 /// Send one chat request, retrying **exactly once** while the failure is still
-/// in the initial phase — before any response body reached us:
+/// in the initial phase and a fresh attempt cannot duplicate billed work:
 ///
-/// - `.send()` errors (connect refused, DNS, TLS, timeout waiting for the
-///   response head): `.send()` only resolves once the response head is parsed,
-///   so anything it reports happened before a single response byte arrived.
+/// - connect-phase `.send()` errors (refused, DNS, TLS handshake): the request
+///   never reached the provider.
 /// - HTTP 429 / 5xx answered instead of the response we asked for.
+///
+/// Timeouts are **never** retried: the client timeout covers the whole
+/// request, so a timeout means the provider accepted it and is most likely
+/// still generating (and billing) — a retry would double the bill and the wait.
+///
+/// `cancelled` (the stream's cancel `Notify`, when there is one) is raced
+/// against the backoff and the second send, so a Cancel in that window stops
+/// the retry; the first attempt's outcome is then returned and the permit is
+/// re-armed for the caller's own cancellation checks.
 ///
 /// The `build` closure must produce an equivalent fresh request per attempt
 /// (reqwest builders are single-use). After the response head arrives — body
-/// parse errors, SSE mid-stream drops — errors propagate untouched: re-sending
-/// then could duplicate an answer the provider already billed.
+/// parse errors, SSE mid-stream drops — errors propagate untouched.
 async fn send_with_retry_once(
     build: impl Fn() -> reqwest::RequestBuilder,
     op: &str,
     backoff: std::time::Duration,
+    cancelled: Option<&Notify>,
 ) -> Result<reqwest::Response, String> {
     let first = build().send().await;
     let retryable = match &first {
         Ok(res) => !res.status().is_success() && is_retryable_status(res.status()),
-        Err(_) => true,
+        Err(e) => is_retryable_send_error(e),
     };
     if !retryable {
         return first.map_err(|e| format!("{op}: {e}"));
     }
-    tokio::time::sleep(backoff).await;
-    build().send().await.map_err(|e| format!("{op}: {e}"))
+    let retry = async {
+        tokio::time::sleep(backoff).await;
+        build().send().await
+    };
+    let Some(cancelled) = cancelled else {
+        return retry.await.map_err(|e| format!("{op}: {e}"));
+    };
+    tokio::select! {
+        second = retry => second.map_err(|e| format!("{op}: {e}")),
+        _ = cancelled.notified() => {
+            cancelled.notify_one();
+            first.map_err(|e| format!("{op}: {e}"))
+        }
+    }
+}
+
+/// Whether a `.send()` error is safe to retry: only failures to establish the
+/// connection. Timeouts and mid-request I/O errors are not — the provider may
+/// already have the request.
+fn is_retryable_send_error(e: &reqwest::Error) -> bool {
+    e.is_connect() && !e.is_timeout()
 }
 
 // ---------------------------------------------------------------------------
@@ -708,6 +735,7 @@ pub async fn call_claude(client: &reqwest::Client, request: AiCompletionRequest)
         || client.post(&url).headers(headers.clone()).json(&body),
         "Claude request failed",
         AI_RETRY_BACKOFF,
+        None,
     )
     .await?;
 
@@ -747,6 +775,7 @@ pub async fn call_openai_compatible(client: &reqwest::Client, request: AiComplet
         || client.post(&url).headers(headers.clone()).json(&body_obj),
         "AI request failed",
         AI_RETRY_BACKOFF,
+        None,
     )
     .await?;
 
@@ -774,6 +803,7 @@ pub async fn call_responses_api(client: &reqwest::Client, request: AiCompletionR
         || client.post(&url).headers(headers.clone()).json(&body),
         "AI request failed",
         AI_RETRY_BACKOFF,
+        None,
     )
     .await?;
 
@@ -813,6 +843,7 @@ pub async fn call_gemini(client: &reqwest::Client, request: AiCompletionRequest)
         || client.post(&url).query(&[("key", api_key.as_str())]).header(CONTENT_TYPE, "application/json").json(&body),
         "Gemini request failed",
         AI_RETRY_BACKOFF,
+        None,
     )
     .await?;
 
@@ -989,6 +1020,7 @@ async fn stream_claude(
         || client.post(&url).headers(headers.clone()).json(&body),
         "Claude request failed",
         AI_RETRY_BACKOFF,
+        Some(cancelled),
     )
     .await?;
 
@@ -1089,6 +1121,7 @@ async fn stream_openai(
         || client.post(&url).headers(headers.clone()).json(&body_obj),
         "AI request failed",
         AI_RETRY_BACKOFF,
+        Some(cancelled),
     )
     .await?;
 
@@ -1158,6 +1191,7 @@ async fn stream_responses_api(
         || client.post(&url).headers(headers.clone()).json(&body),
         "AI request failed",
         AI_RETRY_BACKOFF,
+        Some(cancelled),
     )
     .await?;
 
@@ -1236,6 +1270,7 @@ async fn stream_gemini(
         },
         "Gemini request failed",
         AI_RETRY_BACKOFF,
+        Some(cancelled),
     )
     .await?;
 
@@ -1554,6 +1589,7 @@ async fn stream_openai_with_tools(
         || client.post(&url).headers(headers.clone()).json(&body),
         "AI request failed",
         AI_RETRY_BACKOFF,
+        Some(request.cancelled),
     )
     .await?;
 
@@ -1698,6 +1734,7 @@ async fn stream_claude_with_tools(
         || client.post(&url).headers(headers.clone()).json(&body),
         "Claude request failed",
         AI_RETRY_BACKOFF,
+        Some(request.cancelled),
     )
     .await?;
 
@@ -1871,6 +1908,7 @@ async fn stream_gemini_with_tools(
         },
         "Gemini request failed",
         AI_RETRY_BACKOFF,
+        Some(request.cancelled),
     )
     .await?;
 
@@ -2010,12 +2048,14 @@ mod tests {
         unregister_stream, validate_config, AiApiStyle, AiChatMessage, AiCompletionRequest, AiConfig, AiMessage,
         AiModelInfo, AiProvider, AiStreamChunk, StreamToolEvent, StreamingToolCallAccumulator, TokenUsage, ToolCallRef,
     };
+    use futures::FutureExt;
     use serde_json::json;
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex as TestMutex};
     use std::time::Duration;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::sync::Notify;
 
     #[test]
     fn accumulator_collapses_fragmented_tool_call() {
@@ -2665,10 +2705,14 @@ mod tests {
         .await;
         let client = reqwest::Client::new();
 
-        let res =
-            send_with_retry_once(|| client.post(&url).json(&json!({ "model": "m" })), "test", Duration::from_millis(1))
-                .await
-                .expect("the retry after the 429 lands");
+        let res = send_with_retry_once(
+            || client.post(&url).json(&json!({ "model": "m" })),
+            "test",
+            Duration::from_millis(1),
+            None,
+        )
+        .await
+        .expect("the retry after the 429 lands");
 
         assert!(res.status().is_success());
         assert_eq!(served.load(Ordering::SeqCst), 2);
@@ -2683,7 +2727,7 @@ mod tests {
         .await;
         let client = reqwest::Client::new();
 
-        let res = send_with_retry_once(|| client.post(&url).json(&json!({})), "test", Duration::from_millis(1))
+        let res = send_with_retry_once(|| client.post(&url).json(&json!({})), "test", Duration::from_millis(1), None)
             .await
             .expect("both responses arrive; the caller shapes the final status into an error");
 
@@ -2698,7 +2742,7 @@ mod tests {
                 .await;
         let client = reqwest::Client::new();
 
-        let res = send_with_retry_once(|| client.post(&url).json(&json!({})), "test", Duration::from_millis(1))
+        let res = send_with_retry_once(|| client.post(&url).json(&json!({})), "test", Duration::from_millis(1), None)
             .await
             .expect("the response is handed back for the caller to describe");
 
@@ -2726,11 +2770,70 @@ mod tests {
             },
             "test",
             Duration::from_millis(1),
+            None,
         )
         .await
         .expect("the retry lands on the live server");
 
         assert!(res.status().is_success());
         assert_eq!(served.load(Ordering::SeqCst), 1);
+    }
+    #[tokio::test]
+    async fn retry_wrapper_does_not_retry_a_timeout() {
+        // Accepts and holds every connection without answering, like a provider
+        // still generating a non-streaming reply when the client timeout fires.
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.expect("bind silent server");
+        let url = format!("http://{}", listener.local_addr().expect("silent addr"));
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let task_accepted = Arc::clone(&accepted);
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((stream, _)) = listener.accept().await {
+                task_accepted.fetch_add(1, Ordering::SeqCst);
+                held.push(stream);
+            }
+        });
+        let client = reqwest::Client::builder().timeout(Duration::from_millis(200)).build().expect("client");
+
+        let err = send_with_retry_once(|| client.post(&url).json(&json!({})), "test", Duration::from_millis(1), None)
+            .await
+            .expect_err("the timeout surfaces as an error");
+
+        assert!(err.starts_with("test:"), "{err}");
+        // Give a (wrong) retry time to connect before counting.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(accepted.load(Ordering::SeqCst), 1, "a timed-out request is never re-sent");
+    }
+
+    #[tokio::test]
+    async fn retry_wrapper_cancel_during_backoff_skips_the_retry() {
+        let (url, served) = spawn_canned_responses(vec![
+            canned_response("429 Too Many Requests", "{\"error\":{\"message\":\"slow down\"}}"),
+            canned_response("200 OK", "{}"),
+        ])
+        .await;
+        let client = reqwest::Client::new();
+        let cancelled = Arc::new(Notify::new());
+        let canceller = Arc::clone(&cancelled);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            canceller.notify_one(); // what `cancel_stream` does
+        });
+
+        let started = std::time::Instant::now();
+        let res = send_with_retry_once(
+            || client.post(&url).json(&json!({})),
+            "test",
+            Duration::from_secs(10),
+            Some(&cancelled),
+        )
+        .await
+        .expect("the first response is handed back");
+
+        assert!(started.elapsed() < Duration::from_secs(5), "the backoff was cut short by the cancel");
+        assert_eq!(res.status(), reqwest::StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(served.load(Ordering::SeqCst), 1, "no billable retry after Cancel");
+        // The permit is re-armed so the caller's own cancel checks still fire.
+        assert!(cancelled.notified().now_or_never().is_some());
     }
 }
