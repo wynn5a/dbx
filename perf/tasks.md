@@ -60,7 +60,7 @@
 | T39 | QueryEditor 异步组件化 | improvement-plan §6 E9-3 | S | ✅ cfb367b9 |
 | T40 | 列固定 + 拖拽排序 | improvement-plan §6 E7-2 | M | ✅ 958f01b6 |
 | T41 | 侧栏拖表/列入编辑器 | improvement-plan §6 E7-3 | M | ✅ 8cf4f39f |
-| T42 | 最终 SQL 结构化输出 | improvement-plan §5 D9 | M | ⬜ |
+| T42 | 最终 SQL 结构化输出 | improvement-plan §5 D9 | M | ✅ 51803e7b |
 | T43 | Agent loop 端到端测试 | improvement-plan §5 D10 | M | ⬜ |
 | T44 | 命令面板 | improvement-plan §6 E8 | L | ⬜ |
 | T45 | AST 驱动的引用提取 | improvement-plan §4 C8 | L | ⬜ |
@@ -476,13 +476,14 @@
   - [x] 不破坏现有拖放与编辑行为；测试通过（表/视图载荷形状与插入文本零改动（既有 queryEditorTableDrop 测试原样全过）；无关拖放仍回落编辑器默认 drop（`insertDroppedSidebarReference` 无.payload 返回 false）；树重排拖拽（connection 节点）、选中/click 吞噬互不干扰；只读编辑器拒绝插入；dragover 仅按 types 列表过滤自有 MIME。`pnpm check` 全绿（format + lint + typecheck + vitest 182 文件 1398 用例，其中 queryEditorTableDrop.test.ts 18→35 例：载荷 create/parse/round-trip、双 kind 解析、各方言引号矩阵、TreeItem/QueryEditor 源码契约））
 - **实现说明**：列载荷新增 `dbx-column-reference`（`{connectionId, database, schema?, tableName?, columnName, databaseType?}`）与表载荷共用同一 MIME（dragover 阶段 dataTransfer 不可读，types 列表只判"是否自有拖拽"，kind 在插入时分派）；列名取 `tableChildDropObjectName` 同源清洗（`meta.name`，回退 label 去 `" (type)"` 后缀）。`canDragTableReference` 扩为 table/view/column（列要求 `tableName` 在位，loadColumns 恒有）；TreeItem 指针拖拽与 QueryEditor 双通道插入（窗口 CustomEvent + DragEvent dataTransfer 回退）类型放宽为 union，表路径行为逐字节不变。
 
-### T42 最终 SQL 结构化输出 ⬜
+### T42 最终 SQL 结构化输出 ✅ 51803e7b
 
 - **来源** improvement-plan-2026-09.md §5 D9（Track D）· **规模** M
 - **内容** 最终 SQL 靠提示词约定"首个 ```sql 块"（`ai.ts:278`）+ fence 扫描解析。在支持的 provider 上改 JSON schema / 工具形态结构化输出；保留 fence 回退。
 - **验收**
-  - [ ] 支持 provider 走结构化输出（mock 测试）
-  - [ ] 不支持 provider 回退路径不回退；测试通过
+  - [x] 支持 provider 走结构化输出（mock 测试）：Ask 模式提示词对受支持 provider（openai/claude/gemini/deepseek/qwen）附加结构化契约——回复末尾另起一行输出 `{"sql": "...", "explanation": "..."}` JSON 对象；OpenAI 官方 API（provider=openai + completions 风格 + api.openai.com 主机）进一步附加原生 `response_format: json_object`（`openai_stream_body`，经 `AiCompletionRequest.structuredOutput` 按请求 opt-in）。mock 测试：Rust 单测断言官方端点请求体含 `response_format`（无 opt-in / 自定义端点 / 非 openai provider 均不含）；`tests/ai_tool_stream.rs` T42 节 wire 断言 mock 端点请求体保持 legacy 形状且契约 JSON 原样流过；前端 aiPrompt/aiMessageRender 测试断言契约行注入与 JSON 解析
+  - [x] 不支持 provider 回退路径不回退；测试通过：ollama/openai-compatible/custom 的 Ask 提示词与旧版逐字节一致（aiPrompt 测试断言相等）；agent 模式提示词不带契约、agent 文本回退路径 `structured_output: false`；解析端统一"JSON 提取优先、fence 扫描回退"——裸 JSON / ```json 包裹 / 前后带解释文本均可提取，畸形输出（既非 JSON 也无 fence）锁定为与现状一致的单 text 段，legacy fence 回复分段结果不变
+- **实现说明**：解析在 `aiMessageRender.ts` 的 `extractAiStructuredSql`（行首 `{` 自后向前有界扫描 + 括号配平含字符串转义 + 仅接受含 string `sql` 字段的对象，sql 值内包裹的 fence 会被剥除、JSON 自身 wrapper fence 标记从前后散文中剔除）；命中后渲染为 text(前后散文+explanation) + code(sql)，Apply/Execute 按钮作用于 JSON 中的 sql。请求字段 `structuredOutput`（serde default false）向后兼容旧调用方；`AiStreamChunk` 流式协议零改动。老会话内容无尾随 JSON → 走 fence 路径渲染不变。`cargo fmt --check && cargo test -p dbx-core`（862 lib 用例）与 `pnpm check`（format+lint+typecheck+vitest 182 文件 1412 用例）全绿。
 
 ### T43 Agent loop 端到端测试 ⬜
 
