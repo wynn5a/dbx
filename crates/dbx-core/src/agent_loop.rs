@@ -385,7 +385,6 @@ async fn run_agent_loop_text_only(
         temperature,
         // Agent-mode text fallback keeps its legacy prompt/traffic; structured
         // output is an Ask-mode-only contract (T42).
-        structured_output: false,
     };
 
     let result = ai::stream(session_id, &request, cancelled, move |chunk| {

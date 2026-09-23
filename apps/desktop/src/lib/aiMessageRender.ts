@@ -91,22 +91,75 @@ export function createAiMessageRenderer(options: AiMessageRendererOptions) {
 export function parseAiMessage(text: string): MessageSegment[] {
   // Structured output first (T42): an Ask-mode reply may end with the contract
   // JSON object {"sql": ..., "explanation": ...} — bare, in a ```json fence, or
-  // with prose around it. When it parses, the SQL becomes the single code
-  // segment and the explanation/prose render as text. Anything else — no JSON,
+  // with prose around it. When it parses, the SQL is the primary code segment
+  // and the explanation/prose render as text. Anything else — no JSON,
   // malformed JSON, an object without a string `sql` field — falls through to
   // the legacy fence scan below, byte-for-byte the pre-T42 behavior.
   const structured = extractAiStructuredSql(text);
   if (structured) {
-    const prose = [structured.proseBefore, structured.explanation, structured.proseAfter]
+    const segments = structuredSegments(structured);
+    if (segments.length) return segments;
+  }
+  return scanFencedSegments(text);
+}
+
+/**
+ * Segments for a reply carrying the contract JSON. The prompt asks for prose, a
+ * ```sql fence, then the JSON line — so the prose around the object is still
+ * fence-scanned: its code blocks stay actionable code segments, and the fence
+ * repeating the contract's SQL *is* the primary block (kept in place, not
+ * rendered a second time). Only when no fence carries that SQL is it appended.
+ */
+function structuredSegments(structured: AiStructuredSql): MessageSegment[] {
+  const before = scanFencedSegments(structured.proseBefore);
+  const after = scanFencedSegments(structured.proseAfter);
+  const explanation = structured.explanation.trim();
+
+  if (!before.some(isCodeSegment) && !after.some(isCodeSegment)) {
+    const prose = [structured.proseBefore, explanation, structured.proseAfter]
       .map((part) => part.trim())
       .filter(Boolean)
       .join("\n\n");
     const segments: MessageSegment[] = [];
     if (prose) segments.push({ type: "text", content: prose });
     if (structured.sql) segments.push({ type: "code", lang: "sql", content: structured.sql });
-    if (segments.length) return segments;
+    return segments;
   }
 
+  const segments: MessageSegment[] = [...before];
+  if (explanation) segments.push({ type: "text", content: explanation });
+  segments.push(...after);
+  const sqlKey = sqlCompareKey(structured.sql);
+  if (structured.sql && !segments.some((s) => isCodeSegment(s) && sqlCompareKey(s.content) === sqlKey)) {
+    segments.push({ type: "code", lang: "sql", content: structured.sql });
+  }
+  return mergeAdjacentText(segments);
+}
+
+function isCodeSegment(segment: MessageSegment): boolean {
+  return segment.type === "code";
+}
+
+/** Whitespace- and trailing-semicolon-insensitive form for "is this the same SQL". */
+function sqlCompareKey(sql: string): string {
+  return sql.replace(/\s+/g, " ").trim().replace(/;+$/, "").trim();
+}
+
+function mergeAdjacentText(segments: MessageSegment[]): MessageSegment[] {
+  const merged: MessageSegment[] = [];
+  for (const segment of segments) {
+    const last = merged[merged.length - 1];
+    if (segment.type === "text" && last?.type === "text") {
+      last.content = `${last.content.trim()}\n\n${segment.content.trim()}`;
+    } else {
+      merged.push({ ...segment });
+    }
+  }
+  return merged;
+}
+
+/** The legacy (pre-T42) parse: ``` fences become code segments, the rest text. */
+function scanFencedSegments(text: string): MessageSegment[] {
   const segments: MessageSegment[] = [];
   const lines = text.split("\n");
   let i = 0;
@@ -257,13 +310,16 @@ function stripSqlFence(sql: string): string {
 
 /**
  * The JSON object's own ```json wrapper leaves its opener line glued to the
- * prose before it; that marker is not prose.
+ * prose before it; that marker is not prose. Only an *unbalanced* trailing
+ * fence line is the wrapper: after a complete ```sql block the last line is
+ * that block's closing fence and stays.
  */
 function dropDanglingFenceOpen(before: string): string {
   const trimmed = before.trim();
   if (!trimmed) return "";
   const lines = trimmed.split("\n");
-  if (/^```[a-zA-Z0-9_+.-]*$/.test(lines[lines.length - 1].trim())) lines.pop();
+  const fenceLines = lines.filter((line) => /^```/.test(line.trim())).length;
+  if (fenceLines % 2 === 1 && /^```[a-zA-Z0-9_+.-]*$/.test(lines[lines.length - 1].trim())) lines.pop();
   return lines.join("\n");
 }
 

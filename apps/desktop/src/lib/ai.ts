@@ -23,6 +23,8 @@ export type AiAssistantMode = "ask" | "agent";
 // for the final SQL (T42 / plan §5 D9). Local/unknown endpoints (ollama,
 // openai-compatible, custom) keep the legacy fence-only contract: model
 // capability there is unknowable and the fence path is the proven fallback.
+// The contract is prompt-only: no provider gets a native JSON response mode,
+// which would force the whole reply (explanations included) into one object.
 const STRUCTURED_SQL_PROVIDERS: ReadonlySet<AiProvider> = new Set(["openai", "claude", "gemini", "deepseek", "qwen"]);
 
 /** Whether the Ask-mode final-SQL contract asks for structured JSON output. */
@@ -107,7 +109,6 @@ export async function runAiStream(
       messages,
       maxTokens,
       temperature: params.temperature,
-      structuredOutput: structuredSqlOutputEnabled(input.config.provider),
     },
     (chunk) => {
       if (!chunk.done) {
