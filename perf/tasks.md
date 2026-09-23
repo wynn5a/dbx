@@ -63,7 +63,7 @@
 | T42 | 最终 SQL 结构化输出 | improvement-plan §5 D9 | M | ✅ 51803e7b |
 | T43 | Agent loop 端到端测试 | improvement-plan §5 D10 | M | ✅ 4e5a153f |
 | T44 | 命令面板 | improvement-plan §6 E8 | L | ✅ 909b8f4f |
-| T45 | AST 驱动的引用提取 | improvement-plan §4 C8 | L | ⬜ |
+| T45 | AST 驱动的引用提取 | improvement-plan §4 C8 | L | ✅ d78655b6 |
 
 ---
 
@@ -503,14 +503,15 @@
   - [x] 动作注册表可扩展（新动作一行注册）；测试通过（`registerCommand({ id, labelKey, categoryKey, run })` 一行注册即被过滤/渲染覆盖，测试锁定）
 - **实现说明**：设计沿用仓库既有模式——框架无关注册表 + App.vue 注入 context：`lib/commandPalette.ts` 纯数据（11 个内置命令 × 4 分类：工作区 newQuery/newConnection/openSqlFile，工具 dataTransfer/schemaDiff/dataCompare，数据 driverStore/sqlLibrary，视图 queryHistory/aiAssistant/openSettings），`run(context)` 接收 App.vue 注入的 `CommandPaletteContext`，每个动作路由到与工具栏/菜单完全相同的 opener（`dialogs.showTransferDialog` 等 refs、`showDriverStore/showHistory/showSettings`、`newQuery()`、`toggleAiPanel`），零重复路由逻辑；SQL library 经新增 `AppSidebar.openSqlLibrary` expose（侧栏收起时先 `setSidebarOpen(true)`，`v-show` 保证 ref 常驻可调）。过滤/环绕选择/clamp 为纯函数，`CommandPalette.vue` 仅接线（Dialog + 搜索输入 + aria combobox/listbox 语义 + 选中项 scrollIntoView）；组件经 `defineAsyncComponent` 挂载（对齐 UpdateDialog/KillProcessDialog 的 `v-if` + `v-model:open` 先例），不进启动 chunk。Mod+K 注册进 `shortcutRegistry`（global scope，与既有绑定零冲突、逐 scope 唯一性断言覆盖），分发挂在 App.vue 既有 keydown 路径（open-settings 之后、focus-search 之前，无遮蔽）；老用户设置由 `normalizeShortcutSettings` 默认值回填，无迁移。文案落六个 locale（命令 label/分类沿用各语言既有术语：如 es "Transferencia de datos"、zh-CN "比较数据库"）。验证：无 Tauri 运行时，GUI 手工点验不可行，按仓库先例以测试+typecheck+构建佐证——新增 `packages/app-tests/commandPalette.test.ts` 15 例（清单顺序、过滤语义六向、环绕/clamp 边界、一行注册+注册表清理、逐命令 context 路由 stub、六 locale 完整性、App.vue/组件源码契约）+ `keyboardShortcuts.test.ts` Mod+K matcher 3 例 + `shortcutRegistry.test.ts` 清单与回填 2 例（既有逐 scope 唯一性/`findShortcutConflict`/六 locale label 循环自动覆盖新绑定）；`pnpm check` 全绿（format + lint + typecheck + vitest 183 文件 1432 用例）、`pnpm build` 通过。
 
-### T45 AST 驱动的引用提取 ⬜
+### T45 AST 驱动的引用提取 ✅ d78655b6
 
 - **来源** improvement-plan-2026-09.md §4 C8（Track C）· **规模** L
 - **内容** 用既有 Rust `analyze_sql_references`（异步 + 按语句文本缓存）替换 `extractReferencedTables` / `extractCteDefinitions` / `extractSubqueryReferences`；正则仅保留"当前关键字上下文"判断。
 - **验收**
-  - [ ] 既有补全回归全过；新增正则易错边界用例（嵌套子查询、注释内、`$$` 体）对比通过
-  - [ ] 性能不劣化（既有 2500 表性能测试）
-  - [ ] 双解析器重复逻辑删除
+  - [x] 既有补全回归全过；新增正则易错边界用例（嵌套子查询、注释内、`$$` 体）对比通过
+  - [x] 性能不劣化（既有 2500 表性能测试）
+  - [x] 双解析器重复逻辑删除
+- **实现说明**：消费点调研后定型为"同步快照输入 + 异步按语句缓存"：`referencedTables` 在补全管线的消费全部经 `getSqlCompletionContext` 的 context（suggestColumns/suggestJoinConditions 门控、别名建议、限定列解析、join 条件、CTE 列），编辑器侧另有 hover/ctrl+click/列预取/未知列门控。Rust 侧按需扩展：`SqlReferenceAnalysis` 新增 `cte_definitions`（显式列清单或按 body 顶层 select 输出推导，RECURSIVE 取 UNION 左臂）与 `derived_tables`（别名 + 输出列），并把 INSERT/UPDATE/DELETE 目标纳入 tables、UPDATE SET 目标纳入 columns——否则 DML 语句列补全会回退。前端新增 `lib/sqlReferences.ts`：(dialect, 语句文本) 键 LRU 缓存（256 条）+ in-flight 去重；`getSqlStatementReferences` 同步返回——精确命中即返回，未命中则后台发起 IPC 解析并回退"最长已分析前缀"（stale-while-revalidate，打字期间每个键立即拿到上一个键的引用，无空窗），解析失败（打字中途语法不全是常态）缓存空判定防止逐键重试；`ensureSqlStatementReferences` 供显式补全（Ctrl+Space 150ms 防抖路径）、hover、ctrl+click await 全量结果；缓存订阅接编辑器既有 `retriggerCompletionAfterMetadata` 机制，后台解析落地即重放补全（与列元数据迟到重放同一契约）。`getSqlCompletionContext` 增加可选 references 参数（快照或 resolver 形态，缺省空集），关键字上下文判定（suggestTables/suggestColumns 门控、statement kind、GROUP BY 等）全部留在前端，`extractSelectAliases`/`extractNonAggregatedSelectColumns` 保留——它们是 ORDER/GROUP BY 排序用的 select 投影助手，不属于引用提取。删除三个正则扫描器及其私有助手（ALIAS_BLACKLIST×2、findMatchingParen、extractSelectColumnNames、isElasticsearchStyleIndexName）共约 370 行；语义诊断 cteNames 改从同一 AST 分析取值，门控输入与门控本身不再可能不一致。已知取舍：不带引号的 ES 风格索引通配（`FROM logs-2024-*`）不是合法 SQL，AST 拒绝后不再计入引用表（加引号则正常），ES 键词/表补全走 qualifier 路径不受影响。验证：Rust 新增 9 用例（crates/dbx-core/tests/sql_analysis.rs，19 全过）锁 CTE/派生表/DML 提取与三类边界；前端新增 `sqlReferences.test.ts` 12 例（缓存命中/未命中/前缀 SWR/方言隔离/负缓存/LRU/映射/边界对比——注释体空格化后送分析、`$$` 体原样保留、注释内光标空引用）；既有补全测试改为显式传入 references 夹具（锁定消费行为而非提取，提取已由 Rust 锁定）；`pnpm check` 全绿（format + lint + typecheck + vitest 184 文件 1440 用例），2500 表性能测试 3 例通过；`cargo fmt --check && cargo test -p dbx-core && cargo check --workspace --locked` 全绿。
 
 ---
 
