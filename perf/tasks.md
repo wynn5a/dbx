@@ -59,7 +59,7 @@
 | T38 | 启动阶段 performance.mark | improvement-plan §6 E9-2 | S | ✅ f158bc2b |
 | T39 | QueryEditor 异步组件化 | improvement-plan §6 E9-3 | S | ✅ cfb367b9 |
 | T40 | 列固定 + 拖拽排序 | improvement-plan §6 E7-2 | M | ✅ 958f01b6 |
-| T41 | 侧栏拖表/列入编辑器 | improvement-plan §6 E7-3 | M | ⬜ |
+| T41 | 侧栏拖表/列入编辑器 | improvement-plan §6 E7-3 | M | ✅ 8cf4f39f |
 | T42 | 最终 SQL 结构化输出 | improvement-plan §5 D9 | M | ⬜ |
 | T43 | Agent loop 端到端测试 | improvement-plan §5 D10 | M | ⬜ |
 | T44 | 命令面板 | improvement-plan §6 E8 | L | ⬜ |
@@ -467,13 +467,14 @@
   - [x] 布局随标签页持久化；测试通过（列宽 + 顺序 + 固定集合合成单一布局对象，按 DataGrid cacheKey（`<tabId>-<resultIndex>`，与待存快照/滚动位置同一键体系）随标签页持久化：切换标签页/重执行后恢复，作用域变更（换表/换 SQL，与隐藏列重置同生命周期）重置，关闭标签页随 `clearDataGridPendingSnapshotsForTab` 同点清理；旧布局数据兼容——无 order/pinned 字段（或字段畸形）按"原顺序、无固定"解析。`pnpm check` 全绿（format + lint + typecheck + vitest 182 文件 / 1380 用例，含新增 24 例）+ `pnpm build` 通过）
 - **实现说明**：新增 `lib/dataGridColumnLayout.ts` 纯函数（渲染顺序合成 = 固定列稳定前置 + 手动顺序按列名排名、排名缺失者按原序尾随；reorder slot 移位；排列置换 `permutationFromOrders`；drop-target 命中；布局对象容错解析）。列名作持久化标识（actual index 跨查询不稳）；同名重复列（JOIN 场景）按首次未消费出现位置映射，语义确定。新增 `useDataGridColumnLayout` composable 持有顺序/固定/持久化宽度状态与 per-tab 缓存，DataGrid 的 `visibleColumnIndexes` 改为布局合成结果——排序/筛选/搜索/选中/导出等全部下游继续走同一数组，行为自动一致；固定集合按列名标识不随顺序失效（拖固定列到非固定区仍是固定，按排名落在固定前缀内）。宽度持久化并入 `useDataGridColumnResize`：init 应用按名列宽覆盖、resize 结束/autoFit 落盘，重排/固定经排列置换让宽度跟随列。DOM sticky 单元格的半透明色调（选中/脏/搜索/新删行/激活行）以"不透明底色 + background-image 叠加 tint"合成，避免滚动内容透出。已知取舍：固定列拖出固定区不解固定（任务只要求集合按名稳定）；拖拽重排不改排序/筛选语义。
 
-### T41 侧栏拖表/列入编辑器 ⬜
+### T41 侧栏拖表/列入编辑器 ✅ 8cf4f39f
 
 - **来源** improvement-plan-2026-09.md §6 E7 第 3 项（Track E）· **规模** M
 - **内容** `sidebar/` 无任何 `dragstart`。实现拖表名/列名入编辑器插入（按方言引号规则，与 T06 一致）。
 - **验收**
-  - [ ] 拖表/列到编辑器光标处插入，引号规则与补全一致
-  - [ ] 不破坏现有拖放与编辑行为；测试通过
+  - [x] 拖表/列到编辑器光标处插入，引号规则与补全一致（表/视图拖拽系既有能力（e324f35f 起以指针拖拽实现，8e048897 弃 HTML5 dragstart 换窗口 CustomEvent——dataTransfer 在 webview 不可靠，故本任务不再引入 dragstart），本次补齐**列节点**：复用同一指针拖拽管线，drop 点 `posAtCoords` 插入（退化为当前选区并替换）；列插入裸列名，经 `sqlDialectForDatabaseType` 走 T06 `quoteSqlIdentifier`（本次从 sqlCompletion.ts 导出为唯一引号源）：MySQL 反引号（含双写转义）、SQL Server 方括号（含 `]]` 转义）、PG 双引号（保留字/大写），保留字与特殊字符加引号、普通标识符与 generic 族方言裸插入；载荷自带 source databaseType 优先于 tab 的。测试以各方言引号矩阵（含保留字 `order`/`select`/`user`、特殊字符、转义、回退与优先级）佐证与补全同规）
+  - [x] 不破坏现有拖放与编辑行为；测试通过（表/视图载荷形状与插入文本零改动（既有 queryEditorTableDrop 测试原样全过）；无关拖放仍回落编辑器默认 drop（`insertDroppedSidebarReference` 无.payload 返回 false）；树重排拖拽（connection 节点）、选中/click 吞噬互不干扰；只读编辑器拒绝插入；dragover 仅按 types 列表过滤自有 MIME。`pnpm check` 全绿（format + lint + typecheck + vitest 182 文件 1398 用例，其中 queryEditorTableDrop.test.ts 18→35 例：载荷 create/parse/round-trip、双 kind 解析、各方言引号矩阵、TreeItem/QueryEditor 源码契约））
+- **实现说明**：列载荷新增 `dbx-column-reference`（`{connectionId, database, schema?, tableName?, columnName, databaseType?}`）与表载荷共用同一 MIME（dragover 阶段 dataTransfer 不可读，types 列表只判"是否自有拖拽"，kind 在插入时分派）；列名取 `tableChildDropObjectName` 同源清洗（`meta.name`，回退 label 去 `" (type)"` 后缀）。`canDragTableReference` 扩为 table/view/column（列要求 `tableName` 在位，loadColumns 恒有）；TreeItem 指针拖拽与 QueryEditor 双通道插入（窗口 CustomEvent + DragEvent dataTransfer 回退）类型放宽为 union，表路径行为逐字节不变。
 
 ### T42 最终 SQL 结构化输出 ⬜
 
