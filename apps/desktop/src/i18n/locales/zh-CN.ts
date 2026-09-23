@@ -492,6 +492,8 @@ export default {
     filterBuilderIsNull: "为空",
     filterBuilderIsNotNull: "不为空",
     columnActions: "字段操作",
+    pinColumn: "固定列",
+    unpinColumn: "取消固定",
     localFilter: "本地列筛选",
     localFilterFor: "本地筛选“{column}”",
     columnFormatter: "列格式化",

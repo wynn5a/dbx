@@ -500,6 +500,8 @@ export default {
     filterBuilderIsNull: "Is NULL",
     filterBuilderIsNotNull: "Is not NULL",
     columnActions: "Column actions",
+    pinColumn: "Pin column",
+    unpinColumn: "Unpin column",
     localFilter: "Local column filter",
     localFilterFor: "Local Filter For '{column}'",
     columnFormatter: "Column formatter",

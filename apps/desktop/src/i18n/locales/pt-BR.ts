@@ -494,6 +494,8 @@ export default {
     filterBuilderIsNull: "É NULL",
     filterBuilderIsNotNull: "Não é NULL",
     columnActions: "Ações da coluna",
+    pinColumn: "Fixar coluna",
+    unpinColumn: "Desafixar coluna",
     localFilter: "Filtro local de coluna",
     localFilterFor: "Filtro Local Para '{column}'",
     columnFormatter: "Formatador de coluna",

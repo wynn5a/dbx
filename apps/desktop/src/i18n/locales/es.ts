@@ -530,6 +530,8 @@ export default {
     filterBuilderIsNull: "Es NULL",
     filterBuilderIsNotNull: "No es NULL",
     columnActions: "Acciones de columna",
+    pinColumn: "Fijar columna",
+    unpinColumn: "Anular fijación de columna",
     localFilter: "Filtro local de columna",
     localFilterFor: "Filtro local para '{column}'",
     searchValues: "Buscar valores...",

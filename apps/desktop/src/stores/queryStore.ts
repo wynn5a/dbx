@@ -39,6 +39,7 @@ import {
 } from "@/lib/jdbcDialect";
 import { queryTimeoutSecsForConnection } from "@/lib/queryTimeout";
 import { clearDataGridPendingSnapshotsForTab } from "@/composables/useDataGridEditor";
+import { clearDataGridColumnLayoutsForTab } from "@/composables/useDataGridColumnLayout";
 import {
   buildTabResultSnapshot,
   deleteTabResultSnapshot,
@@ -424,6 +425,7 @@ export const useQueryStore = defineStore("query", () => {
     const idx = tabs.value.findIndex((t) => t.id === id);
     if (idx < 0) return;
     clearDataGridPendingSnapshotsForTab(id);
+    clearDataGridColumnLayoutsForTab(id);
     if (tabs.value[idx].isExecuting) void cancelTabExecution(id);
     if (tabs.value[idx].isExplaining) void cancelTabExplain(id);
     void closeResultSession(tabs.value[idx]);
@@ -440,6 +442,7 @@ export const useQueryStore = defineStore("query", () => {
       .filter((tab) => tab.id !== id)
       .forEach((tab) => {
         clearDataGridPendingSnapshotsForTab(tab.id);
+        clearDataGridColumnLayoutsForTab(tab.id);
         if (tab.isExecuting) void cancelTabExecution(tab.id);
         if (tab.isExplaining) void cancelTabExplain(tab.id);
         void closeResultSession(tab);
@@ -454,6 +457,7 @@ export const useQueryStore = defineStore("query", () => {
   function closeAllTabs() {
     tabs.value.forEach((tab) => {
       clearDataGridPendingSnapshotsForTab(tab.id);
+      clearDataGridColumnLayoutsForTab(tab.id);
       if (tab.isExecuting) void cancelTabExecution(tab.id);
       if (tab.isExplaining) void cancelTabExplain(tab.id);
       void closeResultSession(tab);
@@ -473,6 +477,7 @@ export const useQueryStore = defineStore("query", () => {
       .filter((tab) => closingIds.has(tab.id))
       .forEach((tab) => {
         clearDataGridPendingSnapshotsForTab(tab.id);
+        clearDataGridColumnLayoutsForTab(tab.id);
         if (tab.isExecuting) void cancelTabExecution(tab.id);
         if (tab.isExplaining) void cancelTabExplain(tab.id);
         void closeResultSession(tab);

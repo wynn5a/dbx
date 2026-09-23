@@ -495,6 +495,8 @@ export default {
     filterBuilderIsNull: "È NULL",
     filterBuilderIsNotNull: "Non è NULL",
     columnActions: "Azioni colonna",
+    pinColumn: "Blocca colonna",
+    unpinColumn: "Sblocca colonna",
     localFilter: "Filtro colonna locale",
     localFilterFor: "Filtro Locale Per '{column}'",
     columnFormatter: "Formattatore colonna",

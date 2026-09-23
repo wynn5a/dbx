@@ -18,10 +18,23 @@ export interface UseDataGridColumnResizeOptions {
   scrollbarGutter?: Ref<number>;
   /** Live inner (client) width of the grid scroller, when measured. */
   viewportWidth?: Ref<number>;
+  /** Persisted widths (column name -> px) applied when widths initialize. */
+  initialWidthsByName?: Ref<Record<string, number> | undefined> | ComputedRef<Record<string, number> | undefined>;
+  /** Called once a width change settles (resize end / auto fit / re-init). */
+  onWidthsSettled?: (widthsByName: Record<string, number>, columnNames: string[]) => void;
 }
 
 export function useDataGridColumnResize(options: UseDataGridColumnResizeOptions) {
-  const { columns, sourceRows, columnIndexes, gridRef, scrollbarGutter, viewportWidth } = options;
+  const {
+    columns,
+    sourceRows,
+    columnIndexes,
+    gridRef,
+    scrollbarGutter,
+    viewportWidth,
+    initialWidthsByName,
+    onWidthsSettled,
+  } = options;
 
   const columnWidths = ref<number[]>([]);
   const { width: gridWidth } = useElementSize(gridRef);
@@ -38,15 +51,49 @@ export function useDataGridColumnResize(options: UseDataGridColumnResizeOptions)
     return values;
   }
 
+  function computedColumnWidth(visibleColIdx: number, colName: string): number {
+    return (
+      initialWidthsByName?.value?.[colName] ??
+      calculateDataGridColumnWidth({
+        columnName: colName,
+        sampleValues: sampleColumnValues(visibleColIdx),
+      })
+    );
+  }
+
+  function reportWidthsSettled() {
+    if (!onWidthsSettled) return;
+    const names = columns.value;
+    const widths: Record<string, number> = {};
+    columnWidths.value.forEach((width, index) => {
+      const name = names[index];
+      if (name) widths[name] = width;
+    });
+    onWidthsSettled(widths, names);
+  }
+
   function initColumnWidths() {
     if (columnWidths.value.length !== columns.value.length) {
-      columnWidths.value = columns.value.map((colName, colIdx) => {
-        return calculateDataGridColumnWidth({
-          columnName: colName,
-          sampleValues: sampleColumnValues(colIdx),
-        });
-      });
+      columnWidths.value = columns.value.map((colName, colIdx) => computedColumnWidth(colIdx, colName));
+      reportWidthsSettled();
     }
+  }
+
+  /** Force widths back to the computed/persisted defaults (scope change). */
+  function resetColumnWidths() {
+    columnWidths.value = columns.value.map((colName, colIdx) => computedColumnWidth(colIdx, colName));
+    reportWidthsSettled();
+  }
+
+  /**
+   * Re-key the positional widths after a reorder/pin: `perm[i]` is the
+   * position the column now at `i` came from. A null permutation (orders are
+   * not the same multiset) is a no-op.
+   */
+  function applyWidthPermutation(perm: number[] | null) {
+    if (!perm || perm.length !== columnWidths.value.length) return;
+    if (perm.every((value, index) => value === index)) return;
+    columnWidths.value = perm.map((from) => columnWidths.value[from] ?? 0);
   }
 
   function onResizeStart(colIdx: number, event: MouseEvent) {
@@ -63,6 +110,7 @@ export function useDataGridColumnResize(options: UseDataGridColumnResizeOptions)
       requestAnimationFrame(() => {
         isResizing = false;
       });
+      reportWidthsSettled();
     };
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
@@ -75,6 +123,7 @@ export function useDataGridColumnResize(options: UseDataGridColumnResizeOptions)
       columnName: colName,
       sampleValues: sampleColumnValues(colIdx),
     });
+    reportWidthsSettled();
   }
 
   const baseTotalWidth = computed(() => columnWidths.value.reduce((a, b) => a + b, 0));
@@ -118,6 +167,8 @@ export function useDataGridColumnResize(options: UseDataGridColumnResizeOptions)
   return {
     columnWidths,
     initColumnWidths,
+    resetColumnWidths,
+    applyWidthPermutation,
     onResizeStart,
     autoFitColumn,
     renderedColumnWidths,

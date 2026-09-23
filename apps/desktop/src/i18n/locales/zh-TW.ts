@@ -482,6 +482,8 @@ export default {
     filterBuilderIsNull: "為空",
     filterBuilderIsNotNull: "不為空",
     columnActions: "欄位操作",
+    pinColumn: "釘選欄位",
+    unpinColumn: "取消釘選",
     localFilter: "本機欄位篩選",
     localFilterFor: "本機篩選「{column}」",
     columnFormatter: "欄位格式設定",
