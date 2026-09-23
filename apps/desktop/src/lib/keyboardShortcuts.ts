@@ -181,6 +181,10 @@ export function isToggleSidebarShortcut(event: ShortcutLikeEvent, shortcuts?: Pa
   return matchesShortcut(event, actionShortcut("toggleSidebar", shortcuts));
 }
 
+export function isCommandPaletteShortcut(event: ShortcutLikeEvent, shortcuts?: Partial<ShortcutSettings>): boolean {
+  return matchesShortcut(event, actionShortcut("commandPalette", shortcuts));
+}
+
 export function isBrowserReloadShortcut(event: ShortcutLikeEvent): boolean {
   if (event.isComposing || event.altKey) return false;
   const key = normalizeKey(event.key);

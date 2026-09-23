@@ -44,6 +44,7 @@ import { parseConnectionDeepLink, type ConnectionDeepLinkDraft } from "@/lib/con
 import {
   isBrowserReloadShortcut,
   isCloseTabShortcut,
+  isCommandPaletteShortcut,
   isExecuteSqlShortcut,
   isFocusSearchShortcut,
   isFormatSqlShortcut,
@@ -76,12 +77,14 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { HistoryEntry } from "@/lib/tauri";
 import type { AiAction } from "@/lib/ai";
+import type { CommandPaletteContext } from "@/lib/commandPalette";
 
 const AiAssistant = defineAsyncComponent(() => import("@/components/editor/AiAssistant.vue"));
 const QueryHistory = defineAsyncComponent(() => import("@/components/editor/QueryHistory.vue"));
 const DriverStorePage = defineAsyncComponent(() => import("@/components/config/DriverStoreDialog.vue"));
 const UpdateDialog = defineAsyncComponent(() => import("@/components/layout/UpdateDialog.vue"));
 const KillProcessDialog = defineAsyncComponent(() => import("@/components/layout/KillProcessDialog.vue"));
+const CommandPalette = defineAsyncComponent(() => import("@/components/layout/CommandPalette.vue"));
 
 type AiAssistantHandle = {
   triggerAction: (action: AiAction, instruction?: string) => void;
@@ -126,6 +129,7 @@ const showConnectionDialog = ref(false);
 const connectionDialogPrefill = ref<ConnectionDeepLinkDraft | null>(null);
 const showSettingsDialog = ref(false);
 const showDriverStore = ref(false);
+const showCommandPalette = ref(false);
 const agentDriverUpdateCount = ref(0);
 const showHistory = ref(false);
 const showAiPanel = ref(safeLocalStorageGet("dbx-ai-panel-open") === "true");
@@ -232,6 +236,29 @@ const { getDatabaseOptions } = useDatabaseOptions();
 const { openLineageTarget, openDatabaseSearchTarget, onStructureEditorSaved, openTableTarget } =
   useNavigationTargets(dialogs);
 const { onExecuteSql, onReloadData, onPaginate, onSort } = useDataGridActions(activeTab);
+
+// Command palette: the App-level capabilities the lib registry's actions run
+// against. Each `run` routes to the same opener the toolbar/menu uses, so the
+// palette stays in sync with the rest of the shell.
+const commandPaletteContext: CommandPaletteContext = {
+  newQuery: () => void newQuery(),
+  newConnection: () => {
+    connectionDialogPrefill.value = null;
+    showConnectionDialog.value = true;
+  },
+  openTransfer: () => (dialogs.showTransferDialog.value = true),
+  openSchemaDiff: () => (dialogs.showSchemaDiffDialog.value = true),
+  openDataCompare: () => (dialogs.showDataCompareDialog.value = true),
+  openDriverStore: () => (showDriverStore.value = true),
+  openSqlLibrary: () => {
+    setSidebarOpen(true);
+    appSidebarRef.value?.openSqlLibrary();
+  },
+  openSqlFile: () => (dialogs.showSqlFileDialog.value = true),
+  toggleQueryHistory: () => (showHistory.value = !showHistory.value),
+  toggleAiAssistant: toggleAiPanel,
+  openSettings: () => (showSettingsDialog.value = true),
+};
 
 // Backend push: a connection's SSH tunnel gave up reconnecting (pools were
 // evicted backend-side). One toast per connection inside the dedupe window.
@@ -817,6 +844,12 @@ function handleKeydown(e: KeyboardEvent) {
     showSettingsDialog.value = true;
     return;
   }
+  if (isCommandPaletteShortcut(e, shortcuts)) {
+    e.preventDefault();
+    e.stopPropagation();
+    showCommandPalette.value = !showCommandPalette.value;
+    return;
+  }
   if (isFocusSearchShortcut(e, shortcuts)) {
     const focused = contentAreaRef.value?.focusSearch() || appSidebarRef.value?.focusSearch();
     if (focused) {
@@ -1306,6 +1339,7 @@ onUnmounted(() => {
           :database="activeTab.database"
           :current-sql="executableSql"
         />
+        <CommandPalette v-if="showCommandPalette" v-model:open="showCommandPalette" :context="commandPaletteContext" />
         <Teleport to="body">
           <Transition name="ds-toast">
             <div v-if="toastVisible" class="ds-toast-host">

@@ -36,6 +36,12 @@ function toggleLibrary() {
   safeLocalStorageSet("dbx-sql-library-open", String(libraryOpen.value));
 }
 
+/** Programmatic opener (command palette); opens the sidebar if collapsed. */
+function openSqlLibrary() {
+  if (libraryOpen.value) return;
+  toggleLibrary();
+}
+
 function startLibraryResize(e: MouseEvent) {
   e.preventDefault();
   const startY = e.clientY;
@@ -81,7 +87,7 @@ function focusSearch(): boolean {
   return connectionTreeRef.value?.focusSearch() ?? false;
 }
 
-defineExpose({ focusSearch });
+defineExpose({ focusSearch, openSqlLibrary });
 </script>
 
 <template>

@@ -29,7 +29,8 @@ export type ShortcutActionId =
   | "refreshData"
   | "toggleTranspose"
   | "cancelSearch"
-  | "toggleSidebar";
+  | "toggleSidebar"
+  | "commandPalette";
 
 export type ShortcutScope = "global" | "editor" | "grid" | "search";
 
@@ -199,6 +200,12 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     labelKey: "settings.shortcutToggleSidebar",
     scope: "global",
     defaultShortcut: "Mod+B",
+  },
+  {
+    id: "commandPalette",
+    labelKey: "settings.shortcutCommandPalette",
+    scope: "global",
+    defaultShortcut: "Mod+K",
   },
 ];
 

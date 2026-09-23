@@ -6,6 +6,7 @@ import {
   GOTO_TAB_ACTION_COUNT,
   SHORTCUT_DEFINITIONS,
   findShortcutConflict,
+  normalizeShortcutSettings,
 } from "../../apps/desktop/src/lib/shortcutRegistry.ts";
 import en from "../../apps/desktop/src/i18n/locales/en.ts";
 import es from "../../apps/desktop/src/i18n/locales/es.ts";
@@ -60,6 +61,21 @@ test("registry contains the format SQL binding", () => {
   assert.equal(formatSql.defaultShortcut, "Mod+Shift+F");
   assert.equal(formatSql.labelKey, "settings.shortcutFormatSql");
   assert.equal(formatSql.labelParams, undefined);
+});
+
+test("registry contains the command palette binding", () => {
+  const commandPalette = definition("commandPalette");
+  assert.equal(commandPalette.scope, "global");
+  assert.equal(commandPalette.defaultShortcut, "Mod+K");
+  assert.equal(commandPalette.labelKey, "settings.shortcutCommandPalette");
+  assert.equal(commandPalette.labelParams, undefined);
+});
+
+test("normalizeShortcutSettings back-fills the command palette id for pre-existing settings", () => {
+  const legacy = normalizeShortcutSettings({ executeSql: "Shift+Mod+Enter" });
+  assert.equal(legacy.commandPalette, "Mod+K");
+  assert.equal(legacy.executeSql, "Shift+Mod+Enter");
+  assert.equal(normalizeShortcutSettings({ commandPalette: "Mod+P" }).commandPalette, "Mod+P");
 });
 
 test("default shortcuts are unique within each scope (no binding conflicts)", () => {

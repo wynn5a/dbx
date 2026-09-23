@@ -6,6 +6,7 @@ import {
   isBrowserReloadShortcut,
   isCancelSearchShortcut,
   isCloseTabShortcut,
+  isCommandPaletteShortcut,
   isExecuteSqlShortcut,
   isFocusSearchShortcut,
   isFormatSqlShortcut,
@@ -275,6 +276,24 @@ test("rejects format SQL shortcuts with missing or extra modifiers", () => {
   assert.equal(isFormatSqlShortcut({ key: "F", ctrlKey: true }), false);
   assert.equal(isFormatSqlShortcut({ key: "F", metaKey: true, shiftKey: true, altKey: true }), false);
   assert.equal(isFormatSqlShortcut({ key: "F", metaKey: true, shiftKey: true, isComposing: true }), false);
+});
+
+test("matches Mod+K for toggling the command palette", () => {
+  assert.equal(isCommandPaletteShortcut({ key: "k", metaKey: true }), true);
+  assert.equal(isCommandPaletteShortcut({ key: "K", ctrlKey: true }), true);
+  assert.equal(eventToShortcut({ key: "k", metaKey: true } as any), "Mod+K");
+});
+
+test("rejects command palette shortcuts with missing or extra modifiers", () => {
+  assert.equal(isCommandPaletteShortcut({ key: "k" }), false);
+  assert.equal(isCommandPaletteShortcut({ key: "k", altKey: true }), false);
+  assert.equal(isCommandPaletteShortcut({ key: "k", metaKey: true, shiftKey: true }), false);
+  assert.equal(isCommandPaletteShortcut({ key: "k", metaKey: true, isComposing: true }), false);
+});
+
+test("matches custom command palette shortcut settings", () => {
+  assert.equal(isCommandPaletteShortcut({ key: "k", metaKey: true }, { commandPalette: "Mod+P" } as any), false);
+  assert.equal(isCommandPaletteShortcut({ key: "p", metaKey: true }, { commandPalette: "Mod+P" } as any), true);
 });
 
 test("matches custom format SQL shortcut settings", () => {
