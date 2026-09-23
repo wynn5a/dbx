@@ -648,12 +648,17 @@ async function mongoFindDocuments(
 }
 
 async function executeMongoWrite(config: ConnectionConfig, command: MongoWriteCommand): Promise<number> {
+  // Forward the session's policy so the desktop bridge enforces the same
+  // write/dangerous gates server-side (defense in depth).
+  const safety = sqlSafetyFromEnv();
+  const policy = { allow_writes: safety.allowWrites, allow_dangerous: safety.allowDangerous };
   if (command.kind === "insert") {
     const result = await bridgeDataRequest<{ affected_rows: number }>("/data/mongo/insert-documents", {
       connection_name: config.name,
       database: config.database || "",
       collection: command.collection,
       docs_json: command.docsJson,
+      ...policy,
     });
     return result.affected_rows;
   }
@@ -665,6 +670,7 @@ async function executeMongoWrite(config: ConnectionConfig, command: MongoWriteCo
       filter_json: command.filter,
       update_json: command.update,
       many: command.many,
+      ...policy,
     });
     return result.affected_rows;
   }
@@ -674,6 +680,7 @@ async function executeMongoWrite(config: ConnectionConfig, command: MongoWriteCo
     collection: command.collection,
     filter_json: command.filter,
     many: command.many,
+    ...policy,
   });
   return result.affected_rows;
 }
@@ -684,12 +691,15 @@ async function mongoAggregateDocuments(
   pipelineJson: string,
   maxRows: number,
 ): Promise<MongoDocumentResult> {
+  const safety = sqlSafetyFromEnv();
   return bridgeDataRequest<MongoDocumentResult>("/data/mongo/aggregate-documents", {
     connection_name: config.name,
     database: config.database || "",
     collection,
     pipeline_json: pipelineJson,
     max_rows: maxRows,
+    allow_writes: safety.allowWrites,
+    allow_dangerous: safety.allowDangerous,
   });
 }
 

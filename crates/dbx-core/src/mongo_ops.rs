@@ -266,6 +266,83 @@ pub async fn mongo_delete_documents_core(
     }
 }
 
+/// Which MongoDB write a caller without an interactive confirmation (the MCP
+/// bridge) is about to run; see [ensure_mongo_write_allowed].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MongoWriteKind {
+    Insert,
+    /// Update/delete carry the filter they apply to.
+    Update,
+    Delete,
+}
+
+fn is_empty_json_object(json: &str) -> bool {
+    matches!(serde_json::from_str::<serde_json::Value>(json), Ok(serde_json::Value::Object(map)) if map.is_empty())
+}
+
+/// Server-side write gate for MongoDB writes, mirroring node-core's
+/// `evaluateMongoWriteSafety`: writes need `allow_writes`; an update/delete
+/// with an empty filter (touches every document) additionally needs
+/// `allow_dangerous`. The `Err` payload is a user-facing reason string.
+pub fn ensure_mongo_write_allowed(
+    kind: MongoWriteKind,
+    filter_json: Option<&str>,
+    allow_writes: bool,
+    allow_dangerous: bool,
+) -> Result<(), String> {
+    if !allow_writes {
+        return Err(
+            "MongoDB write is blocked. Re-send the request with allow_writes=true to run it; the bridge is read-only by default."
+                .to_string(),
+        );
+    }
+    let unfiltered = matches!(kind, MongoWriteKind::Update | MongoWriteKind::Delete)
+        && filter_json.is_some_and(is_empty_json_object);
+    if unfiltered && !allow_dangerous {
+        return Err(
+            "MongoDB update/delete with an empty filter is blocked. Re-send the request with allow_dangerous=true to run it."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// The first `$out`/`$merge` stage of an aggregate pipeline, if any — those
+/// stages write data.
+pub fn mongo_aggregate_write_stage(pipeline_json: &str) -> Option<&'static str> {
+    let Ok(serde_json::Value::Array(stages)) = serde_json::from_str::<serde_json::Value>(pipeline_json) else {
+        return None;
+    };
+    stages.iter().filter_map(serde_json::Value::as_object).find_map(|stage| {
+        if stage.contains_key("$out") {
+            Some("$out")
+        } else if stage.contains_key("$merge") {
+            Some("$merge")
+        } else {
+            None
+        }
+    })
+}
+
+/// Server-side gate for aggregates, mirroring node-core's
+/// `evaluateMongoAggregateSafety`: read-only pipelines always pass; a
+/// `$out`/`$merge` stage needs both `allow_writes` and `allow_dangerous`.
+pub fn ensure_mongo_aggregate_allowed(
+    pipeline_json: &str,
+    allow_writes: bool,
+    allow_dangerous: bool,
+) -> Result<(), String> {
+    let Some(stage) = mongo_aggregate_write_stage(pipeline_json) else {
+        return Ok(());
+    };
+    if !allow_writes || !allow_dangerous {
+        return Err(format!(
+            "MongoDB aggregate stage \"{stage}\" writes data. Re-send the request with allow_writes=true and allow_dangerous=true to run it."
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{fallback_mongo_database, mongo_list_databases_unauthorized, sort_names};
@@ -297,5 +374,28 @@ mod tests {
             vec!["app".to_string()],
         );
         assert_eq!(fallback_mongo_database("not authorized", None).unwrap_err(), "not authorized");
+    }
+
+    #[test]
+    fn mongo_writes_need_allow_writes_and_unfiltered_ones_allow_dangerous() {
+        use super::{ensure_mongo_write_allowed, MongoWriteKind};
+        assert!(ensure_mongo_write_allowed(MongoWriteKind::Insert, None, false, false).is_err());
+        assert!(ensure_mongo_write_allowed(MongoWriteKind::Insert, None, true, false).is_ok());
+        assert!(ensure_mongo_write_allowed(MongoWriteKind::Update, Some(r#"{"a":1}"#), false, true).is_err());
+        assert!(ensure_mongo_write_allowed(MongoWriteKind::Update, Some(r#"{"a":1}"#), true, false).is_ok());
+        assert!(ensure_mongo_write_allowed(MongoWriteKind::Delete, Some("{}"), true, false).is_err());
+        assert!(ensure_mongo_write_allowed(MongoWriteKind::Delete, Some(" { } "), true, true).is_ok());
+    }
+
+    #[test]
+    fn mongo_aggregate_write_stages_need_both_flags() {
+        use super::{ensure_mongo_aggregate_allowed, mongo_aggregate_write_stage};
+        assert_eq!(mongo_aggregate_write_stage(r#"[{"$match":{}},{"$out":"copy"}]"#), Some("$out"));
+        assert_eq!(mongo_aggregate_write_stage(r#"[{"$merge":{"into":"x"}}]"#), Some("$merge"));
+        assert_eq!(mongo_aggregate_write_stage(r#"[{"$match":{"$out":1}}]"#), None);
+        assert_eq!(mongo_aggregate_write_stage("not json"), None);
+        assert!(ensure_mongo_aggregate_allowed(r#"[{"$match":{}}]"#, false, false).is_ok());
+        assert!(ensure_mongo_aggregate_allowed(r#"[{"$out":"copy"}]"#, true, false).is_err());
+        assert!(ensure_mongo_aggregate_allowed(r#"[{"$out":"copy"}]"#, true, true).is_ok());
     }
 }

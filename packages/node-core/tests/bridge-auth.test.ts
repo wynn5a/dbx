@@ -127,3 +127,32 @@ test("executeQuery sends the token and policy flags through the bridge", async (
     server.close();
   }
 });
+
+const mongoConfig: ConnectionConfig = {
+  id: "mongo-1",
+  name: "mongo-local",
+  db_type: "mongodb",
+  host: "127.0.0.1",
+  port: 27017,
+  username: "",
+  password: "",
+  database: "app",
+  ssl: false,
+};
+
+test("Mongo writes forward the policy flags so the bridge can gate them", async () => {
+  process.env.DBX_BRIDGE_TOKEN = "shared-token";
+  process.env.DBX_MCP_ALLOW_WRITES = "1";
+  const { server, port, requests } = await startBridge(() => [200, JSON.stringify({ affected_rows: 1 })]);
+  writeFileSync(join(dataDir, "mcp-bridge-port"), String(port));
+  try {
+    const result = await executeQuery(mongoConfig, 'db.users.deleteOne({"name": "x"})');
+    assert.equal(result.row_count, 1);
+    const request = requests[0];
+    assert.equal(request?.body.collection, "users");
+    assert.equal(request?.body.allow_writes, true);
+    assert.equal(request?.body.allow_dangerous, false);
+  } finally {
+    server.close();
+  }
+});

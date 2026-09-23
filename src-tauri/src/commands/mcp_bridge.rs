@@ -62,6 +62,10 @@ struct MongoAggregateDocumentsRequest {
     collection: String,
     pipeline_json: String,
     max_rows: Option<usize>,
+    /// Caller-declared policy, enforced server-side (defense in depth on top
+    /// of the MCP server's own check). Read-only by default.
+    allow_writes: Option<bool>,
+    allow_dangerous: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -70,6 +74,10 @@ struct MongoInsertDocumentsRequest {
     database: Option<String>,
     collection: String,
     docs_json: String,
+    /// Caller-declared policy, enforced server-side (defense in depth on top
+    /// of the MCP server's own check). Read-only by default.
+    allow_writes: Option<bool>,
+    allow_dangerous: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -80,6 +88,10 @@ struct MongoUpdateDocumentsRequest {
     filter_json: String,
     update_json: String,
     many: bool,
+    /// Caller-declared policy, enforced server-side (defense in depth on top
+    /// of the MCP server's own check). Read-only by default.
+    allow_writes: Option<bool>,
+    allow_dangerous: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -89,6 +101,10 @@ struct MongoDeleteDocumentsRequest {
     collection: String,
     filter_json: String,
     many: bool,
+    /// Caller-declared policy, enforced server-side (defense in depth on top
+    /// of the MCP server's own check). Read-only by default.
+    allow_writes: Option<bool>,
+    allow_dangerous: Option<bool>,
 }
 
 #[derive(Clone, Serialize)]
@@ -496,6 +512,14 @@ async fn handle_mongo_find_documents_data(state: &Arc<AppState>, body: &str, str
 
 async fn handle_mongo_aggregate_documents_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
     let Some(req) = parse_request::<MongoAggregateDocumentsRequest>(body, stream).await else { return };
+    if let Err(reason) = dbx_core::mongo_ops::ensure_mongo_aggregate_allowed(
+        &req.pipeline_json,
+        req.allow_writes.unwrap_or(false),
+        req.allow_dangerous.unwrap_or(false),
+    ) {
+        respond_error(stream, "403 Forbidden", &reason).await;
+        return;
+    }
     let Some((pool_key, database)) = resolve_mongo_pool_key(state, &req.connection_name, req.database, stream).await
     else {
         return;
@@ -517,6 +541,15 @@ async fn handle_mongo_aggregate_documents_data(state: &Arc<AppState>, body: &str
 
 async fn handle_mongo_insert_documents_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
     let Some(req) = parse_request::<MongoInsertDocumentsRequest>(body, stream).await else { return };
+    if let Err(reason) = dbx_core::mongo_ops::ensure_mongo_write_allowed(
+        dbx_core::mongo_ops::MongoWriteKind::Insert,
+        None,
+        req.allow_writes.unwrap_or(false),
+        req.allow_dangerous.unwrap_or(false),
+    ) {
+        respond_error(stream, "403 Forbidden", &reason).await;
+        return;
+    }
     let Some((pool_key, database)) = resolve_mongo_pool_key(state, &req.connection_name, req.database, stream).await
     else {
         return;
@@ -531,6 +564,15 @@ async fn handle_mongo_insert_documents_data(state: &Arc<AppState>, body: &str, s
 
 async fn handle_mongo_update_documents_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
     let Some(req) = parse_request::<MongoUpdateDocumentsRequest>(body, stream).await else { return };
+    if let Err(reason) = dbx_core::mongo_ops::ensure_mongo_write_allowed(
+        dbx_core::mongo_ops::MongoWriteKind::Update,
+        Some(&req.filter_json),
+        req.allow_writes.unwrap_or(false),
+        req.allow_dangerous.unwrap_or(false),
+    ) {
+        respond_error(stream, "403 Forbidden", &reason).await;
+        return;
+    }
     let Some((pool_key, database)) = resolve_mongo_pool_key(state, &req.connection_name, req.database, stream).await
     else {
         return;
@@ -553,6 +595,15 @@ async fn handle_mongo_update_documents_data(state: &Arc<AppState>, body: &str, s
 
 async fn handle_mongo_delete_documents_data(state: &Arc<AppState>, body: &str, stream: &mut tokio::net::TcpStream) {
     let Some(req) = parse_request::<MongoDeleteDocumentsRequest>(body, stream).await else { return };
+    if let Err(reason) = dbx_core::mongo_ops::ensure_mongo_write_allowed(
+        dbx_core::mongo_ops::MongoWriteKind::Delete,
+        Some(&req.filter_json),
+        req.allow_writes.unwrap_or(false),
+        req.allow_dangerous.unwrap_or(false),
+    ) {
+        respond_error(stream, "403 Forbidden", &reason).await;
+        return;
+    }
     let Some((pool_key, database)) = resolve_mongo_pool_key(state, &req.connection_name, req.database, stream).await
     else {
         return;
@@ -773,6 +824,62 @@ mod tests {
         )
         .await;
         assert!(drop_ok.starts_with("HTTP/1.1 200"), "drop with both flags: {drop_ok}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    #[tokio::test]
+    async fn gates_mongo_writes_behind_flags() {
+        let (addr, dir) = test_bridge().await;
+        let cases = [
+            ("/data/mongo/insert-documents", r#""collection":"c","docs_json":"[{\"a\":1}]""#),
+            (
+                "/data/mongo/update-documents",
+                r#""collection":"c","filter_json":"{\"a\":1}","update_json":"{\"$set\":{\"a\":2}}","many":false"#,
+            ),
+            ("/data/mongo/delete-documents", r#""collection":"c","filter_json":"{\"a\":1}","many":false"#),
+        ];
+        for (path, fields) in cases {
+            let blocked =
+                post(addr, path, Some(TOKEN), &format!(r#"{{"connection_name":"bridge-test",{fields}}}"#)).await;
+            assert!(blocked.starts_with("HTTP/1.1 403"), "{path} without allow_writes: {blocked}");
+            // With the flag the gate passes; the (SQLite) test connection then
+            // fails as "not a MongoDB connection", which is not a 403.
+            let allowed = post(
+                addr,
+                path,
+                Some(TOKEN),
+                &format!(r#"{{"connection_name":"bridge-test",{fields},"allow_writes":true}}"#),
+            )
+            .await;
+            assert!(!allowed.starts_with("HTTP/1.1 403"), "{path} with allow_writes: {allowed}");
+        }
+
+        // An unfiltered delete also needs allow_dangerous.
+        let unfiltered = post(
+            addr,
+            "/data/mongo/delete-documents",
+            Some(TOKEN),
+            r#"{"connection_name":"bridge-test","collection":"c","filter_json":"{}","many":true,"allow_writes":true}"#,
+        )
+        .await;
+        assert!(unfiltered.starts_with("HTTP/1.1 403"), "unfiltered delete without allow_dangerous: {unfiltered}");
+
+        // Aggregates writing via $out need both flags; plain pipelines stay open.
+        let out = post(
+            addr,
+            "/data/mongo/aggregate-documents",
+            Some(TOKEN),
+            r#"{"connection_name":"bridge-test","collection":"c","pipeline_json":"[{\"$out\":\"copy\"}]","allow_writes":true}"#,
+        )
+        .await;
+        assert!(out.starts_with("HTTP/1.1 403"), "$out without allow_dangerous: {out}");
+        let read = post(
+            addr,
+            "/data/mongo/aggregate-documents",
+            Some(TOKEN),
+            r#"{"connection_name":"bridge-test","collection":"c","pipeline_json":"[{\"$match\":{}}]"}"#,
+        )
+        .await;
+        assert!(!read.starts_with("HTTP/1.1 403"), "read-only aggregate: {read}");
         let _ = std::fs::remove_dir_all(dir);
     }
 }
