@@ -1,7 +1,9 @@
 import { test } from "vitest";
 import assert from "node:assert/strict";
 import { createPinia, setActivePinia } from "pinia";
+import { readFileSync } from "node:fs";
 import { useConnectionStore } from "../../apps/desktop/src/stores/connectionStore.ts";
+import { runStartupLoadChain } from "../../apps/desktop/src/lib/startupLoadChain.ts";
 import type { ConnectionConfig } from "../../apps/desktop/src/types/database.ts";
 
 // ---------------------------------------------------------------------------
@@ -228,14 +230,14 @@ test("initFromDisk total time tracks the slowest read, not the sum of the three"
   }
 });
 
-test("a failing startup read rejects initFromDisk, clears the loading flag, and commits nothing", async () => {
+test("a corrupt sidebar layout degrades to the default layout instead of dropping the connections", async () => {
   const storage = installMemoryStorage();
   const issued: string[] = [];
   const restoreTauri = installTauriInvokeStub(async (cmd) => {
     issued.push(cmd);
     if (cmd === "load_pinned_tree_node_ids") return [];
-    if (cmd === "load_connections") return [conn("conn-a", "A")];
-    if (cmd === "load_sidebar_layout") throw new Error("disk boom");
+    if (cmd === "load_connections") return [conn("conn-a", "A"), conn("conn-b", "B")];
+    if (cmd === "load_sidebar_layout") throw new Error("invalid layout_json: expected value at line 1 column 1");
     return null;
   });
 
@@ -243,20 +245,103 @@ test("a failing startup read rejects initFromDisk, clears the loading flag, and 
     setActivePinia(createPinia());
     const store = useConnectionStore();
 
-    // Same fault-tolerance semantics as the serial version: the pinned-ids
-    // read self-catches, while loadConnections/loadSidebarLayout failures
-    // propagate to the caller (App.vue toasts connection.loadFailed).
-    await assert.rejects(store.initFromDisk(), /disk boom/);
+    await store.initFromDisk();
 
-    // All three reads were still issued — one failure does not stop the fan-out.
     for (const cmd of STARTUP_COMMANDS) {
       assert.ok(issued.includes(cmd), `expected ${cmd} to be issued`);
     }
     assert.equal(store.connectionsLoading, false);
-    // No half-loaded state: connections are not committed without the layout.
-    assert.equal(store.connections.length, 0);
+    assert.deepEqual(
+      store.connections.map((c) => c.id),
+      ["conn-a", "conn-b"],
+      "the layout is cosmetic — the connections must still load",
+    );
+    assert.ok(store.treeNodes.length >= 2, "the tree is rebuilt with the default layout");
   } finally {
     restoreTauri();
     storage.restore();
   }
+});
+
+test("a failed connections read rejects, commits nothing, and blocks the save that would wipe them", async () => {
+  const storage = installMemoryStorage();
+  const issued: string[] = [];
+  let failConnections = true;
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    issued.push(cmd);
+    if (cmd === "load_pinned_tree_node_ids") return [];
+    if (cmd === "load_connections") {
+      if (failConnections) throw new Error("disk boom");
+      return [conn("conn-a", "A")];
+    }
+    if (cmd === "load_sidebar_layout") return null;
+    return null;
+  });
+
+  try {
+    setActivePinia(createPinia());
+    const store = useConnectionStore();
+
+    await assert.rejects(store.initFromDisk(), /disk boom/);
+    assert.equal(store.connectionsLoading, false);
+    assert.equal(store.connections.length, 0);
+
+    // save_connections replaces the whole stored set: saving the (empty)
+    // in-memory list plus one new connection would delete everything else.
+    await assert.rejects(store.addConnection(conn("conn-new", "New")), /failed to load/);
+    assert.equal(issued.includes("save_connections"), false, "no save may reach the backend");
+
+    // A later successful load lifts the guard.
+    failConnections = false;
+    await store.initFromDisk();
+    assert.deepEqual(
+      store.connections.map((c) => c.id),
+      ["conn-a"],
+    );
+    await store.addConnection(conn("conn-new", "New"));
+    assert.equal(issued.includes("save_connections"), true);
+  } finally {
+    restoreTauri();
+    storage.restore();
+  }
+});
+
+test("a failing saved-SQL load at startup still loads connections and clears the loading flag", async () => {
+  const storage = installMemoryStorage();
+  const restoreTauri = installTauriInvokeStub(async (cmd) => {
+    if (cmd === "load_pinned_tree_node_ids") return [];
+    if (cmd === "load_connections") return [conn("conn-a", "A")];
+    if (cmd === "load_sidebar_layout") return null;
+    return null;
+  });
+
+  try {
+    setActivePinia(createPinia());
+    const store = useConnectionStore();
+    const errors: unknown[] = [];
+    let connectionsLoaded = false;
+
+    await runStartupLoadChain({
+      loadSavedSql: () => Promise.reject(new Error("saved sql library unreadable")),
+      loadConnections: () => store.initFromDisk(),
+      onConnectionsLoaded: () => {
+        connectionsLoaded = true;
+      },
+      onError: (error) => errors.push(error),
+    });
+
+    assert.equal(errors.length, 1, "the saved-SQL failure is still reported");
+    assert.match(String(errors[0]), /saved sql library unreadable/);
+    assert.equal(connectionsLoaded, true);
+    assert.equal(store.connectionsLoading, false, "the Welcome screen must not stay on 'Loading connections…'");
+    assert.equal(store.connections.length, 1);
+  } finally {
+    restoreTauri();
+    storage.restore();
+  }
+});
+
+test("App startup routes through runStartupLoadChain", () => {
+  const app = readFileSync(new URL("../../apps/desktop/src/App.vue", import.meta.url), "utf8");
+  assert.match(app, /runStartupLoadChain\(\{[\s\S]*?loadSavedSql:[\s\S]*?loadConnections: \(\) => connectionStore\.initFromDisk\(\)/);
 });

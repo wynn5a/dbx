@@ -270,6 +270,10 @@ export const useConnectionStore = defineStore("connection", () => {
   let layoutPersistTimer: ReturnType<typeof setTimeout> | null = null;
   const staleTreeRefreshIds = new Set<string>();
   let initFromDiskPromise: Promise<void> | null = null;
+  // Set when the startup read of the saved connections failed: `connections`
+  // is then empty/incomplete, and save_connections replaces the whole stored
+  // set (connections + secrets), so a save would silently delete them all.
+  let connectionsLoadFailed = false;
 
   function startEditing(id: string) {
     editingConnectionId.value = id;
@@ -2855,6 +2859,11 @@ export const useConnectionStore = defineStore("connection", () => {
   }
 
   async function persistConnections(nextConnections: ConnectionConfig[] = connections.value) {
+    if (connectionsLoadFailed) {
+      throw new Error(
+        "Saved connections failed to load; not saving so they are not overwritten. Restart DBX to retry.",
+      );
+    }
     await api.saveConnections(nextConnections);
   }
 
@@ -3151,18 +3160,28 @@ export const useConnectionStore = defineStore("connection", () => {
       connectionsLoading.value = true;
       initFromDiskPromise = (async () => {
         // The three disk reads are independent — fetch them concurrently so
-        // startup waits on the slowest, not on their sum. Failure semantics
-        // match the previous serial version: loadPinnedTreeNodeIds self-catches
-        // its IPC, while loadConnections/loadSidebarLayout propagate to the
-        // caller (App.vue toasts connection.loadFailed); with Promise.all no
-        // state is committed unless all three succeed (no half-loaded tree).
+        // startup waits on the slowest, not on their sum. loadPinnedTreeNodeIds
+        // self-catches its IPC, and a failed (e.g. corrupt) sidebar layout
+        // degrades to the default layout (reconcileLayout accepts null): the
+        // layout is cosmetic, while dropping the connections over it would
+        // leave `connections` empty and the next save would wipe every stored
+        // connection. Only a loadConnections failure propagates (App.vue
+        // toasts connection.loadFailed); it then blocks saves until a later
+        // load succeeds (see persistConnections).
         // Assignments keep the original order: reconcileLayout needs the
         // loaded connections, and rebuildTreeNodes needs both.
         const [pinnedIds, saved, savedLayout] = await Promise.all([
           loadPinnedTreeNodeIds(),
-          api.loadConnections(),
-          api.loadSidebarLayout(),
+          api.loadConnections().catch((error: unknown) => {
+            connectionsLoadFailed = true;
+            throw error;
+          }),
+          api.loadSidebarLayout().catch((error: unknown) => {
+            console.warn("Failed to load the sidebar layout; falling back to the default layout", error);
+            return null;
+          }),
         ]);
+        connectionsLoadFailed = false;
         pinnedTreeNodeIds.value = pinnedIds;
         connections.value = saved.map(normalizeConnection);
         sidebarLayout.value = reconcileLayout(

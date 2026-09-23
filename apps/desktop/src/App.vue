@@ -70,6 +70,7 @@ import { buildHistoryAiAnalysisPrompt } from "@/lib/historyAiAnalysis";
 import { countAvailableAgentDriverUpdates, type AgentDriverUpdateBadgeState } from "@/lib/agentDriverUpdateBadge";
 import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/safeStorage";
 import { flushStartupMarks, markStartupPhase } from "@/lib/startupMarks";
+import { runStartupLoadChain } from "@/lib/startupLoadChain";
 import { DsDialog } from "@/components/ui/dialog";
 import { DsToast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -976,23 +977,22 @@ function handleKeydown(e: KeyboardEvent) {
 function initApp() {
   markStartupPhase("startup:init-app-begin");
   settingsStore.initDesktopSettings().catch(() => {});
-  savedSqlStore
-    .initFromStorage()
-    .then(() => {
-      markStartupPhase("startup:saved-sql-loaded");
-      return connectionStore.initFromDisk();
-    })
-    .then(() => {
+  void runStartupLoadChain({
+    loadSavedSql: () => savedSqlStore.initFromStorage(),
+    onSavedSqlLoaded: () => markStartupPhase("startup:saved-sql-loaded"),
+    loadConnections: () => connectionStore.initFromDisk(),
+    onConnectionsLoaded: () => {
       markStartupPhase("startup:connections-loaded");
       // End of the awaited startup chain: flush the complete summary (the
       // first-frame flush in main.ts may have run before these disk reads
       // settled).
       flushStartupMarks();
       reconnectRestoredTabs();
-    })
-    .catch((e: any) => {
+    },
+    onError: (e: any) => {
       toast(t("connection.loadFailed", { message: e?.message || String(e) }), 5000);
-    });
+    },
+  });
   settingsStore.initAiConfig();
 }
 
