@@ -346,7 +346,7 @@ test("inserts Oracle and DuckDB identifiers without MySQL backticks, ANSI-quotin
   // in Oracle). Generic-family dialects keep plain identifiers bare (no
   // per-dialect reserved-word set yet) and wrap anything that cannot be written
   // bare in ANSI double quotes, which all of them accept.
-  for (const dialect of ["oracle", "duckdb", "clickhouse", "sqlite", "generic"] as const) {
+  for (const dialect of ["duckdb", "clickhouse", "sqlite", "generic"] as const) {
     const reservedItems = buildSqlCompletionItems("select * from ord", "select * from ord".length, {
       tables: dialectQuotedTables,
       columnsByTable: new Map(),
@@ -368,7 +368,7 @@ test("inserts Oracle and DuckDB identifiers without MySQL backticks, ANSI-quotin
 test("quoteSqlIdentifier ANSI-quotes identifiers that cannot be bare on generic-family dialects", () => {
   // T07 review: `my table` used to be inserted bare on sqlite/duckdb/clickhouse/
   // oracle/generic — invalid SQL on all five.
-  for (const dialect of ["oracle", "duckdb", "clickhouse", "sqlite", "generic", undefined] as const) {
+  for (const dialect of ["duckdb", "clickhouse", "sqlite", "generic", undefined] as const) {
     assert.equal(quoteSqlIdentifier("my table", dialect), '"my table"', String(dialect));
     assert.equal(quoteSqlIdentifier("order-items", dialect), '"order-items"', String(dialect));
     assert.equal(quoteSqlIdentifier("2024_sales", dialect), '"2024_sales"', String(dialect));
@@ -382,6 +382,27 @@ test("quoteSqlIdentifier ANSI-quotes identifiers that cannot be bare on generic-
     dialect: "sqlite",
   });
   assert.equal(items.find((item) => item.label === "my table")?.apply, '"my table"');
+});
+
+test("quoteSqlIdentifier quotes Oracle identifiers that are not plain upper case", () => {
+  // Oracle-family engines fold unquoted names to upper case: a column reported
+  // as `myCol` / `order_date` only exists quoted, so bare text would name MYCOL.
+  assert.equal(quoteSqlIdentifier("EMP_ID", "oracle"), "EMP_ID");
+  assert.equal(quoteSqlIdentifier("SYS$COL#1", "oracle"), "SYS$COL#1");
+  assert.equal(quoteSqlIdentifier("myCol", "oracle"), '"myCol"');
+  assert.equal(quoteSqlIdentifier("order_date", "oracle"), '"order_date"');
+  assert.equal(quoteSqlIdentifier("Order Date", "oracle"), '"Order Date"');
+  assert.equal(quoteSqlIdentifier("2024_SALES", "oracle"), '"2024_SALES"');
+  const items = buildSqlCompletionItems("select * from EM", "select * from EM".length, {
+    tables: [
+      { name: "EMPLOYEES", type: "table" },
+      { name: "emp_Audit", type: "table" },
+    ],
+    columnsByTable: new Map(),
+    dialect: "oracle",
+  });
+  assert.equal(items.find((item) => item.label === "EMPLOYEES")?.apply, "EMPLOYEES");
+  assert.equal(items.find((item) => item.label === "emp_Audit")?.apply, '"emp_Audit"');
 });
 
 test("suggests matching table names after FROM", () => {

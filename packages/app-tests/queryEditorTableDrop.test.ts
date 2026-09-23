@@ -329,9 +329,24 @@ describe("sidebarReferenceInsertText for columns", () => {
   });
 
   it("leaves generic-family dialects unquoted (same as completion)", () => {
-    for (const databaseType of ["oracle", "duckdb", "clickhouse", "sqlite", "generic", undefined] as const) {
+    for (const databaseType of ["duckdb", "clickhouse", "sqlite", "generic", undefined] as const) {
       expect(sidebarReferenceInsertText(sampleColumnPayload({ columnName: "order", databaseType }))).toBe("order");
     }
+  });
+
+  it("ANSI-quotes generic-family column drops that cannot be bare, and Oracle non-upper-case names", () => {
+    for (const databaseType of ["duckdb", "clickhouse", "sqlite", "generic"] as const) {
+      expect(sidebarReferenceInsertText(sampleColumnPayload({ columnName: "Order Date", databaseType }))).toBe(
+        '"Order Date"',
+      );
+      expect(sidebarReferenceInsertText(sampleColumnPayload({ columnName: "my-col", databaseType }))).toBe('"my-col"');
+    }
+    expect(sidebarReferenceInsertText(sampleColumnPayload({ columnName: "myCol", databaseType: "oracle" }))).toBe(
+      '"myCol"',
+    );
+    expect(sidebarReferenceInsertText(sampleColumnPayload({ columnName: "ORDER_ID", databaseType: "oracle" }))).toBe(
+      "ORDER_ID",
+    );
   });
 
   it("falls back to the provided database type when the payload has none", () => {

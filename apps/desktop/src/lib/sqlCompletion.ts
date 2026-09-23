@@ -2895,8 +2895,14 @@ export function quoteSqlIdentifier(identifier: string, dialect?: SqlDialect): st
     case "sqlserver":
       if (!requiresSqlServerIdentifierQuote(identifier)) return identifier;
       return `[${identifier.replaceAll("]", "]]")}]`;
+    case "oracle":
+      // Oracle-family engines fold unquoted identifiers to upper case, so a
+      // name reported in lower/mixed case (`myCol`) only exists quoted — a bare
+      // `myCol` would resolve to MYCOL. Plain upper-case names stay bare.
+      if (/^[A-Z][A-Z0-9_$#]*$/.test(identifier)) return identifier;
+      return `"${identifier.replaceAll('"', '""')}"`;
     default:
-      // Generic-family dialects (oracle, duckdb, clickhouse, sqlite, generic):
+      // Generic-family dialects (duckdb, clickhouse, sqlite, generic):
       // there is no per-dialect reserved-word set for them yet, so plain
       // identifiers stay bare. Anything that cannot be written bare (spaces,
       // hyphens, a leading digit, …) gets ANSI double quotes, which all five
