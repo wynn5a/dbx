@@ -229,3 +229,62 @@ fn update_set_targets_count_as_column_references() {
     assert!(names.contains(&"age"));
     assert!(names.contains(&"id"));
 }
+
+// The unknown-column gate (apps/desktop/src/lib/sqlUnknownColumns.ts) is fed
+// the analyzer's real output for each case in this fixture by
+// packages/app-tests/sqlUnknownColumnsFixture.test.ts. This test keeps the
+// stored `analysis` in sync with the parser; regenerate with
+// `DBX_UPDATE_FIXTURES=1 cargo test -p dbx-core --test sql_analysis unknown_column_gate_fixture`.
+#[test]
+fn unknown_column_gate_fixture_is_current() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packages/app-tests/fixtures/unknown-column-gate-cases.json");
+    let text = std::fs::read_to_string(&path).expect("read fixture");
+    let mut fixture: serde_json::Value = serde_json::from_str(&text).expect("parse fixture");
+    let update = std::env::var_os("DBX_UPDATE_FIXTURES").is_some();
+    let mut stale = Vec::new();
+    for case in fixture["cases"].as_array_mut().expect("cases array") {
+        let sql = case["sql"].as_str().expect("sql").to_string();
+        let dialect = case["dialect"].as_str().expect("dialect").to_string();
+        let analysis = analyze_sql_references(&sql, Some(&dialect)).unwrap_or_else(|err| panic!("{sql}: {err}"));
+        let analysis = serde_json::to_value(&analysis).expect("serialize analysis");
+        if case["analysis"] != analysis {
+            stale.push(case["name"].as_str().unwrap_or(&sql).to_string());
+            case["analysis"] = analysis;
+        }
+    }
+    if update {
+        std::fs::write(&path, serde_json::to_string_pretty(&fixture).expect("serialize fixture") + "\n")
+            .expect("write fixture");
+        return;
+    }
+    assert!(stale.is_empty(), "stale analysis in {}: {stale:?} — rerun with DBX_UPDATE_FIXTURES=1", path.display());
+}
+
+#[test]
+fn table_functions_without_column_lists_are_opaque_sources() {
+    let analysis = analyze_sql_references("SELECT n FROM users, generate_series(1,3) n", Some("postgres")).unwrap();
+    assert_eq!(analysis.opaque_sources, vec!["n".to_string()]);
+    assert_eq!(analysis.tables.len(), 1, "the function is not a schema table");
+
+    // An explicit column list makes the output known: not opaque.
+    let analysis =
+        analyze_sql_references("SELECT n FROM users, generate_series(1,3) AS g(n)", Some("postgres")).unwrap();
+    assert!(analysis.opaque_sources.is_empty());
+    assert_eq!(analysis.alias_columns, vec!["n".to_string()]);
+}
+
+#[test]
+fn date_part_keywords_and_pseudo_columns_are_not_column_references() {
+    let names = |sql: &str, dialect: &str| -> Vec<String> {
+        analyze_sql_references(sql, Some(dialect)).unwrap().columns.into_iter().map(|column| column.name).collect()
+    };
+    assert_eq!(names("SELECT DATEADD(day, 1, created_at) FROM orders", "sqlserver"), vec!["created_at"]);
+    assert_eq!(names("SELECT TIMESTAMPDIFF(DAY, a, b) FROM orders", "mysql"), vec!["a", "b"]);
+    // A quoted first argument is an identifier, not a keyword.
+    assert_eq!(names("SELECT DATEADD(\"day\", 1, created_at) FROM orders", "sqlserver"), vec!["day", "created_at"]);
+    assert!(names("SELECT ROWNUM, SYSDATE FROM users", "oracle").is_empty());
+    assert!(names("SELECT ctid, xmin FROM users", "postgres").is_empty());
+    // Pseudo-columns are per dialect: `level` is an ordinary column on PG.
+    assert_eq!(names("SELECT level FROM users", "postgres"), vec!["level"]);
+}

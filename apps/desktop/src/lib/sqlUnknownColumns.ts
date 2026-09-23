@@ -39,6 +39,13 @@ export interface SqlUnknownColumnConfidence {
   /** Identifiers visible in scope that are not schema columns (select-list
    *  aliases, table-alias column lists). Matched case-insensitively. */
   scopeAliases?: readonly string[];
+  /** FROM sources whose output columns are unknown (table functions / UNNEST
+   *  without a column list). While any is present, unqualified names are
+   *  not attributable: they may be one of its columns or the source itself. */
+  opaqueSources?: readonly string[];
+  /** Other in-scope relation names (derived-table aliases). An unqualified
+   *  identifier equal to one is a whole-row reference, not a column. */
+  relationNames?: readonly string[];
   formatMessage?: (column: string, table: string) => string;
 }
 
@@ -58,6 +65,16 @@ export function gateUnknownColumnDiagnostics(confidence: SqlUnknownColumnConfide
 
   const cteNames = lowercaseSet(confidence.cteNames);
   const scopeAliases = lowercaseSet(confidence.scopeAliases);
+  const hasOpaqueSource = (confidence.opaqueSources ?? []).length > 0;
+  // A table alias/name (or other relation) used as a value — PG
+  // `row_to_json(u)`, `json_agg(t)`, `SELECT u FROM users u` — is a whole-row
+  // reference, never a column of that table.
+  const relationNames = lowercaseSet([
+    ...tables.flatMap((table) => (table.alias ? [table.alias, table.name] : [table.name])),
+    ...(confidence.relationNames ?? []),
+    ...(confidence.opaqueSources ?? []),
+    ...(confidence.cteNames ?? []),
+  ]);
 
   for (const table of tables) {
     // A CTE shadows any same-named schema table; the reference the SQL actually
@@ -83,8 +100,10 @@ export function gateUnknownColumnDiagnostics(confidence: SqlUnknownColumnConfide
     } else {
       // Unqualified columns are attributable only in single-table statements:
       // joins, subqueries and multi-statement scripts scope them in ways the
-      // flat reference list cannot see.
-      if (tables.length !== 1) continue;
+      // flat reference list cannot see. A table function without a column
+      // list is an extra source the table list does not show.
+      if (tables.length !== 1 || hasOpaqueSource) continue;
+      if (relationNames.has(column.name.toLowerCase())) continue;
       ref = tables[0];
     }
     if (!ref) continue;
@@ -130,6 +149,8 @@ export async function buildUnknownColumnDiagnostics(
     resolutions,
     cteNames: context.cteNames,
     scopeAliases: [...(analysis.select_aliases ?? []), ...(analysis.alias_columns ?? [])],
+    opaqueSources: analysis.opaque_sources ?? [],
+    relationNames: (analysis.derived_tables ?? []).map((derived) => derived.alias),
     formatMessage: context.formatMessage,
   });
 }

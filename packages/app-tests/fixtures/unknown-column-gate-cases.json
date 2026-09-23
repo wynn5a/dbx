@@ -1,0 +1,771 @@
+{
+  "_comment": "Real analyze_sql_references output fed to the unknown-column gate (packages/app-tests/sqlUnknownColumnsFixture.test.ts). Edit the cases, then regenerate `analysis` with: DBX_UPDATE_FIXTURES=1 cargo test -p dbx-core --test sql_analysis unknown_column_gate_fixture",
+  "cases": [
+    {
+      "name": "sqlserver DATEADD date part",
+      "dialect": "sqlserver",
+      "sql": "SELECT DATEADD(day, 1, created_at) FROM orders",
+      "schema": {
+        "orders": [
+          "id",
+          "created_at",
+          "total"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "orders",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 41,
+              "end_line": 1,
+              "end_column": 47
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "created_at",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 24,
+              "end_line": 1,
+              "end_column": 34
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "sqlserver DATEDIFF / DATEPART date parts",
+      "dialect": "sqlserver",
+      "sql": "SELECT DATEDIFF(day, created_at, GETDATE()), DATEPART(yy, created_at) FROM orders",
+      "schema": {
+        "orders": [
+          "id",
+          "created_at",
+          "total"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "orders",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 76,
+              "end_line": 1,
+              "end_column": 82
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "created_at",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 22,
+              "end_line": 1,
+              "end_column": 32
+            }
+          },
+          {
+            "name": "created_at",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 59,
+              "end_line": 1,
+              "end_column": 69
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "mysql TIMESTAMPDIFF unit",
+      "dialect": "mysql",
+      "sql": "SELECT TIMESTAMPDIFF(DAY, created_at, NOW()) FROM orders",
+      "schema": {
+        "orders": [
+          "id",
+          "created_at",
+          "total"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "orders",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 51,
+              "end_line": 1,
+              "end_column": 57
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "created_at",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 27,
+              "end_line": 1,
+              "end_column": 37
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "control: typo inside DATEADD is still flagged",
+      "dialect": "sqlserver",
+      "sql": "SELECT DATEADD(day, 1, created_atx) FROM orders",
+      "schema": {
+        "orders": [
+          "id",
+          "created_at",
+          "total"
+        ]
+      },
+      "expectedUnknown": [
+        "created_atx"
+      ],
+      "analysis": {
+        "tables": [
+          {
+            "name": "orders",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 42,
+              "end_line": 1,
+              "end_column": 48
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "created_atx",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 24,
+              "end_line": 1,
+              "end_column": 35
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "postgres row_to_json(alias)",
+      "dialect": "postgres",
+      "sql": "SELECT row_to_json(u) FROM users u",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": "u",
+            "span": {
+              "start_line": 1,
+              "start_column": 28,
+              "end_line": 1,
+              "end_column": 33
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "u",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 20,
+              "end_line": 1,
+              "end_column": 21
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "postgres json_agg(alias)",
+      "dialect": "postgres",
+      "sql": "SELECT json_agg(t) FROM users t",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": "t",
+            "span": {
+              "start_line": 1,
+              "start_column": 25,
+              "end_line": 1,
+              "end_column": 30
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "t",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 17,
+              "end_line": 1,
+              "end_column": 18
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "postgres bare alias as whole row",
+      "dialect": "postgres",
+      "sql": "SELECT u FROM users u",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": "u",
+            "span": {
+              "start_line": 1,
+              "start_column": 15,
+              "end_line": 1,
+              "end_column": 20
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "u",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 8,
+              "end_line": 1,
+              "end_column": 9
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "postgres generate_series aliased without column list",
+      "dialect": "postgres",
+      "sql": "SELECT n FROM users, generate_series(1,3) n",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 15,
+              "end_line": 1,
+              "end_column": 20
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "n",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 8,
+              "end_line": 1,
+              "end_column": 9
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": [
+          "n"
+        ]
+      }
+    },
+    {
+      "name": "postgres unnest aliased without column list",
+      "dialect": "postgres",
+      "sql": "SELECT u FROM users, unnest(tags) AS u",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 15,
+              "end_line": 1,
+              "end_column": 20
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "tags",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 29,
+              "end_line": 1,
+              "end_column": 33
+            }
+          },
+          {
+            "name": "u",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 8,
+              "end_line": 1,
+              "end_column": 9
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": [
+          "u"
+        ]
+      }
+    },
+    {
+      "name": "postgres jsonb_each output columns",
+      "dialect": "postgres",
+      "sql": "SELECT key, value FROM users, jsonb_each(data) e",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 24,
+              "end_line": 1,
+              "end_column": 29
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "data",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 42,
+              "end_line": 1,
+              "end_column": 46
+            }
+          },
+          {
+            "name": "key",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 8,
+              "end_line": 1,
+              "end_column": 11
+            }
+          },
+          {
+            "name": "value",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 13,
+              "end_line": 1,
+              "end_column": 18
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": [
+          "e"
+        ]
+      }
+    },
+    {
+      "name": "control: qualified typo beside a table function is still flagged",
+      "dialect": "postgres",
+      "sql": "SELECT u.nme FROM users u, generate_series(1,3) n",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [
+        "nme"
+      ],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": "u",
+            "span": {
+              "start_line": 1,
+              "start_column": 19,
+              "end_line": 1,
+              "end_column": 24
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "nme",
+            "qualifier": "u",
+            "span": {
+              "start_line": 1,
+              "start_column": 10,
+              "end_line": 1,
+              "end_column": 13
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": [
+          "n"
+        ]
+      }
+    },
+    {
+      "name": "oracle ROWNUM / SYSDATE",
+      "dialect": "oracle",
+      "sql": "SELECT ROWNUM, SYSDATE FROM users WHERE ROWNUM < 10",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 29,
+              "end_line": 1,
+              "end_column": 34
+            }
+          }
+        ],
+        "columns": [],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "postgres system columns",
+      "dialect": "postgres",
+      "sql": "SELECT ctid, xmin FROM users",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 24,
+              "end_line": 1,
+              "end_column": 29
+            }
+          }
+        ],
+        "columns": [],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "sqlite rowid",
+      "dialect": "sqlite",
+      "sql": "SELECT rowid, name FROM users",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 25,
+              "end_line": 1,
+              "end_column": 30
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "name",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 15,
+              "end_line": 1,
+              "end_column": 19
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "control: oracle typo beside a pseudo-column is still flagged",
+      "dialect": "oracle",
+      "sql": "SELECT ROWNUM, nme FROM users",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [
+        "nme"
+      ],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 25,
+              "end_line": 1,
+              "end_column": 30
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "nme",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 16,
+              "end_line": 1,
+              "end_column": 19
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "control: plain typo on a single table",
+      "dialect": "postgres",
+      "sql": "SELECT usr_nme FROM users",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [
+        "usr_nme"
+      ],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 21,
+              "end_line": 1,
+              "end_column": 26
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "usr_nme",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 8,
+              "end_line": 1,
+              "end_column": 15
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    }
+  ]
+}

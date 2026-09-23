@@ -32,6 +32,15 @@ pub struct SqlReferenceAnalysis {
     /// Derived tables (`FROM (SELECT id, name FROM t) x`): the alias plus the
     /// same output column derivation as CTEs.
     pub derived_tables: Vec<SqlDerivedTable>,
+    /// FROM items whose output columns the analysis cannot know: table
+    /// functions and UNNEST without an alias column list
+    /// (`generate_series(1,3) n`, `unnest(tags) AS u`, `jsonb_each(j) e`).
+    /// Each entry is the alias (or the function name when unaliased). An
+    /// unqualified identifier may name one of their columns — or the source
+    /// itself — so confidence-gated consumers must not attribute unqualified
+    /// references to a schema table when any is present.
+    #[serde(default)]
+    pub opaque_sources: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +91,10 @@ impl From<Span> for SqlTextSpan {
 
 #[derive(Default)]
 struct Analyzer {
+    /// Normalized dialect (see `normalize_dialect`), for dialect-specific
+    /// pseudo-columns.
+    dialect: String,
+    opaque_sources: Vec<String>,
     tables: Vec<SqlTableReference>,
     columns: Vec<SqlColumnReference>,
     select_aliases: Vec<String>,
@@ -100,6 +113,7 @@ pub fn analyze_sql_references(sql: &str, dialect: Option<&str>) -> Result<SqlRef
             alias_columns: vec![],
             cte_definitions: vec![],
             derived_tables: vec![],
+            opaque_sources: vec![],
         });
     }
 
@@ -117,7 +131,7 @@ pub fn analyze_sql_references(sql: &str, dialect: Option<&str>) -> Result<SqlRef
     }
     .map_err(|err| err.to_string())?;
 
-    let mut analyzer = Analyzer::default();
+    let mut analyzer = Analyzer { dialect: normalized_dialect, ..Analyzer::default() };
     for statement in statements {
         analyzer.visit_statement(&statement);
     }
@@ -129,6 +143,7 @@ pub fn analyze_sql_references(sql: &str, dialect: Option<&str>) -> Result<SqlRef
         alias_columns: analyzer.alias_columns,
         cte_definitions: analyzer.cte_definitions,
         derived_tables: analyzer.derived_tables,
+        opaque_sources: analyzer.opaque_sources,
     })
 }
 
@@ -391,10 +406,20 @@ impl Analyzer {
         match factor {
             TableFactor::Table { name, alias, args, .. } => {
                 self.push_alias_columns(alias.as_ref());
-                if args.is_none() {
-                    if let Some(table) = table_reference_from_name(name, alias.as_ref().map(|a| a.name.value.clone())) {
-                        self.tables.push(table);
+                if let Some(args) = args {
+                    // A table-valued function call (`generate_series(1,3) n`),
+                    // not a schema table.
+                    self.push_opaque_source(
+                        alias.as_ref(),
+                        object_name_last_ident(name).map(|ident| ident.value.as_str()),
+                    );
+                    for arg in &args.args {
+                        self.visit_function_arg(arg);
                     }
+                } else if let Some(table) =
+                    table_reference_from_name(name, alias.as_ref().map(|a| a.name.value.clone()))
+                {
+                    self.tables.push(table);
                 }
             }
             TableFactor::Derived { subquery, alias, .. } => {
@@ -414,16 +439,19 @@ impl Analyzer {
             TableFactor::NestedJoin { table_with_joins, .. } => self.visit_table_with_joins(table_with_joins),
             TableFactor::TableFunction { expr, alias, .. } => {
                 self.push_alias_columns(alias.as_ref());
+                self.push_opaque_source(alias.as_ref(), Some("table"));
                 self.visit_expr(expr);
             }
-            TableFactor::Function { args, alias, .. } => {
+            TableFactor::Function { name, args, alias, .. } => {
                 self.push_alias_columns(alias.as_ref());
+                self.push_opaque_source(alias.as_ref(), object_name_last_ident(name).map(|ident| ident.value.as_str()));
                 for arg in args {
                     self.visit_function_arg(arg);
                 }
             }
             TableFactor::UNNEST { array_exprs, alias, .. } => {
                 self.push_alias_columns(alias.as_ref());
+                self.push_opaque_source(alias.as_ref(), Some("unnest"));
                 for expr in array_exprs {
                     self.visit_expr(expr);
                 }
@@ -439,6 +467,16 @@ impl Analyzer {
             for column in &alias.columns {
                 self.alias_columns.push(column.name.value.clone());
             }
+        }
+    }
+
+    // A function/UNNEST source without an alias column list: its output
+    // column names are unknown to the analysis (see `opaque_sources`).
+    fn push_opaque_source(&mut self, alias: Option<&TableAlias>, function_name: Option<&str>) {
+        match alias {
+            Some(alias) if !alias.columns.is_empty() => {}
+            Some(alias) => self.opaque_sources.push(alias.name.value.clone()),
+            None => self.opaque_sources.push(function_name.unwrap_or_default().to_string()),
         }
     }
 
@@ -511,7 +549,11 @@ impl Analyzer {
             }
             Expr::Function(function) => {
                 self.visit_function_args(&function.parameters);
-                self.visit_function_args(&function.args);
+                if takes_date_part_first_arg(&function.name) {
+                    self.visit_function_args_after_date_part(&function.args);
+                } else {
+                    self.visit_function_args(&function.args);
+                }
                 if let Some(filter) = &function.filter {
                     self.visit_expr(filter);
                 }
@@ -555,6 +597,28 @@ impl Analyzer {
         }
     }
 
+    // `DATEADD(day, 1, created_at)`, `TIMESTAMPDIFF(DAY, a, b)`: the leading
+    // unquoted identifier is a date-part keyword, not a column reference.
+    fn visit_function_args_after_date_part(&mut self, args: &FunctionArguments) {
+        let FunctionArguments::List(list) = args else {
+            self.visit_function_args(args);
+            return;
+        };
+        for (index, arg) in list.args.iter().enumerate() {
+            if index == 0 && is_bare_identifier_arg(arg) {
+                continue;
+            }
+            self.visit_function_arg(arg);
+        }
+        for clause in &list.clauses {
+            if let sqlparser::ast::FunctionArgumentClause::OrderBy(items) = clause {
+                for item in items {
+                    self.visit_expr(&item.expr);
+                }
+            }
+        }
+    }
+
     fn visit_function_arg(&mut self, arg: &FunctionArg) {
         match arg {
             FunctionArg::Named { arg, .. } | FunctionArg::ExprNamed { arg, .. } | FunctionArg::Unnamed(arg) => {
@@ -566,6 +630,11 @@ impl Analyzer {
     }
 
     fn push_column(&mut self, qualifier: Option<String>, ident: &Ident) {
+        // Engine pseudo-columns (Oracle ROWNUM, PG ctid, SQLite rowid, …) are
+        // valid references that no column listing returns.
+        if is_pseudo_column(&self.dialect, &ident.value) {
+            return;
+        }
         self.columns.push(SqlColumnReference { name: ident.value.clone(), qualifier, span: ident.span.into() });
     }
 
@@ -574,6 +643,56 @@ impl Analyzer {
             self.tables.push(table);
         }
     }
+}
+
+// Functions whose first argument is an unquoted date-part keyword
+// (SQL Server DATEADD/DATEDIFF/DATEPART/…, MySQL TIMESTAMPDIFF/TIMESTAMPADD,
+// Snowflake-style DATE_TRUNC/DATE_PART with a bare unit).
+const DATE_PART_FIRST_ARG_FUNCTIONS: &[&str] = &[
+    "DATEADD",
+    "DATEDIFF",
+    "DATEDIFF_BIG",
+    "DATEPART",
+    "DATENAME",
+    "DATETRUNC",
+    "DATE_BUCKET",
+    "TIMESTAMPADD",
+    "TIMESTAMPDIFF",
+    "DATE_TRUNC",
+    "DATE_PART",
+];
+
+fn takes_date_part_first_arg(name: &ObjectName) -> bool {
+    object_name_last_ident(name).is_some_and(|ident| {
+        DATE_PART_FIRST_ARG_FUNCTIONS.iter().any(|function| function.eq_ignore_ascii_case(&ident.value))
+    })
+}
+
+fn is_bare_identifier_arg(arg: &FunctionArg) -> bool {
+    matches!(arg, FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Identifier(Ident { quote_style: None, .. }))))
+}
+
+// Per-dialect pseudo-columns: referencable like columns, never listed by the
+// schema's column metadata. Matched case-insensitively.
+fn is_pseudo_column(dialect: &str, name: &str) -> bool {
+    let names: &[&str] = match dialect {
+        "oracle" => &[
+            "ROWNUM",
+            "ROWID",
+            "SYSDATE",
+            "SYSTIMESTAMP",
+            "LEVEL",
+            "USER",
+            "UID",
+            "ORA_ROWSCN",
+            "CONNECT_BY_ISLEAF",
+            "CONNECT_BY_ISCYCLE",
+        ],
+        "postgres" => &["ctid", "xmin", "xmax", "cmin", "cmax", "tableoid", "oid"],
+        "sqlite" => &["rowid", "oid", "_rowid_"],
+        _ => &[],
+    };
+    names.iter().any(|pseudo| pseudo.eq_ignore_ascii_case(name))
 }
 
 /// Output columns of a CTE: the explicit column list when given, otherwise

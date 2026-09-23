@@ -323,6 +323,9 @@ export interface SqlReferenceAnalysis {
   cte_definitions: SqlCteDefinition[];
   /** Derived tables (`FROM (SELECT …) x`): alias plus output columns. */
   derived_tables: SqlDerivedTable[];
+  /** Function/UNNEST sources without an alias column list (`generate_series(1,3) n`):
+   *  their output columns are unknown, so unqualified names are not attributable. */
+  opaque_sources?: string[];
 }
 
 export type TreeNodeType =
