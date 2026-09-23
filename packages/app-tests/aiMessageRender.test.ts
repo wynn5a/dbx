@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseAiMessage } from "../../apps/desktop/src/lib/aiMessageRender";
+import { extractAiStructuredSql, parseAiMessage } from "../../apps/desktop/src/lib/aiMessageRender";
 
 describe("parseAiMessage", () => {
   it("parses a clean fenced code block", () => {
@@ -33,5 +33,91 @@ describe("parseAiMessage", () => {
       { type: "code", lang: "sql", content: "plain code" },
       { type: "text", content: "and then more text" },
     ]);
+  });
+});
+
+describe("parseAiMessage structured SQL (T42)", () => {
+  it("renders a bare contract JSON reply as explanation text plus the SQL block", () => {
+    // Native response_format:json_object replies are one bare JSON object.
+    const segments = parseAiMessage('{"sql": "SELECT id FROM users;", "explanation": "One statement."}');
+    expect(segments).toEqual([
+      { type: "text", content: "One statement." },
+      { type: "code", lang: "sql", content: "SELECT id FROM users;" },
+    ]);
+  });
+
+  it("extracts the contract JSON from a ```json fence, dropping the wrapper from the prose", () => {
+    const raw = 'Here is the query.\n\n```json\n{"sql": "SELECT 1;", "explanation": "ok"}\n```';
+    const segments = parseAiMessage(raw);
+    // Prose before the object and the explanation render as one text segment.
+    expect(segments).toEqual([
+      { type: "text", content: "Here is the query.\n\nok" },
+      { type: "code", lang: "sql", content: "SELECT 1;" },
+    ]);
+  });
+
+  it("extracts the SQL when prose surrounds the JSON object", () => {
+    const raw = 'Notes first.\n{"sql": "SELECT 2;", "explanation": "mid"}\nTrailing remark.';
+    const segments = parseAiMessage(raw);
+    expect(segments).toEqual([
+      { type: "text", content: "Notes first.\n\nmid\n\nTrailing remark." },
+      { type: "code", lang: "sql", content: "SELECT 2;" },
+    ]);
+  });
+
+  it("strips a code fence the model wrapped into the sql string value", () => {
+    const raw = '{"sql": "```sql\\nSELECT 3;\\n```", "explanation": "wrapped"}';
+    const segments = parseAiMessage(raw);
+    expect(segments).toEqual([
+      { type: "text", content: "wrapped" },
+      { type: "code", lang: "sql", content: "SELECT 3;" },
+    ]);
+  });
+
+  it("renders an empty-sql contract reply (clarifying question) as explanation-only text", () => {
+    const segments = parseAiMessage('{"sql": "", "explanation": "Which table holds the orders?"}');
+    expect(segments).toEqual([{ type: "text", content: "Which table holds the orders?" }]);
+  });
+
+  it("keeps a legacy fence reply on the fallback path, byte-identical to the pre-T42 parse", () => {
+    const raw = "Intro\n```sql\nSELECT 1;\n```\nDone";
+    expect(parseAiMessage(raw)).toEqual([
+      { type: "text", content: "Intro" },
+      { type: "code", lang: "sql", content: "SELECT 1;" },
+      { type: "text", content: "Done" },
+    ]);
+  });
+
+  it("falls back to the fence scan when trailing JSON has no string sql field", () => {
+    const raw = 'Result:\n```json\n{"rows": 5}\n```';
+    expect(parseAiMessage(raw)).toEqual([
+      { type: "text", content: "Result:" },
+      { type: "code", lang: "json", content: '{"rows": 5}' },
+    ]);
+  });
+
+  it("ignores a trailing JSON array instead of hijacking the reply", () => {
+    const raw = "Data:\n[{\"row\": 1}]";
+    expect(parseAiMessage(raw)).toEqual([{ type: "text", content: "Data:\n[{\"row\": 1}]" }]);
+  });
+
+  it("renders malformed output (neither JSON nor a fence) as plain text, locked to the legacy behavior", () => {
+    const raw = '{"sql": "SELECT 1;';
+    expect(parseAiMessage(raw)).toEqual([{ type: "text", content: raw }]);
+    const prose = "Sure — could you say which schema?";
+    expect(parseAiMessage(prose)).toEqual([{ type: "text", content: prose }]);
+  });
+});
+
+describe("extractAiStructuredSql", () => {
+  it("returns null when the reply carries no contract JSON", () => {
+    expect(extractAiStructuredSql("```sql\nSELECT 1;\n```")).toBeNull();
+    expect(extractAiStructuredSql("plain prose only")).toBeNull();
+    expect(extractAiStructuredSql('{"sql": "SELECT 1;')).toBeNull();
+  });
+
+  it("honors string escapes while brace-balancing the candidate object", () => {
+    const parsed = extractAiStructuredSql('{"sql": "SELECT \'{braced}\', \\"q\\" FROM t;", "explanation": "x"}');
+    expect(parsed?.sql).toBe("SELECT '{braced}', \"q\" FROM t;");
   });
 });

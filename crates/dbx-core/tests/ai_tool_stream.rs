@@ -1,5 +1,6 @@
-//! Mock-SSE tests for the tool-calling stream (perf tasks T21 / plan §5 D5)
-//! and the initial-request retry (perf task T31 / plan §5 D6).
+//! Mock-SSE tests for the tool-calling stream (perf tasks T21 / plan §5 D5),
+//! the initial-request retry (perf task T31 / plan §5 D6), and structured
+//! output for the final SQL (perf task T42 / plan §5 D9).
 //!
 //! A tiny HTTP server on a loopback port answers each request with the next
 //! canned response, so Gemini and Ollama provider streams are driven across a
@@ -8,7 +9,12 @@
 //! text — and the recorded request bodies assert what went back over the wire.
 //! The T31 section reuses the same server to pin the retry contract: exactly
 //! one retry for 429/5xx/connect failures before the response head, never
-//! after the stream started.
+//! after the stream started. The T42 section pins the structured-output
+//! contract: the `structured_output` opt-in must leave every non-OpenAI and
+//! custom-endpoint request byte-identical (the fence fallback keeps the legacy
+//! traffic), while the native `response_format: json_object` attach for the
+//! official OpenAI API is a pure body-builder check (`openai_stream_body`)
+//! because a loopback mock can never masquerade as the official host.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -407,6 +413,7 @@ async fn ollama_model_without_tools_capability_keeps_text_only_traffic() {
         messages: vec![AiMessage::text("user", "What tables do I have?")],
         max_tokens: Some(512),
         temperature: Some(0.2),
+        structured_output: false,
     };
     let text = Arc::new(Mutex::new(String::new()));
     let sink = Arc::clone(&text);
@@ -453,6 +460,7 @@ async fn stream_plain(config: &AiConfig, cancelled: &Notify) -> Result<String, S
         messages: vec![AiMessage::text("user", "hi")],
         max_tokens: Some(16),
         temperature: Some(0.0),
+        structured_output: false,
     };
     let text = Arc::new(Mutex::new(String::new()));
     let sink = Arc::clone(&text);
@@ -520,6 +528,7 @@ async fn complete_retries_once_on_502() {
         messages: vec![AiMessage::text("user", "hi")],
         max_tokens: Some(16),
         temperature: Some(0.0),
+        structured_output: false,
     };
     let text = ai::complete(&request).await.expect("the retry after the 502 succeeds");
 
@@ -561,4 +570,81 @@ async fn stream_does_not_retry_client_errors() {
 
     assert!(err.contains("model not found"), "the provider's error message is surfaced: {err}");
     assert_eq!(server.requests().len(), 1, "deterministic client errors get no second request");
+}
+
+// ---------------------------------------------------------------------------
+// T42: structured output for the final SQL — the `structured_output` opt-in
+// must keep every request that cannot safely carry native `response_format`
+// byte-identical to the legacy shape (fence fallback keeps the legacy traffic),
+// and stream the contract JSON through untouched.
+// ---------------------------------------------------------------------------
+
+/// Drive the plain `ai::stream` path with the structured-output opt-in set and
+/// collect the text deltas.
+async fn stream_structured(config: &AiConfig, cancelled: &Notify) -> Result<String, String> {
+    let request = AiCompletionRequest {
+        config: config.clone(),
+        system_prompt: "You are DBX's assistant.".to_string(),
+        messages: vec![AiMessage::text("user", "List the users.")],
+        max_tokens: Some(256),
+        temperature: Some(0.15),
+        structured_output: true,
+    };
+    let text = Arc::new(Mutex::new(String::new()));
+    let sink = Arc::clone(&text);
+    let result = ai::stream("t42-structured", &request, cancelled, move |chunk: AiStreamChunk| {
+        sink.lock().expect("text sink").push_str(&chunk.delta);
+    })
+    .await;
+    result.map(|_| text.lock().expect("text sink").clone())
+}
+
+#[tokio::test]
+async fn structured_opt_in_on_a_custom_openai_endpoint_keeps_the_legacy_request_body() {
+    // A loopback endpoint is never the official API host, so — however the ask
+    // flow opts in — the request body must stay exactly the legacy shape: no
+    // `response_format`, and the fallback fence contract still gets its answer.
+    let answer = openai_sse(&[
+        json!({ "choices": [{ "delta": { "content": "{\"sql\": \"SELECT id FROM users\"," } }] }),
+        json!({ "choices": [{ "delta": { "content": " \"explanation\": \"one statement\"}" } }] }),
+    ]);
+    let server = MockProvider::start(vec![answer]).await;
+    let config = openai_config(&server.base_url);
+
+    let text = stream_structured(&config, &Notify::new()).await.expect("the structured stream succeeds");
+
+    assert_eq!(text, "{\"sql\": \"SELECT id FROM users\", \"explanation\": \"one statement\"}");
+
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].path, "/chat/completions");
+    let body: Value = serde_json::from_str(&requests[0].body).expect("request body is JSON");
+    assert!(body.get("response_format").is_none(), "custom endpoints never get native response_format");
+    assert_eq!(body["model"], "gpt-test");
+    assert_eq!(body["stream"], true);
+    assert_eq!(body["messages"][0]["role"], "system");
+    assert_eq!(body["messages"][1]["content"], "List the users.");
+}
+
+#[tokio::test]
+async fn structured_opt_in_leaves_gemini_traffic_unchanged() {
+    // Gemini has no native response_format wired in this codebase: the opt-in
+    // rides the prompt alone, so the request body must not carry any format
+    // hint (the Gemini field would be generationConfig.responseMimeType).
+    let answer = gemini_sse(&[json!({
+        "candidates": [{ "content": { "role": "model", "parts": [{ "text": "{\"sql\": \"SELECT 1\"}" }] } }]
+    })]);
+    let server = MockProvider::start(vec![answer]).await;
+    let config = gemini_config(&server.base_url);
+
+    let text = stream_structured(&config, &Notify::new()).await.expect("the structured stream succeeds");
+
+    assert_eq!(text, "{\"sql\": \"SELECT 1\"}");
+
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1);
+    let body: Value = serde_json::from_str(&requests[0].body).expect("request body is JSON");
+    assert!(body.get("response_format").is_none());
+    assert!(body["generationConfig"].get("responseMimeType").is_none());
+    assert_eq!(body["generationConfig"]["maxOutputTokens"], 256);
 }

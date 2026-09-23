@@ -210,6 +210,14 @@ pub struct AiCompletionRequest {
     pub messages: Vec<AiMessage>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
+    /// Ask-mode structured SQL output (T42 / plan §5 D9). Opt-in per request so
+    /// the agent loop's text-only fallback keeps its exact legacy traffic. Only
+    /// the OpenAI provider over the official API reacts to it (native
+    /// `response_format: json_object`, see [`openai_stream_body`]); everywhere
+    /// else the structured contract rides the prompt alone and the request body
+    /// stays unchanged.
+    #[serde(default)]
+    pub structured_output: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -817,6 +825,7 @@ pub async fn test_connection_core(config: &AiConfig) -> Result<String, String> {
         messages: vec![AiMessage::text("user", "hi")],
         max_tokens: Some(1),
         temperature: Some(0.0),
+        structured_output: false,
     };
 
     match request.config.provider {
@@ -1004,15 +1013,17 @@ async fn stream_claude(
     Ok(())
 }
 
-async fn stream_openai(
-    client: &reqwest::Client,
-    session_id: &str,
-    request: &AiCompletionRequest,
-    cancelled: &Notify,
-    on_chunk: &impl Fn(AiStreamChunk),
-) -> Result<(), String> {
-    let headers = maybe_bearer_headers(&request.config)?;
-
+/// The chat-completions request body for the OpenAI-compatible streaming path.
+///
+/// With `structured_output` opted in, the official OpenAI API additionally gets
+/// native `response_format: json_object`, which guarantees the reply is the
+/// contract JSON object (`{"sql": ..., "explanation": ...}`). That gate is
+/// deliberately narrow — official `api.openai.com` host only — because custom
+/// endpoints (proxies, gateways, OpenAI-compatible servers) vary in
+/// `response_format` support and a rejected body would break generation
+/// outright. Everywhere else the structured contract is prompt-only and this
+/// body stays byte-identical to the legacy shape.
+fn openai_stream_body(request: &AiCompletionRequest) -> serde_json::Value {
     let mut messages = vec![json!({ "role": "system", "content": request.system_prompt })];
     messages.extend(request.messages.iter().map(|m| json!({ "role": m.role, "content": m.content })));
 
@@ -1028,6 +1039,35 @@ async fn stream_openai(
             "chat_template_kwargs": { "enable_thinking": false }
         });
     }
+    if request.structured_output
+        && matches!(request.config.provider, AiProvider::Openai)
+        && openai_official_endpoint(&request.config.endpoint)
+    {
+        body_obj["response_format"] = json!({ "type": "json_object" });
+    }
+    body_obj
+}
+
+/// Whether the endpoint points at the official OpenAI API host — the only place
+/// native `response_format` is assumed safe to request. User-supplied endpoints
+/// (proxies, local servers) have unknowable feature support, so they keep the
+/// legacy body even when structured output is opted in.
+fn openai_official_endpoint(endpoint: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(endpoint.trim()) else {
+        return false;
+    };
+    url.host_str().is_some_and(|host| host.eq_ignore_ascii_case("api.openai.com"))
+}
+
+async fn stream_openai(
+    client: &reqwest::Client,
+    session_id: &str,
+    request: &AiCompletionRequest,
+    cancelled: &Notify,
+    on_chunk: &impl Fn(AiStreamChunk),
+) -> Result<(), String> {
+    let headers = maybe_bearer_headers(&request.config)?;
+    let body_obj = openai_stream_body(request);
 
     let url = resolve_endpoint(&request.config);
     let res = send_with_retry_once(
@@ -1905,10 +1945,11 @@ pub fn load_config(path: &Path) -> Result<Option<AiConfig>, String> {
 mod tests {
     use super::{
         build_ai_http_client, cancel_stream, claude_system_blocks, drain_complete_lines, gemini_contents_with_tools,
-        gemini_text, is_retryable_status, ollama_native_show_endpoint, openai_response_text, openai_stream_text,
-        parse_gemini_tool_event, parse_model_list_response, provider_supports_function_calling, register_agent_cancel,
-        register_stream, resolve_endpoint, resolve_model_list_endpoint, responses_max_output_tokens, responses_text,
-        send_with_retry_once, unregister_stream, validate_config, AiApiStyle, AiChatMessage, AiConfig, AiMessage,
+        gemini_text, is_retryable_status, ollama_native_show_endpoint, openai_official_endpoint, openai_response_text,
+        openai_stream_body, openai_stream_text, parse_gemini_tool_event, parse_model_list_response,
+        provider_supports_function_calling, register_agent_cancel, register_stream, resolve_endpoint,
+        resolve_model_list_endpoint, responses_max_output_tokens, responses_text, send_with_retry_once,
+        unregister_stream, validate_config, AiApiStyle, AiChatMessage, AiCompletionRequest, AiConfig, AiMessage,
         AiModelInfo, AiProvider, AiStreamChunk, StreamToolEvent, StreamingToolCallAccumulator, TokenUsage, ToolCallRef,
     };
     use serde_json::json;
@@ -1969,6 +2010,71 @@ mod tests {
         // Ollama is per-model opt-in via the /api/show probe; covered against a
         // mock server in tests/ai_tool_stream.rs.
         assert!(!provider_supports_function_calling(&mk(AiProvider::Openai, AiApiStyle::Responses)).await);
+    }
+
+    /// An Ask-style completion request for the structured-output body tests.
+    fn structured_body_request(provider: AiProvider, endpoint: &str, structured_output: bool) -> AiCompletionRequest {
+        AiCompletionRequest {
+            config: AiConfig {
+                provider,
+                api_key: "k".into(),
+                endpoint: endpoint.into(),
+                model: "gpt-test".into(),
+                api_style: AiApiStyle::Completions,
+                proxy_enabled: false,
+                proxy_url: String::new(),
+                enable_thinking: true,
+            },
+            system_prompt: "system".into(),
+            messages: vec![AiMessage::text("user", "hi")],
+            max_tokens: Some(64),
+            temperature: Some(0.15),
+            structured_output,
+        }
+    }
+
+    #[test]
+    fn structured_output_adds_json_object_response_format_on_the_official_openai_endpoint() {
+        let body = openai_stream_body(&structured_body_request(
+            AiProvider::Openai,
+            "https://api.openai.com/v1/chat/completions",
+            true,
+        ));
+
+        // The native structured output attach, plus the legacy keys untouched.
+        assert_eq!(body["response_format"], json!({ "type": "json_object" }));
+        assert_eq!(body["model"], "gpt-test");
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["max_tokens"], 64);
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["messages"][1]["content"], "hi");
+    }
+
+    #[test]
+    fn structured_output_off_the_supported_provider_or_host_keeps_the_legacy_body() {
+        let body = |provider: AiProvider, endpoint: &str, structured: bool| {
+            openai_stream_body(&structured_body_request(provider, endpoint, structured))
+        };
+
+        // No opt-in: the official host still gets the legacy body.
+        assert!(body(AiProvider::Openai, "https://api.openai.com/v1", false).get("response_format").is_none());
+        // Opted in, but a custom/proxy endpoint: unknown response_format support,
+        // so the body stays byte-identical to the legacy shape (fence fallback).
+        assert!(body(AiProvider::Openai, "https://proxy.example.com/v1", true).get("response_format").is_none());
+        assert!(body(AiProvider::Openai, "http://127.0.0.1:8080/v1", true).get("response_format").is_none());
+        // Opted in on the shared OpenAI-compatible path, but a different provider.
+        assert!(body(AiProvider::Deepseek, "https://api.openai.com/v1", true).get("response_format").is_none());
+    }
+
+    #[test]
+    fn openai_official_endpoint_matches_only_the_official_host() {
+        assert!(openai_official_endpoint("https://api.openai.com/v1"));
+        assert!(openai_official_endpoint("https://api.openai.com/v1/chat/completions"));
+        assert!(openai_official_endpoint("https://API.OPENAI.COM/v1"));
+        assert!(!openai_official_endpoint("http://127.0.0.1:8080/v1"));
+        assert!(!openai_official_endpoint("https://proxy.example.com/v1"));
+        assert!(!openai_official_endpoint("https://api.openai.com.evil.example/v1"));
+        assert!(!openai_official_endpoint("not a url"));
     }
 
     #[test]

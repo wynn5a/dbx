@@ -89,6 +89,24 @@ export function createAiMessageRenderer(options: AiMessageRendererOptions) {
 }
 
 export function parseAiMessage(text: string): MessageSegment[] {
+  // Structured output first (T42): an Ask-mode reply may end with the contract
+  // JSON object {"sql": ..., "explanation": ...} — bare, in a ```json fence, or
+  // with prose around it. When it parses, the SQL becomes the single code
+  // segment and the explanation/prose render as text. Anything else — no JSON,
+  // malformed JSON, an object without a string `sql` field — falls through to
+  // the legacy fence scan below, byte-for-byte the pre-T42 behavior.
+  const structured = extractAiStructuredSql(text);
+  if (structured) {
+    const prose = [structured.proseBefore, structured.explanation, structured.proseAfter]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join("\n\n");
+    const segments: MessageSegment[] = [];
+    if (prose) segments.push({ type: "text", content: prose });
+    if (structured.sql) segments.push({ type: "code", lang: "sql", content: structured.sql });
+    if (segments.length) return segments;
+  }
+
   const segments: MessageSegment[] = [];
   const lines = text.split("\n");
   let i = 0;
@@ -138,6 +156,132 @@ export function normalizeAiCodeLanguage(lang?: string): string {
 
 export function isSqlAiCodeLanguage(lang: string): boolean {
   return SQL_LANGUAGE_LABELS.has(lang);
+}
+
+// ---------------------------------------------------------------------------
+// Structured SQL extraction (T42 / plan §5 D9)
+// ---------------------------------------------------------------------------
+
+export interface AiStructuredSql {
+  /** The final SQL, with a wrapped code fence stripped when the model added one. */
+  sql: string;
+  /** Short explanation from the contract object; empty when absent. */
+  explanation: string;
+  /** Anything the model wrote before the JSON object. */
+  proseBefore: string;
+  /** Anything after it (usually empty; a dangling fence close is dropped). */
+  proseAfter: string;
+}
+
+/**
+ * Extract the Ask-mode structured SQL payload — a `{"sql": ..., "explanation": ...}`
+ * JSON object — from a reply. The contract puts the object last, so candidates
+ * are line-anchored `{` positions scanned from the end (bounded); each slice is
+ * brace-balanced with string escapes honored, then JSON-parsed. Accepted only
+ * when the value is an object carrying a string `sql` field. Returns null for
+ * everything else so the fence scan stays the single fallback.
+ */
+export function extractAiStructuredSql(text: string): AiStructuredSql | null {
+  const lineStarts: number[] = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\n") lineStarts.push(i + 1);
+  }
+
+  let candidates = 0;
+  for (let s = lineStarts.length - 1; s >= 0 && candidates < 50; s--) {
+    const start = lineStarts[s];
+    if (text[start] !== "{") continue;
+    candidates++;
+    const parsed = tryParseStructuredSqlAt(text, start);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function tryParseStructuredSqlAt(text: string, start: number): AiStructuredSql | null {
+  const end = balancedObjectEnd(text, start);
+  if (end < 0) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.slice(start, end));
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.sql !== "string") return null;
+
+  const sql = stripSqlFence(record.sql);
+  const explanation = typeof record.explanation === "string" ? record.explanation : "";
+  if (!sql && !explanation) return null;
+
+  return {
+    sql,
+    explanation,
+    proseBefore: dropDanglingFenceOpen(text.slice(0, start)),
+    proseAfter: dropDanglingFenceClose(text.slice(end)),
+  };
+}
+
+/** Index just past the `}` matching the `{` at `start`, or -1 when unbalanced. */
+function balancedObjectEnd(text: string, start: number): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
+/** Models sometimes wrap the SQL in a fence inside the string value; unwrap one. */
+function stripSqlFence(sql: string): string {
+  const trimmed = sql.trim();
+  const fenced = trimmed.match(/^```[a-zA-Z0-9_+.-]*\s*\n?([\s\S]*?)\n?\s*```$/);
+  return (fenced ? fenced[1] : trimmed).trim();
+}
+
+/**
+ * The JSON object's own ```json wrapper leaves its opener line glued to the
+ * prose before it; that marker is not prose.
+ */
+function dropDanglingFenceOpen(before: string): string {
+  const trimmed = before.trim();
+  if (!trimmed) return "";
+  const lines = trimmed.split("\n");
+  if (/^```[a-zA-Z0-9_+.-]*$/.test(lines[lines.length - 1].trim())) lines.pop();
+  return lines.join("\n");
+}
+
+/**
+ * Trailing text after the JSON object. A bare ``` (or a ``` glued to following
+ * prose, e.g. "```No results") is the wrapper's closing fence, not content; a
+ * ```lang opener line starts a legitimate new fenced block and stays.
+ */
+function dropDanglingFenceClose(after: string): string {
+  const trimmed = after.trim();
+  if (!trimmed) return "";
+  const firstLine = trimmed.split("\n")[0];
+  const marker = firstLine.match(/^```([a-zA-Z0-9_+.-]*)(.*)$/);
+  if (!marker) return after;
+  const rest = trimmed.slice(firstLine.length).replace(/^\n/, "");
+  if (marker[2].trim()) return [marker[2].trim(), rest].filter(Boolean).join("\n");
+  if (marker[1]) return after;
+  return rest;
 }
 
 function escapeHtml(value: string): string {

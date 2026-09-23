@@ -256,6 +256,13 @@ export interface AiCompletionRequest {
   messages: AiMessage[];
   maxTokens?: number;
   temperature?: number;
+  /**
+   * Ask-mode structured SQL output opt-in (T42): asks the model to end with a
+   * `{"sql": ..., "explanation": ...}` JSON object and, on providers where it
+   * is safe (OpenAI over the official API), attaches native `response_format`.
+   * Absent/false keeps the legacy fence-only contract and traffic.
+   */
+  structuredOutput?: boolean;
 }
 
 export interface AiModelInfo {

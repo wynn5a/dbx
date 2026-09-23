@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "vitest";
 import type { AiContext } from "../../apps/desktop/src/lib/ai.ts";
+import type { AiProvider } from "../../apps/desktop/src/stores/settingsStore";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -71,6 +72,32 @@ test("ask mode prompt forbids auto-execution assumptions", () => {
   assert.match(prompt, /Ask 模式/);
   assert.match(prompt, /只生成 SQL 和说明/);
   assert.match(prompt, /不要暗示已经执行或即将自动执行/);
+});
+
+test("ask mode prompt adds the structured JSON contract for supported providers (T42)", () => {
+  const prompt = buildSystemPrompt("generate", context(), "ask", "openai");
+
+  // The structured contract: the reply must end with the machine-readable JSON.
+  assert.match(prompt, /JSON 对象/);
+  assert.match(prompt, /"sql"/);
+  assert.match(prompt, /"explanation"/);
+  // The fence contract stays as the visible/fallback form.
+  assert.match(prompt, /返回 SQL 时放在 ```sql 代码块中/);
+});
+
+test("unsupported providers keep the legacy ask prompt byte-for-byte", () => {
+  const legacy = buildSystemPrompt("generate", context(), "ask");
+  const providers: AiProvider[] = ["ollama", "openai-compatible", "custom"];
+  for (const provider of providers) {
+    assert.equal(buildSystemPrompt("generate", context(), "ask", provider), legacy);
+  }
+  // No provider given → legacy prompt too (older callers).
+  assert.equal(legacy, buildSystemPrompt("generate", context(), "ask", undefined));
+});
+
+test("agent mode prompt never carries the structured contract", () => {
+  const agent = buildSystemPrompt("generate", context(), "agent", "openai");
+  assert.doesNotMatch(agent, /JSON 对象/);
 });
 
 test("prompt gives explicit guidance for truncated schema context", () => {

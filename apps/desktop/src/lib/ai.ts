@@ -1,4 +1,4 @@
-import type { AiConfig } from "@/stores/settingsStore";
+import type { AiConfig, AiProvider } from "@/stores/settingsStore";
 import { uuid } from "@/lib/utils";
 import type {
   ColumnInfo,
@@ -18,6 +18,17 @@ import { quoteTableIdentifier } from "@/lib/tableSelectSql";
 
 export type AiAction = "generate" | "explain" | "optimize" | "fix" | "convert" | "sampleData";
 export type AiAssistantMode = "ask" | "agent";
+
+// Providers whose hosted models reliably follow the structured JSON contract
+// for the final SQL (T42 / plan §5 D9). Local/unknown endpoints (ollama,
+// openai-compatible, custom) keep the legacy fence-only contract: model
+// capability there is unknowable and the fence path is the proven fallback.
+const STRUCTURED_SQL_PROVIDERS: ReadonlySet<AiProvider> = new Set(["openai", "claude", "gemini", "deepseek", "qwen"]);
+
+/** Whether the Ask-mode final-SQL contract asks for structured JSON output. */
+export function structuredSqlOutputEnabled(provider: AiProvider): boolean {
+  return STRUCTURED_SQL_PROVIDERS.has(provider);
+}
 
 function isChineseLocale(locale: Locale): boolean {
   return locale === "zh-CN" || locale === "zh-TW";
@@ -79,7 +90,7 @@ export async function runAiStream(
   sessionId?: string,
   onReasoningDelta?: (delta: string) => void,
 ): Promise<void> {
-  const systemPrompt = buildSystemPrompt(input.action, input.context, input.mode);
+  const systemPrompt = buildSystemPrompt(input.action, input.context, input.mode, input.config.provider);
   const userPrompt = buildTurnUserPrompt(input);
 
   const messages: api.AiMessage[] = [...(history || []), { role: "user", content: userPrompt }];
@@ -96,6 +107,7 @@ export async function runAiStream(
       messages,
       maxTokens,
       temperature: params.temperature,
+      structuredOutput: structuredSqlOutputEnabled(input.config.provider),
     },
     (chunk) => {
       if (!chunk.done) {
@@ -121,7 +133,12 @@ function actionParams(action: AiAction): { maxTokens: number; temperature: numbe
 // schema. It must NOT include per-turn volatile content (current SQL, last error,
 // result preview) — that lives in the user turn via buildTurnContextBlock so this
 // prefix stays byte-identical across turns and prompt caching can hit.
-export function buildSystemPrompt(action: AiAction, context: AiContext, mode: AiAssistantMode = "ask"): string {
+export function buildSystemPrompt(
+  action: AiAction,
+  context: AiContext,
+  mode: AiAssistantMode = "ask",
+  provider?: AiProvider,
+): string {
   const schema = formatSchema(context);
   const schemaScope = context.schemaScope ?? "database";
 
@@ -151,6 +168,20 @@ export function buildSystemPrompt(action: AiAction, context: AiContext, mode: Ai
     isZh
       ? "返回 SQL 时放在 ```sql 代码块中。额外说明简短实用。"
       : "Put SQL in a fenced ```sql code block. Keep extra explanation short and practical.",
+  );
+
+  // Structured output for the final SQL (T42): for supported providers the
+  // fence contract stays as the visible/fallback form, and the model must also
+  // end with the machine-readable JSON object the parser prefers.
+  if (mode === "ask" && provider && structuredSqlOutputEnabled(provider)) {
+    lines.push(
+      isZh
+        ? '在回复正文之后，最后另起一行输出一个 JSON 对象作为结构化结尾：{"sql": "<最终 SQL，与第一个 ```sql 代码块中的 SQL 完全一致；没有 SQL 时为空字符串>", "explanation": "<一句话说明>"}。sql 字段不要包含代码块标记；除这一行外不要再输出其他 JSON。'
+        : 'After the reply body, end with one JSON object on its own final line: {"sql": "<the final SQL, exactly matching the SQL in the first ```sql code block; an empty string when there is none>", "explanation": "<one short sentence>"}. The sql field must not contain code fences; output no other JSON.',
+    );
+  }
+
+  lines.push(
     "",
     `Database type: ${context.databaseType}`,
     `Connection: ${context.connectionName}`,
