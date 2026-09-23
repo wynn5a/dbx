@@ -562,6 +562,25 @@ pub fn ensure_cluster_db(db: u32) -> Result<(), String> {
 /// [`ConnectionLike`] so a direct connection keeps its tracked-db /
 /// auto-reconnect bookkeeping (see the `ConnectionLike` impl above) and a
 /// cluster connection goes through its own self-healing `ClusterConnection`.
+/// Health-sweep probe (window-focus refresh). The session mutex serializes
+/// every user of the connection, so a slow command (large SCAN, HGETALL, a
+/// console command) would make a waiting PING hit the sweep's deadline and get
+/// a healthy connection evicted. A connection that is busy right now has just
+/// been used — and every command is bounded by the response timeout — so it
+/// counts as healthy; only an idle connection is actually pinged.
+pub async fn probe_health(connection: &RedisConnection) -> Result<(), String> {
+    match connection {
+        RedisConnection::Direct(direct) => match direct.try_lock() {
+            Ok(mut con) => ping(&mut *con).await,
+            Err(_) => Ok(()),
+        },
+        RedisConnection::Cluster(cluster) => match cluster.connection.try_lock() {
+            Ok(mut con) => ping(&mut *con).await,
+            Err(_) => Ok(()),
+        },
+    }
+}
+
 pub async fn ping<C>(con: &mut C) -> Result<(), String>
 where
     C: ConnectionLike + Send + Sync + Unpin,

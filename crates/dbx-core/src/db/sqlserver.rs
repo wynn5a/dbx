@@ -113,6 +113,10 @@ impl SqlServerPool {
     /// [Self::lease_checked] on product call paths.
     async fn lease(&self) -> Result<SqlServerLease, String> {
         let permit = self.inner.permits.clone().acquire_owned().await.map_err(|e| e.to_string())?;
+        self.lease_with_permit(permit).await
+    }
+
+    async fn lease_with_permit(&self, permit: tokio::sync::OwnedSemaphorePermit) -> Result<SqlServerLease, String> {
         let idle = self.inner.pop_idle();
         let conn = match idle {
             Some(conn) => conn,
@@ -137,7 +141,29 @@ impl SqlServerPool {
     /// same way MySQL sheds dead pooled connections at checkout. Returns the
     /// session id (SPID) so callers can register a server-side cancel target.
     pub async fn lease_checked(&self) -> Result<(SqlServerLease, Option<String>), String> {
-        let mut lease = self.lease().await?;
+        let lease = self.lease().await?;
+        Self::check_lease(lease).await
+    }
+
+    /// Health-sweep probe (window-focus refresh): check out a connection
+    /// through the same health-checking path as [Self::lease_checked] — a
+    /// merely-stale idle socket is healed by redialling, not reported dead —
+    /// and return the healthy socket to the idle list. When every slot is
+    /// leased the pool is in active use right now, so it counts as healthy
+    /// instead of waiting on the semaphore past the sweep's deadline (which
+    /// would evict a busy-but-fine pool). Busy leases are bounded by their own
+    /// query timeouts.
+    pub async fn probe_health(&self) -> Result<(), String> {
+        let Ok(permit) = self.inner.permits.clone().try_acquire_owned() else {
+            return Ok(());
+        };
+        let lease = self.lease_with_permit(permit).await?;
+        let (mut lease, _) = Self::check_lease(lease).await?;
+        lease.keep();
+        Ok(())
+    }
+
+    async fn check_lease(mut lease: SqlServerLease) -> Result<(SqlServerLease, Option<String>), String> {
         let mut last_err = String::new();
         for attempt in 1..=MAX_LEASE_ATTEMPTS {
             match lease.health_check().await {
@@ -1878,5 +1904,54 @@ mod tests {
         );
 
         assert!(results.is_empty());
+    }
+
+    /// A pool with no idle socket whose every dial is refused: any probe that
+    /// actually checks a connection out must fail, so the tests below can tell
+    /// "probed" from "skipped because busy".
+    fn unreachable_pool() -> super::SqlServerPool {
+        super::SqlServerPool {
+            inner: std::sync::Arc::new(super::SqlServerPoolInner {
+                params: super::SqlServerConnectParams {
+                    host: "127.0.0.1".to_string(),
+                    port: 1,
+                    username: "sa".to_string(),
+                    password: String::new(),
+                    database: None,
+                    connect_timeout: std::time::Duration::from_secs(2),
+                },
+                idle: std::sync::Mutex::new(Vec::new()),
+                permits: std::sync::Arc::new(tokio::sync::Semaphore::new(super::SQLSERVER_POOL_MAX_SIZE)),
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn health_probe_counts_a_saturated_pool_as_healthy_without_waiting() {
+        let pool = unreachable_pool();
+        // Every slot leased by long-running work.
+        let _busy = pool
+            .inner
+            .permits
+            .clone()
+            .try_acquire_many_owned(super::SQLSERVER_POOL_MAX_SIZE as u32)
+            .expect("hold every permit");
+
+        let probe = tokio::time::timeout(std::time::Duration::from_millis(500), pool.probe_health()).await;
+        assert_eq!(
+            probe.expect("a saturated pool must not make the sweep wait on the semaphore"),
+            Ok(()),
+            "busy pools are in active use and must count as healthy"
+        );
+    }
+
+    #[tokio::test]
+    async fn health_probe_checks_a_connection_when_a_slot_is_free() {
+        let pool = unreachable_pool();
+        let _busy = pool.inner.permits.clone().try_acquire_owned().expect("one slot busy");
+
+        let probe = pool.probe_health().await;
+        assert!(probe.is_err(), "with a free slot the probe must really dial and report the dead server: {probe:?}");
+        assert_eq!(pool.inner.permits.available_permits(), super::SQLSERVER_POOL_MAX_SIZE - 1, "probe permit released");
     }
 }

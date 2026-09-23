@@ -12,12 +12,15 @@
 //!   ConnectionManager's reconnect future while holding the session mutex.
 //! - Initial connect failures (refused, wrong password) must surface the real
 //!   cause instead of a generic "timed out".
+//! - The window-focus health sweep must not evict a healthy Redis pool just
+//!   because a slow command holds its session mutex (review of T11).
 
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use dbx_core::connection::AppState;
+use dbx_core::connection::{AppState, PoolKind};
+use dbx_core::db::redis_driver::RedisConnection;
 use dbx_core::models::connection::{ConnectionConfig, DatabaseType};
 use dbx_core::redis_ops;
 use dbx_core::storage::Storage;
@@ -220,6 +223,42 @@ async fn initial_connect_errors_surface_their_real_cause() {
         "the authentication error must reach the user: {wrong}"
     );
     println!("refused: {refused}\nwrong password: {wrong}");
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test]
+#[ignore = "spawns a local redis-server (DBX_TEST_REDIS_SERVER or redis-server on PATH)"]
+async fn health_sweep_keeps_a_busy_redis_pool() {
+    let server = RedisServer::start(free_port(), None);
+    let (state, dir) = app_state(redis_config(server.port, "")).await;
+    state.get_or_create_pool(CONNECTION_ID, None).await.expect("connect local redis");
+
+    let direct = match state.connections.read().await.get(CONNECTION_ID) {
+        Some(PoolKind::Redis(RedisConnection::Direct(direct))) => direct.clone(),
+        _ => panic!("standalone Redis must build a direct pool"),
+    };
+
+    // A slow command (SCAN over a big keyspace, a console command) holds the
+    // session mutex for longer than the sweep's 5 s per-pool deadline.
+    let guard = direct.lock().await;
+    let started = Instant::now();
+    state.refresh_connections().await;
+    assert!(started.elapsed() < Duration::from_secs(2), "the sweep must not queue behind a busy session");
+    assert!(
+        state.connections.read().await.contains_key(CONNECTION_ID),
+        "a healthy-but-busy Redis pool must survive the sweep"
+    );
+    drop(guard);
+
+    // Idle again: the sweep really probes — a live server keeps the pool…
+    state.refresh_connections().await;
+    assert!(state.connections.read().await.contains_key(CONNECTION_ID), "a healthy idle pool survives");
+
+    // …and a dead one is evicted.
+    drop(server);
+    state.refresh_connections().await;
+    assert!(!state.connections.read().await.contains_key(CONNECTION_ID), "an idle pool on a dead server is evicted");
 
     let _ = std::fs::remove_dir_all(dir);
 }

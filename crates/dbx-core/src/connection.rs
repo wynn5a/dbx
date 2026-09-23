@@ -926,27 +926,10 @@ impl AppState {
                         let client = p.get().await.map_err(|e| e.to_string())?;
                         client.simple_query("SELECT 1").await.map(|_| ()).map_err(|e| e.to_string())
                     }
-                    PoolKind::SqlServer(p) => {
-                        // The pool's own checked checkout health-probes the
-                        // socket (`SELECT @@SPID`) and sheds a stale one by
-                        // redialling, so a merely-stale idle socket is healed
-                        // here instead of reported dead. keep() returns the
-                        // healthy socket to the idle list rather than closing
-                        // it, so the sweep leaves no side effects behind.
-                        let (mut lease, _) = p.lease_checked().await?;
-                        lease.keep();
-                        Ok(())
-                    }
-                    PoolKind::Redis(con) => match con {
-                        db::redis_driver::RedisConnection::Direct(direct) => {
-                            let mut con = direct.lock().await;
-                            db::redis_driver::ping(&mut *con).await
-                        }
-                        db::redis_driver::RedisConnection::Cluster(cluster) => {
-                            let mut con = cluster.connection.lock().await;
-                            db::redis_driver::ping(&mut *con).await
-                        }
-                    },
+                    // Both probes treat a connection that is busy right now
+                    // as healthy instead of queueing behind it (see each fn).
+                    PoolKind::SqlServer(p) => p.probe_health().await,
+                    PoolKind::Redis(con) => db::redis_driver::probe_health(con).await,
                     _ => Ok(()),
                 }
             };
@@ -2665,21 +2648,16 @@ mod tests {
             "the sweep filter must include SQL Server and Redis pools"
         );
 
-        // SQL Server goes through the pool's own health-checking lease
-        // (`SELECT @@SPID`, stale sockets shed by redial) and a healthy lease
-        // is returned to the idle list instead of being closed.
+        // SQL Server and Redis go through their busy-aware probes: a pool that
+        // is saturated right now counts as healthy instead of queueing behind
+        // it past the sweep deadline (behavior pinned by the probes' own tests).
         assert!(
-            sweep.contains("lease_checked") && sweep.contains("lease.keep()"),
-            "the SQL Server arm must reuse SqlServerPool::lease_checked and keep() the healthy lease"
+            sweep.contains("PoolKind::SqlServer(p) => p.probe_health().await"),
+            "the SQL Server arm must use SqlServerPool::probe_health"
         );
-
-        // Redis is probed with PING on both the direct and the cluster pool.
-        assert!(sweep.contains("db::redis_driver::ping"), "the Redis arm must PING through redis_driver");
-        let redis_arm = sweep.split("PoolKind::Redis(con) => match con").nth(1).unwrap();
-        let redis_arm = redis_arm.split("_ => Ok(())").next().unwrap();
         assert!(
-            redis_arm.contains("RedisConnection::Direct") && redis_arm.contains("RedisConnection::Cluster"),
-            "both Redis pool variants must be swept, not just direct connections"
+            sweep.contains("PoolKind::Redis(con) => db::redis_driver::probe_health(con).await"),
+            "the Redis arm must use redis_driver::probe_health (direct and cluster)"
         );
     }
 
