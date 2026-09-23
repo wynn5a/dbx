@@ -58,7 +58,7 @@
 | T37 | prefers-reduced-motion 支持 | improvement-plan §6 E9-1 | S | ✅ a92296bb |
 | T38 | 启动阶段 performance.mark | improvement-plan §6 E9-2 | S | ✅ f158bc2b |
 | T39 | QueryEditor 异步组件化 | improvement-plan §6 E9-3 | S | ✅ cfb367b9 |
-| T40 | 列固定 + 拖拽排序 | improvement-plan §6 E7-2 | M | ⬜ |
+| T40 | 列固定 + 拖拽排序 | improvement-plan §6 E7-2 | M | ✅ 958f01b6 |
 | T41 | 侧栏拖表/列入编辑器 | improvement-plan §6 E7-3 | M | ⬜ |
 | T42 | 最终 SQL 结构化输出 | improvement-plan §5 D9 | M | ⬜ |
 | T43 | Agent loop 端到端测试 | improvement-plan §5 D10 | M | ⬜ |
@@ -458,13 +458,14 @@
   - [x] 编辑器打开与功能不回退（`pnpm check` 全绿：format + lint + typecheck + vitest 181 文件 / 1351 用例；props/events 对 `defineAsyncComponent` 透明，模板未动；defineExpose 的 `openSearch`/`openReplace`/`scrollCursorIntoView` 由源码契约测试锁定接线；GUI 交互手工验证本环境不可行，以构建 + 类型检查 + 契约测试佐证）
 - **实现说明**：新增 `components/editor/queryEditorAsync.ts`——`defineAsyncComponent({ loader, loadingComponent })` 包装 `QueryEditor.vue`，对齐 ContentArea 既有 DataGrid 模式：`loadQueryEditorComponent()` 记忆化动态 import（并发挂载共享一次加载，附 `[DBX][QueryEditor:load:start/done]` 耗时日志），loading 占位为等面积 Loader2 旋转骨架（异步组件默认 200ms delay，本地快速加载不闪现，慢加载不塌陷/不跳动布局）。静态引用点两处全部改造：`ContentArea.vue:28` 与 `ObjectBrowser.vue:82`（对象侧源码查看/编辑）。ref 方法处理：`defineAsyncComponent` 对 props/events 透明但对实例 ref 不透明，`queryEditorRef` 由 `InstanceType<typeof QueryEditor>` 改为显式 `QueryEditorHandle`（镜像 DataGridHandle 先例）；三个调用点（`focusSearch`→`openSearch`、`handleModRTarget`→`openReplace`、执行结束 watch→`scrollCursorIntoView`）均已 `?.` 优雅降级——`openSearch` 在加载窗口内回落侧栏搜索（与今日非 query 模式行为一致），`openReplace` 仅可由编辑器自身 DOM（`[data-query-editor-root]`）触发、天然后置于加载完成。刻意不加 DataGrid 式 idle 预载：纯浏览会话不应拉取编辑器 chunk。防回退：`packages/app-tests/queryEditorAsync.test.ts` 5 例源码契约——包装器为记忆化动态 import 且自身无 `@codemirror`/静态 import；两个引用点无静态 `QueryEditor.vue` import 且经包装器挂载；defineExpose 清单与 handle 类型、三调用点接线在位。
 
-### T40 列固定 + 拖拽排序 ⬜
+### T40 列固定 + 拖拽排序 ✅ 958f01b6
 
 - **来源** improvement-plan-2026-09.md §6 E7 第 2 项（Track E）· **规模** M
 - **内容** `useDataGridColumnResize` 只管 resize。增加列 pin/freeze 与拖拽重排。
 - **验收**
-  - [ ] 列可固定与拖拽排序；横向大范围滚动下固定列不漂移
-  - [ ] 布局随标签页持久化；测试通过
+  - [x] 列可固定与拖拽排序；横向大范围滚动下固定列不漂移（表头右键菜单与紧凑表头下拉均含"固定列/取消固定"（六 locale），表头指针拖拽换列序（4px 阈值 + 落点指示线，拖完吞掉尾随 click 不误选中）。**渲染模式支持范围：DOM 与 canvas 两种模式都支持**——canvas 是默认渲染路径，列头在 canvas 模式下本就是 DOM，pin/drag 入口天然两态共享；行区不漂移由几何保证：固定列 i 的视口 x = 行号宽 + 前 i 个固定列宽度之和，公式中无 scrollLeft 项——DOM 模式以 sticky left=该偏移实现，canvas 模式以两遍绘制实现（滚动列先画、固定列按固定 x 后画覆盖，命中测试在视口空间先判固定区域再查 scrollLeft）。手工滚动验证在本环境不可行，以几何单测佐证：drop-target 在固定区域的命中于 scrollLeft 0/500/5000 完全一致、canvas 渲染器录制 fillText 断言固定列文本 x 在 scrollLeft 0 与 1000 下逐值相等而非固定列随滚动平移、`pinnedColumnViewportX` 断言固定偏移不含滚动项）
+  - [x] 布局随标签页持久化；测试通过（列宽 + 顺序 + 固定集合合成单一布局对象，按 DataGrid cacheKey（`<tabId>-<resultIndex>`，与待存快照/滚动位置同一键体系）随标签页持久化：切换标签页/重执行后恢复，作用域变更（换表/换 SQL，与隐藏列重置同生命周期）重置，关闭标签页随 `clearDataGridPendingSnapshotsForTab` 同点清理；旧布局数据兼容——无 order/pinned 字段（或字段畸形）按"原顺序、无固定"解析。`pnpm check` 全绿（format + lint + typecheck + vitest 182 文件 / 1380 用例，含新增 24 例）+ `pnpm build` 通过）
+- **实现说明**：新增 `lib/dataGridColumnLayout.ts` 纯函数（渲染顺序合成 = 固定列稳定前置 + 手动顺序按列名排名、排名缺失者按原序尾随；reorder slot 移位；排列置换 `permutationFromOrders`；drop-target 命中；布局对象容错解析）。列名作持久化标识（actual index 跨查询不稳）；同名重复列（JOIN 场景）按首次未消费出现位置映射，语义确定。新增 `useDataGridColumnLayout` composable 持有顺序/固定/持久化宽度状态与 per-tab 缓存，DataGrid 的 `visibleColumnIndexes` 改为布局合成结果——排序/筛选/搜索/选中/导出等全部下游继续走同一数组，行为自动一致；固定集合按列名标识不随顺序失效（拖固定列到非固定区仍是固定，按排名落在固定前缀内）。宽度持久化并入 `useDataGridColumnResize`：init 应用按名列宽覆盖、resize 结束/autoFit 落盘，重排/固定经排列置换让宽度跟随列。DOM sticky 单元格的半透明色调（选中/脏/搜索/新删行/激活行）以"不透明底色 + background-image 叠加 tint"合成，避免滚动内容透出。已知取舍：固定列拖出固定区不解固定（任务只要求集合按名稳定）；拖拽重排不改排序/筛选语义。
 
 ### T41 侧栏拖表/列入编辑器 ⬜
 
