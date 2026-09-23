@@ -54,6 +54,7 @@ pub async fn start_transport_layers(
                     &layer_id,
                     &connect_endpoint.host,
                     connect_endpoint.port,
+                    (layer_host, layer_port),
                     &ssh.user,
                     &ssh.password,
                     &ssh.key_path,

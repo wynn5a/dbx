@@ -44,8 +44,10 @@ fn start_tunnel_give_up_relay(app: &tauri::AppHandle, state: &Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         while let Some(give_up) = give_ups.recv().await {
             log::warn!(
-                "[SSH] tunnel {} gave up reconnecting to {}:{}",
+                "[SSH] tunnel {} gave up reconnecting to {}:{} (dialed via {}:{})",
                 give_up.tunnel_id,
+                give_up.ssh_host,
+                give_up.ssh_port,
                 give_up.connect_host,
                 give_up.connect_port
             );
@@ -54,8 +56,10 @@ fn start_tunnel_give_up_relay(app: &tauri::AppHandle, state: &Arc<AppState>) {
                     "ssh-tunnel-lost",
                     SshTunnelLostEvent {
                         connection_id,
-                        ssh_host: give_up.connect_host,
-                        ssh_port: give_up.connect_port,
+                        // The configured hop, not the dialed address: an
+                        // inner hop dials the previous layer's 127.0.0.1 port.
+                        ssh_host: give_up.ssh_host,
+                        ssh_port: give_up.ssh_port,
                     },
                 );
             }

@@ -1004,6 +1004,14 @@ impl AppState {
     /// transport and pool from scratch and, while the tunnel endpoint is still
     /// down, fails fast with the clear SSH error instead of a refused socket.
     ///
+    /// The whole transport chain is torn down first, not just the pools: in a
+    /// multi-layer chain layer n+1 dials layer n's local port fixed at spawn,
+    /// so if only the dead layer were rebuilt (on a new port) the surviving
+    /// later layers would keep forwarding into the old dead port and the chain
+    /// would never heal. Stopping every layer before evicting also covers the
+    /// window where the giving-up task has sent its notice but not yet exited
+    /// (a rebuild then would still see it as active and reuse its dead port).
+    ///
     /// Returns the owning connection id so the caller can notify the frontend,
     /// or `None` when the tunnel never serves pools (the connection dialog's
     /// probe tunnel, `{id}:test`) and evicting its connection's live pools
@@ -1013,6 +1021,7 @@ impl AppState {
             return None;
         }
         let connection_id = connection_id_from_tunnel_id(tunnel_id);
+        self.reset_connection_transport(connection_id).await;
         self.remove_connection_pools(connection_id).await;
         Some(connection_id.to_string())
     }
@@ -1739,6 +1748,65 @@ mod tests {
         assert!(!conns.contains_key("conn:session:tab-1"), "session pools must go with the dead tunnel");
         assert!(conns.contains_key("other"), "other connections keep their pools");
         drop(conns);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Multi-layer chain: when one layer gives up, every other layer of the
+    /// same connection must be torn down too. A surviving later layer keeps
+    /// dialing the dead layer's old local port, so a rebuilt earlier layer
+    /// (on a new port) would never be reached and the chain would never heal.
+    #[tokio::test]
+    async fn tunnel_give_up_tears_down_every_transport_layer_of_the_connection() {
+        let (state, dir) = test_app_state().await;
+        let proxy_layer = |id: &str, port: u16| {
+            crate::models::connection::TransportLayerConfig::Proxy(crate::models::connection::ProxyTunnelConfig {
+                id: id.to_string(),
+                name: id.to_string(),
+                enabled: true,
+                proxy_type: crate::models::connection::ProxyType::Http,
+                host: "127.0.0.1".to_string(),
+                port,
+                username: String::new(),
+                password: String::new(),
+            })
+        };
+        let mut config = mysql_config(None);
+        config.id = "conn".to_string();
+        config.transport_layers = vec![proxy_layer("outer", 1), proxy_layer("inner", 2)];
+        let layers = config.effective_transport_layers();
+        assert_eq!(layers.len(), 2);
+        state.configs.write().await.insert("conn".to_string(), config);
+
+        // Real chain start, exactly as connection_host_port builds it.
+        db::transport_layer_tunnel::start_transport_layers(
+            "conn",
+            &layers,
+            "db.internal",
+            3306,
+            &state.tunnels,
+            &state.proxy_tunnels,
+        )
+        .await
+        .expect("start two-layer chain");
+        assert!(state.proxy_tunnels.local_port("conn:transport:0").await.is_some());
+        let inner_port = state.proxy_tunnels.local_port("conn:transport:1").await.expect("inner layer listening");
+
+        // Layer 0 gives up (its SSH endpoint died past the reconnect budget).
+        assert_eq!(state.evict_pools_for_tunnel("conn:transport:0").await.as_deref(), Some("conn"));
+
+        assert_eq!(state.proxy_tunnels.local_port("conn:transport:0").await, None, "the dead layer is gone");
+        assert_eq!(
+            state.proxy_tunnels.local_port("conn:transport:1").await,
+            None,
+            "later layers must be stopped too, or they keep forwarding into the dead layer's old port"
+        );
+        // The inner layer's listener is really closed (its task was aborted).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while tokio::net::TcpStream::connect(("127.0.0.1", inner_port)).await.is_ok() {
+            assert!(std::time::Instant::now() < deadline, "inner layer still accepting on {inner_port}");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
 
         let _ = std::fs::remove_dir_all(dir);
     }

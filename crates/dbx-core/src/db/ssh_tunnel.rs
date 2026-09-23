@@ -59,9 +59,15 @@ pub struct TunnelGiveUp {
     /// transport-layer tunnels that serve pools, `{connection_id}:test` for the
     /// connection dialog's probe tunnel.
     pub tunnel_id: String,
-    /// SSH endpoint the tunnel could no longer reach.
+    /// Address the tunnel dialed and could no longer reach. For an inner hop
+    /// of a multi-layer chain this is the previous layer's local forward
+    /// (`127.0.0.1:<port>`), not a host the user would recognize.
     pub connect_host: String,
     pub connect_port: u16,
+    /// The SSH server as configured for this hop — what user-facing notices
+    /// name. Equals `connect_host:connect_port` for a first/only hop.
+    pub ssh_host: String,
+    pub ssh_port: u16,
 }
 
 struct SshClient;
@@ -304,6 +310,7 @@ async fn tunnel_reconnect_loop(
     tunnel_id: String,
     connect_host: String,
     connect_port: u16,
+    hop_endpoint: (String, u16),
     ssh_user: String,
     ssh_password: String,
     ssh_key_path: String,
@@ -344,7 +351,14 @@ async fn tunnel_reconnect_loop(
                     "SSH tunnel ({connect_host}:{connect_port}): max reconnect attempts ({}) exhausted, giving up",
                     policy.max_attempts
                 );
-                let _ = give_ups.send(TunnelGiveUp { tunnel_id, connect_host: connect_host.clone(), connect_port });
+                let (ssh_host, ssh_port) = hop_endpoint;
+                let _ = give_ups.send(TunnelGiveUp {
+                    tunnel_id,
+                    connect_host: connect_host.clone(),
+                    connect_port,
+                    ssh_host,
+                    ssh_port,
+                });
                 return;
             }
         }
@@ -407,11 +421,17 @@ impl TunnelManager {
     }
 
     #[allow(clippy::too_many_arguments)]
+    ///
+    /// `ssh_host:ssh_port` is the address dialed; `hop_endpoint` is the SSH
+    /// server as configured for this hop, reported in the give-up notice. They
+    /// differ for an inner hop of a chain, which dials the previous layer's
+    /// local forward.
     pub async fn start_tunnel(
         &self,
         connection_id: &str,
         ssh_host: &str,
         ssh_port: u16,
+        hop_endpoint: (&str, u16),
         ssh_user: &str,
         ssh_password: &str,
         ssh_key_path: &str,
@@ -434,6 +454,7 @@ impl TunnelManager {
             connection_id,
             ssh_host,
             ssh_port,
+            hop_endpoint,
             ssh_user,
             ssh_password,
             ssh_key_path,
@@ -505,6 +526,7 @@ impl TunnelManager {
                 connection_id,
                 &connect_host,
                 connect_port,
+                (&hop.host, hop.port),
                 &hop.user,
                 &hop.password,
                 &hop.key_path,
@@ -554,6 +576,7 @@ async fn spawn_tunnel(
     tunnel_id: &str,
     connect_host: &str,
     connect_port: u16,
+    hop_endpoint: (&str, u16),
     ssh_user: &str,
     ssh_password: &str,
     ssh_key_path: &str,
@@ -588,6 +611,7 @@ async fn spawn_tunnel(
         tunnel_id.to_string(),
         connect_host.to_string(),
         connect_port,
+        (hop_endpoint.0.to_string(), hop_endpoint.1),
         ssh_user.to_string(),
         ssh_password.to_string(),
         ssh_key_path.to_string(),
