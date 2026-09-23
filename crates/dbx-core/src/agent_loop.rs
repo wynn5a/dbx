@@ -206,10 +206,7 @@ pub async fn run_agent_loop(
             role: "assistant".to_string(),
             content: turn_text,
             tool_call_id: None,
-            tool_calls: tool_calls
-                .iter()
-                .map(|tc| ToolCallRef { id: tc.id.clone(), name: tc.name.clone(), arguments: tc.arguments.clone() })
-                .collect(),
+            tool_calls: tool_calls.iter().map(ToolCallRef::from).collect(),
         });
 
         for tc in &tool_calls {

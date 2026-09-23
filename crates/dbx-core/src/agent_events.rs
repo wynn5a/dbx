@@ -49,6 +49,10 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: Value,
+    /// Gemini's opaque `thoughtSignature` for this call, replayed on the next
+    /// turn (see [`crate::ai::ToolCallRef`]). `None` for every other provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thought_signature: Option<String>,
 }
 
 /// Result of executing a tool. `content` is the text fed back to the model;

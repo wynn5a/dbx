@@ -255,10 +255,7 @@ fn replay_turn(convo: &mut Vec<AiMessage>, turn_text: String, calls: &[ToolCall]
         role: "assistant".to_string(),
         content: turn_text,
         tool_call_id: None,
-        tool_calls: calls
-            .iter()
-            .map(|tc| ToolCallRef { id: tc.id.clone(), name: tc.name.clone(), arguments: tc.arguments.clone() })
-            .collect(),
+        tool_calls: calls.iter().map(ToolCallRef::from).collect(),
     });
     for (tc, result) in calls.iter().zip(results) {
         convo.push(AiMessage {
@@ -283,7 +280,9 @@ async fn gemini_tool_loop_round_trips_function_call_and_response_across_turns() 
         }),
         json!({
             "candidates": [{ "content": { "role": "model", "parts": [
-                { "functionCall": { "name": "list_tables", "args": {} } }
+                // Gemini 3 binds its reasoning to the call with an opaque
+                // signature that must come back on replay.
+                { "functionCall": { "name": "list_tables", "args": {} }, "thoughtSignature": "EpYCCpMCAb4+9vs=" }
             ] } }],
             "usageMetadata": { "promptTokenCount": 11, "candidatesTokenCount": 6 }
         }),
@@ -310,6 +309,7 @@ async fn gemini_tool_loop_round_trips_function_call_and_response_across_turns() 
     assert_eq!(calls1[0].id, "call_0");
     assert_eq!(calls1[0].name, "list_tables");
     assert_eq!(calls1[0].arguments, json!({}));
+    assert_eq!(calls1[0].thought_signature.as_deref(), Some("EpYCCpMCAb4+9vs="));
     assert_eq!(usage1.input_tokens, Some(11));
     assert_eq!(usage1.output_tokens, Some(6));
 
@@ -339,9 +339,53 @@ async fn gemini_tool_loop_round_trips_function_call_and_response_across_turns() 
     assert_eq!(contents[1]["role"], "model");
     assert_eq!(contents[1]["parts"][0]["text"], "Let me check the schema.");
     assert_eq!(contents[1]["parts"][1]["functionCall"]["name"], "list_tables");
+    assert_eq!(contents[1]["parts"][1]["thoughtSignature"], "EpYCCpMCAb4+9vs=");
     assert_eq!(contents[2]["role"], "user");
     assert_eq!(contents[2]["parts"][0]["functionResponse"]["name"], "list_tables");
     assert_eq!(contents[2]["parts"][0]["functionResponse"]["response"]["result"], "users\norders");
+}
+
+#[tokio::test]
+async fn gemini_calls_in_separate_chunks_stay_distinct_through_the_stream() {
+    // Two sequential functionCall parts, each in its own SSE chunk: the stream
+    // must index them 0 and 1, not both 0 (which merged name and args).
+    let turn1 = gemini_sse(&[
+        json!({ "candidates": [{ "content": { "role": "model", "parts": [
+            { "functionCall": { "name": "list_tables", "args": {} }, "thoughtSignature": "c2lnLTE=" }
+        ] } }] }),
+        json!({ "candidates": [{ "content": { "role": "model", "parts": [
+            { "functionCall": { "name": "get_columns", "args": { "table": "orders" } }, "thoughtSignature": "c2lnLTI=" }
+        ] } }] }),
+    ]);
+    let turn2 = gemini_sse(&[json!({
+        "candidates": [{ "content": { "role": "model", "parts": [{ "text": "done" }] } }]
+    })]);
+    let server = MockProvider::start(vec![turn1, turn2]).await;
+    let config = gemini_config(&server.base_url);
+    let tools = vec![list_tables_tool()];
+    let mut convo = vec![AiMessage::text("user", "Describe orders")];
+    let cancelled = Notify::new();
+
+    let (_, calls, _) = stream_turn(&config, &convo, &tools, &cancelled).await;
+    assert_eq!(calls.len(), 2, "{calls:?}");
+    assert_eq!((calls[0].id.as_str(), calls[0].name.as_str()), ("call_0", "list_tables"));
+    assert_eq!(calls[0].arguments, json!({}));
+    assert_eq!((calls[1].id.as_str(), calls[1].name.as_str()), ("call_1", "get_columns"));
+    assert_eq!(calls[1].arguments, json!({ "table": "orders" }));
+
+    replay_turn(&mut convo, String::new(), &calls, &["users\norders", "id INTEGER"]);
+    stream_turn(&config, &convo, &tools, &cancelled).await;
+
+    let body2: Value = serde_json::from_str(&server.requests()[1].body).expect("turn 2 body is JSON");
+    let model_parts = body2["contents"][1]["parts"].as_array().expect("model parts");
+    assert_eq!(model_parts.len(), 2);
+    assert_eq!(model_parts[0]["functionCall"]["name"], "list_tables");
+    assert_eq!(model_parts[0]["thoughtSignature"], "c2lnLTE=");
+    assert_eq!(model_parts[1]["functionCall"]["name"], "get_columns");
+    assert_eq!(model_parts[1]["thoughtSignature"], "c2lnLTI=");
+    let responses = body2["contents"][2]["parts"].as_array().expect("function responses");
+    assert_eq!(responses[0]["functionResponse"]["name"], "list_tables");
+    assert_eq!(responses[1]["functionResponse"]["name"], "get_columns");
 }
 
 // ---------------------------------------------------------------------------

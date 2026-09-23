@@ -87,6 +87,7 @@ fn execute_query_tool_call(id: &str, marker: &str) -> ToolCall {
         id: id.to_string(),
         name: "execute_query".to_string(),
         arguments: serde_json::json!({ "sql": format!("SELECT pg_sleep(30), '{marker}' AS dbx_agent_probe") }),
+        thought_signature: None,
     }
 }
 

@@ -624,11 +624,11 @@ mod tests {
     const CONN_ID: &str = "agent-test-conn";
 
     fn tool_call(id: &str, arguments: Value) -> ToolCall {
-        ToolCall { id: id.to_string(), name: "execute_query".to_string(), arguments }
+        ToolCall { id: id.to_string(), name: "execute_query".to_string(), arguments, thought_signature: None }
     }
 
     fn named_tool_call(id: &str, name: &str, arguments: Value) -> ToolCall {
-        ToolCall { id: id.to_string(), name: name.to_string(), arguments }
+        ToolCall { id: id.to_string(), name: name.to_string(), arguments, thought_signature: None }
     }
 
     fn sample_result() -> QueryResult {

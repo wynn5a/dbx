@@ -188,6 +188,21 @@ pub struct ToolCallRef {
     pub id: String,
     pub name: String,
     pub arguments: Value,
+    /// Gemini's opaque `thoughtSignature` from the `functionCall` part, echoed
+    /// back verbatim on replay (Gemini 3 rejects a replayed call without it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thought_signature: Option<String>,
+}
+
+impl From<&ToolCall> for ToolCallRef {
+    fn from(tc: &ToolCall) -> Self {
+        Self {
+            id: tc.id.clone(),
+            name: tc.name.clone(),
+            arguments: tc.arguments.clone(),
+            thought_signature: tc.thought_signature.clone(),
+        }
+    }
 }
 
 /// Best-effort token accounting accumulated across a streamed response. Also
@@ -1338,9 +1353,23 @@ fn ollama_native_show_endpoint(config: &AiConfig) -> String {
 /// Normalized streaming event emitted by every provider tool parser.
 pub enum StreamToolEvent {
     Chunk(AiStreamChunk),
-    ToolCallStart { index: u32, id: String, name: String },
-    ToolCallDelta { index: u32, fragment: String },
-    ToolCallComplete { index: u32 },
+    ToolCallStart {
+        index: u32,
+        id: String,
+        name: String,
+    },
+    ToolCallDelta {
+        index: u32,
+        fragment: String,
+    },
+    /// Provider-opaque signature bound to a call (Gemini `thoughtSignature`).
+    ToolCallSignature {
+        index: u32,
+        signature: String,
+    },
+    ToolCallComplete {
+        index: u32,
+    },
 }
 
 #[derive(Default)]
@@ -1348,6 +1377,7 @@ struct PartialToolCall {
     id: String,
     name: String,
     arguments: String,
+    thought_signature: Option<String>,
 }
 
 /// Collects streamed tool-call fragments (keyed by provider stream index) and
@@ -1378,6 +1408,9 @@ impl StreamingToolCallAccumulator {
             StreamToolEvent::ToolCallDelta { index, fragment } => {
                 self.entry(index).arguments.push_str(&fragment);
             }
+            StreamToolEvent::ToolCallSignature { index, signature } => {
+                self.entry(index).thought_signature = Some(signature);
+            }
             StreamToolEvent::ToolCallComplete { .. } => {}
         }
     }
@@ -1404,7 +1437,12 @@ impl StreamingToolCallAccumulator {
                 serde_json::from_str(&partial.arguments).unwrap_or_else(|_| json!({}))
             };
             let id = if partial.id.is_empty() { format!("call_{index}") } else { partial.id.clone() };
-            out.push(ToolCall { id, name: partial.name.clone(), arguments });
+            out.push(ToolCall {
+                id,
+                name: partial.name.clone(),
+                arguments,
+                thought_signature: partial.thought_signature.clone(),
+            });
         }
         out
     }
@@ -1781,7 +1819,11 @@ fn gemini_contents_with_tools(messages: &[AiMessage]) -> Vec<Value> {
                 parts.push(json!({ "text": m.content }));
             }
             for tc in &m.tool_calls {
-                parts.push(json!({ "functionCall": { "name": tc.name, "args": tc.arguments } }));
+                let mut part = json!({ "functionCall": { "name": tc.name, "args": tc.arguments } });
+                if let Some(signature) = &tc.thought_signature {
+                    part["thoughtSignature"] = json!(signature);
+                }
+                parts.push(part);
             }
             out.push(json!({ "role": "model", "parts": parts }));
         } else {
@@ -1838,12 +1880,15 @@ async fn stream_gemini_with_tools(
     }
 
     let mut usage = TokenUsage::default();
+    // Gemini sends each functionCall part whole, often one per SSE chunk, so the
+    // accumulator index must count calls across the whole stream.
+    let mut next_call_index = 0u32;
     read_sse_stream(res, request.cancelled, |line| {
         let Some(data) = stream_data_payload(line) else {
             return ControlFlow::Continue(());
         };
         if let Ok(event) = serde_json::from_str::<Value>(data) {
-            parse_gemini_tool_event(&event, request.session_id, emit, &mut usage);
+            parse_gemini_tool_event(&event, request.session_id, emit, &mut usage, &mut next_call_index);
         }
         ControlFlow::Continue(())
     })
@@ -1854,9 +1899,18 @@ async fn stream_gemini_with_tools(
 
 /// Parse one Gemini `streamGenerateContent` SSE payload: `text` parts stream as
 /// text deltas, `functionCall` parts arrive complete (no argument fragmentation)
-/// and are fed through the accumulator as start+delta+complete. Best-effort
-/// usage comes from the chunks' `usageMetadata`.
-fn parse_gemini_tool_event(event: &Value, session_id: &str, emit: &impl Fn(StreamToolEvent), usage: &mut TokenUsage) {
+/// and are fed through the accumulator as start+delta+complete, each under the
+/// next stream-wide call index (`next_call_index`, owned by the caller for the
+/// whole stream — calls in different chunks must not share an index). A part's
+/// `thoughtSignature` is kept so the replay can echo it. Best-effort usage
+/// comes from the chunks' `usageMetadata`.
+fn parse_gemini_tool_event(
+    event: &Value,
+    session_id: &str,
+    emit: &impl Fn(StreamToolEvent),
+    usage: &mut TokenUsage,
+    next_call_index: &mut u32,
+) {
     if let Some(u) = event.get("usageMetadata").filter(|u| !u.is_null()) {
         if let Some(prompt) = u["promptTokenCount"].as_u64() {
             usage.input_tokens = Some(prompt as u32);
@@ -1870,7 +1924,7 @@ fn parse_gemini_tool_event(event: &Value, session_id: &str, emit: &impl Fn(Strea
     let Some(parts) = event["candidates"].get(0).and_then(|candidate| candidate["content"]["parts"].as_array()) else {
         return;
     };
-    for (position, part) in parts.iter().enumerate() {
+    for part in parts {
         if let Some(text) = part["text"].as_str().filter(|s| !s.is_empty()) {
             emit(StreamToolEvent::Chunk(AiStreamChunk {
                 session_id: session_id.to_string(),
@@ -1881,10 +1935,14 @@ fn parse_gemini_tool_event(event: &Value, session_id: &str, emit: &impl Fn(Strea
         }
         let Some(call) = part.get("functionCall") else { continue };
         let Some(name) = call["name"].as_str().filter(|s| !s.is_empty()) else { continue };
-        let index = position as u32;
+        let index = *next_call_index;
+        *next_call_index += 1;
         emit(StreamToolEvent::ToolCallStart { index, id: String::new(), name: name.to_string() });
         let args = call.get("args").cloned().unwrap_or_else(|| json!({}));
         emit(StreamToolEvent::ToolCallDelta { index, fragment: args.to_string() });
+        if let Some(signature) = part["thoughtSignature"].as_str().filter(|s| !s.is_empty()) {
+            emit(StreamToolEvent::ToolCallSignature { index, signature: signature.to_string() });
+        }
         emit(StreamToolEvent::ToolCallComplete { index });
     }
 }
@@ -2106,11 +2164,17 @@ mod tests {
                 content: "Checking.".into(),
                 tool_call_id: None,
                 tool_calls: vec![
-                    ToolCallRef { id: "call_0".into(), name: "list_tables".into(), arguments: json!({}) },
+                    ToolCallRef {
+                        id: "call_0".into(),
+                        name: "list_tables".into(),
+                        arguments: json!({}),
+                        thought_signature: Some("sig-A".into()),
+                    },
                     ToolCallRef {
                         id: "call_1".into(),
                         name: "get_columns".into(),
                         arguments: json!({ "table": "users" }),
+                        thought_signature: None,
                     },
                 ],
             },
@@ -2136,6 +2200,10 @@ mod tests {
         assert_eq!(contents[1]["parts"][0]["text"], "Checking.");
         assert_eq!(contents[1]["parts"][1]["functionCall"]["name"], "list_tables");
         assert_eq!(contents[1]["parts"][2]["functionCall"]["args"]["table"], "users");
+        // The signature rides beside `functionCall` on the same part; parallel
+        // calls after the first carry none and must not grow an empty one.
+        assert_eq!(contents[1]["parts"][1]["thoughtSignature"], "sig-A");
+        assert!(contents[1]["parts"][2].get("thoughtSignature").is_none());
         // Consecutive tool results collapse into one user turn of functionResponses.
         assert_eq!(contents[2]["role"], "user");
         assert_eq!(contents[2]["parts"][0]["functionResponse"]["name"], "list_tables");
@@ -2162,11 +2230,13 @@ mod tests {
             acc.lock().unwrap().process(event, &|c: AiStreamChunk| chunks.lock().unwrap().push(c));
         };
         let mut usage = TokenUsage::default();
-        parse_gemini_tool_event(&event, "s", &emit, &mut usage);
+        let mut next = 0;
+        parse_gemini_tool_event(&event, "s", &emit, &mut usage, &mut next);
 
         let calls = acc.into_inner().unwrap().finalize();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].id, "call_1"); // index of the functionCall part
+        assert_eq!(calls[0].id, "call_0"); // first call of the stream, not the part position
+        assert_eq!(next, 1);
         assert_eq!(calls[0].name, "list_tables");
         assert_eq!(calls[0].arguments["schema"], "public");
         assert_eq!(chunks.lock().unwrap()[0].delta, "Checking the schema.");
@@ -2179,21 +2249,52 @@ mod tests {
         let mut usage = TokenUsage::default();
         let acc = std::sync::Mutex::new(StreamingToolCallAccumulator::new());
         let emit = |event: StreamToolEvent| acc.lock().unwrap().process(event, &|_| {});
-        parse_gemini_tool_event(&serde_json::json!({ "candidates": [] }), "s", &emit, &mut usage);
+        let mut next = 0;
+        parse_gemini_tool_event(&serde_json::json!({ "candidates": [] }), "s", &emit, &mut usage, &mut next);
         parse_gemini_tool_event(
             &serde_json::json!({ "candidates": [{ "content": { "parts": [{ "text": "" }] } }] }),
             "s",
             &emit,
             &mut usage,
+            &mut next,
         );
         parse_gemini_tool_event(
             &serde_json::json!({ "candidates": [{ "content": { "parts": [{ "functionCall": { "args": {} } }] } }] }),
             "s",
             &emit,
             &mut usage,
+            &mut next,
         );
         assert!(acc.into_inner().unwrap().finalize().is_empty());
         assert_eq!(usage, TokenUsage::default());
+        assert_eq!(next, 0, "nameless calls must not consume an index");
+    }
+
+    #[test]
+    fn gemini_tool_event_indexes_calls_across_chunks_and_keeps_signatures() {
+        // Gemini 3 shape: two sequential functionCall parts in separate SSE
+        // chunks, each part carrying its own thoughtSignature.
+        let chunk1 = serde_json::json!({ "candidates": [{ "content": { "role": "model", "parts": [
+            { "functionCall": { "name": "list_tables", "args": { "schema": "public" } }, "thoughtSignature": "c2lnLTE=" }
+        ] } }] });
+        let chunk2 = serde_json::json!({ "candidates": [{ "content": { "role": "model", "parts": [
+            { "functionCall": { "name": "get_columns", "args": { "table": "orders" } }, "thoughtSignature": "c2lnLTI=" }
+        ] } }] });
+        let acc = std::sync::Mutex::new(StreamingToolCallAccumulator::new());
+        let emit = |event: StreamToolEvent| acc.lock().unwrap().process(event, &|_| {});
+        let mut usage = TokenUsage::default();
+        let mut next = 0;
+        parse_gemini_tool_event(&chunk1, "s", &emit, &mut usage, &mut next);
+        parse_gemini_tool_event(&chunk2, "s", &emit, &mut usage, &mut next);
+
+        let calls = acc.into_inner().unwrap().finalize();
+        assert_eq!(calls.len(), 2, "both calls survive: {calls:?}");
+        assert_eq!((calls[0].id.as_str(), calls[0].name.as_str()), ("call_0", "list_tables"));
+        assert_eq!(calls[0].arguments, json!({ "schema": "public" }));
+        assert_eq!(calls[0].thought_signature.as_deref(), Some("c2lnLTE="));
+        assert_eq!((calls[1].id.as_str(), calls[1].name.as_str()), ("call_1", "get_columns"));
+        assert_eq!(calls[1].arguments, json!({ "table": "orders" }));
+        assert_eq!(calls[1].thought_signature.as_deref(), Some("c2lnLTI="));
     }
 
     #[test]
