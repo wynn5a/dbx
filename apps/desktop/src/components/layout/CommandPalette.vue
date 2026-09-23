@@ -3,14 +3,19 @@ import type { Component } from "vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
+  AlignLeft,
   ArrowLeftRight,
   Bot,
+  ChevronLeft,
+  ChevronRight,
   Database,
   FileCode,
   FolderOpen,
   GitCompareArrows,
   History,
   Package,
+  PanelLeft,
+  RefreshCw,
   Search,
   Settings,
   SquareTerminal,
@@ -21,12 +26,16 @@ import DialogContent from "@/components/ui/dialog/DialogContent.vue";
 import {
   COMMAND_DEFINITIONS,
   clampPaletteSelection,
+  commandShortcutHint,
   filterCommands,
+  isCommandEnabled,
   movePaletteSelection,
+  runPaletteCommand,
   type CommandDefinition,
   type CommandIconName,
   type CommandPaletteContext,
 } from "@/lib/commandPalette";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 // Palette-side icon resolution: the registry stays UI-agnostic by carrying
 // only an icon name; this table maps every name to its component (the
@@ -44,6 +53,11 @@ const COMMAND_ICONS: Record<CommandIconName, Component> = {
   history: History,
   bot: Bot,
   settings: Settings,
+  format: AlignLeft,
+  sidebar: PanelLeft,
+  next: ChevronRight,
+  prev: ChevronLeft,
+  refresh: RefreshCw,
 };
 
 const props = defineProps<{
@@ -53,9 +67,9 @@ const props = defineProps<{
 const open = defineModel<boolean>("open", { default: false });
 
 const { t } = useI18n();
+const settingsStore = useSettingsStore();
 const query = ref("");
 const selectedIndex = ref(0);
-const searchInputRef = ref<HTMLInputElement | null>(null);
 const listRef = ref<HTMLElement | null>(null);
 
 const filtered = computed(() => filterCommands(COMMAND_DEFINITIONS, query.value, t));
@@ -64,12 +78,8 @@ watch(filtered, (items) => {
   selectedIndex.value = clampPaletteSelection(selectedIndex.value, items.length);
 });
 
-watch(open, (isOpen) => {
-  if (!isOpen) return;
-  query.value = "";
-  selectedIndex.value = 0;
-  nextTick(() => searchInputRef.value?.focus());
-});
+// App mounts the palette with v-if, so each open is a fresh instance: the
+// query/selection start empty and reka's DialogContent auto-focuses the input.
 
 watch(selectedIndex, async () => {
   await nextTick();
@@ -97,9 +107,19 @@ function iconFor(command: CommandDefinition): Component | undefined {
   return command.icon ? COMMAND_ICONS[command.icon] : undefined;
 }
 
+function enabledFor(command: CommandDefinition): boolean {
+  return isCommandEnabled(command, props.context);
+}
+
+function shortcutHintFor(command: CommandDefinition): string | null {
+  return commandShortcutHint(command, settingsStore.editorSettings.shortcuts);
+}
+
 function runCommand(command: CommandDefinition) {
+  // Disabled rows (same rules as the toolbar) do nothing and keep the palette open.
+  if (!enabledFor(command)) return;
   open.value = false;
-  command.run(props.context);
+  runPaletteCommand(command, props.context);
 }
 
 function runSelected() {
@@ -114,7 +134,6 @@ function runSelected() {
       <div class="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--ds-border)] px-3.5">
         <Search class="size-4 shrink-0 text-[var(--ds-text-3)]" />
         <input
-          ref="searchInputRef"
           v-model="query"
           type="text"
           role="combobox"
@@ -139,9 +158,13 @@ function runSelected() {
           type="button"
           role="option"
           :aria-selected="index === selectedIndex"
+          :aria-disabled="enabledFor(command) ? undefined : 'true'"
           :data-palette-selected="index === selectedIndex ? 'true' : undefined"
           class="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors duration-[var(--ds-speed)]"
-          :class="index === selectedIndex ? 'bg-[var(--ds-bg-active)]' : 'hover:bg-[var(--ds-bg-active)]/60'"
+          :class="[
+            index === selectedIndex ? 'bg-[var(--ds-bg-active)]' : 'hover:bg-[var(--ds-bg-active)]/60',
+            enabledFor(command) ? '' : 'cursor-not-allowed opacity-50',
+          ]"
           @mouseenter="selectedIndex = index"
           @click="runCommand(command)"
         >
@@ -153,6 +176,12 @@ function runSelected() {
           <span class="min-w-0 flex-1 truncate text-[13px] text-[var(--ds-text-1)]">
             {{ t(command.labelKey) }}
           </span>
+          <kbd
+            v-if="shortcutHintFor(command)"
+            class="shrink-0 rounded border border-[var(--ds-border)] px-1.5 py-px font-mono text-[10.5px] text-[var(--ds-text-2)]"
+          >
+            {{ shortcutHintFor(command) }}
+          </kbd>
           <span class="shrink-0 text-[11px] text-[var(--ds-text-3)]">
             {{ t(command.categoryKey) }}
           </span>

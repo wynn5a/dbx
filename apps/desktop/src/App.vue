@@ -78,7 +78,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { HistoryEntry } from "@/lib/tauri";
 import type { AiAction } from "@/lib/ai";
-import type { CommandPaletteContext } from "@/lib/commandPalette";
+import { isModalDialogOpen, resolveCommandPaletteToggle, type CommandPaletteContext } from "@/lib/commandPalette";
 
 const AiAssistant = defineAsyncComponent(() => import("@/components/editor/AiAssistant.vue"));
 const QueryHistory = defineAsyncComponent(() => import("@/components/editor/QueryHistory.vue"));
@@ -238,15 +238,34 @@ const { openLineageTarget, openDatabaseSearchTarget, onStructureEditorSaved, ope
   useNavigationTargets(dialogs);
 const { onExecuteSql, onReloadData, onPaginate, onSort } = useDataGridActions(activeTab);
 
+// Shared shell actions: the toolbar, the keyboard shortcuts (handleKeydown)
+// and the command palette all route through these, so each action is
+// written once.
+function openNewConnection() {
+  connectionDialogPrefill.value = null;
+  showConnectionDialog.value = true;
+}
+function openSettingsDialog() {
+  showSettingsDialog.value = true;
+}
+function toggleSidebar() {
+  setSidebarOpen(!sidebarOpen.value);
+}
+function refreshActiveData() {
+  contentAreaRef.value?.refreshData();
+}
+
 // Command palette: the App-level capabilities the lib registry's actions run
-// against. Each `run` routes to the same opener the toolbar/menu uses, so the
-// palette stays in sync with the rest of the shell.
+// against. Each `run` routes to the same opener the toolbar/shortcut uses, and
+// the `has*`/`can*` predicates mirror the toolbar's disable rules.
 const commandPaletteContext: CommandPaletteContext = {
+  hasConnections: () => hasConnections.value,
+  hasSqlFileConnections: () => hasSqlFileConnections.value,
+  canFormatSql: () => activeTab.value?.mode === "query" && !!activeTab.value.sql.trim(),
+  hasTabs: () => queryStore.tabs.length > 0,
+  canRefreshData: () => !showDriverStore.value && !!activeTab.value?.result,
   newQuery: () => void newQuery(),
-  newConnection: () => {
-    connectionDialogPrefill.value = null;
-    showConnectionDialog.value = true;
-  },
+  newConnection: openNewConnection,
   openTransfer: () => (dialogs.showTransferDialog.value = true),
   openSchemaDiff: () => (dialogs.showSchemaDiffDialog.value = true),
   openDataCompare: () => (dialogs.showDataCompareDialog.value = true),
@@ -258,7 +277,12 @@ const commandPaletteContext: CommandPaletteContext = {
   openSqlFile: () => (dialogs.showSqlFileDialog.value = true),
   toggleQueryHistory: () => (showHistory.value = !showHistory.value),
   toggleAiAssistant: toggleAiPanel,
-  openSettings: () => (showSettingsDialog.value = true),
+  openSettings: openSettingsDialog,
+  formatSql: () => formatActiveSql(),
+  toggleSidebar,
+  nextTab: () => switchTab("next"),
+  prevTab: () => switchTab("prev"),
+  refreshData: refreshActiveData,
 };
 
 // Backend push: a connection's SSH tunnel gave up reconnecting (pools were
@@ -285,6 +309,7 @@ const toolbarAgentDriverUpdateCount = computed(() =>
   updateNotificationsEnabled.value ? agentDriverUpdateCount.value : 0,
 );
 const toolbarHasUpdateAvailable = computed(() => updateNotificationsEnabled.value && hasUpdateAvailable.value);
+const hasConnections = computed(() => connectionStore.connections.length > 0);
 const hasSqlFileConnections = computed(() =>
   connectionStore.connections.some((c) => supportsSqlFileExecution(c.db_type)),
 );
@@ -845,13 +870,15 @@ function handleKeydown(e: KeyboardEvent) {
   if (isOpenSettingsShortcut(e, shortcuts)) {
     e.preventDefault();
     e.stopPropagation();
-    showSettingsDialog.value = true;
+    // Don't stack Settings over another modal (the palette included).
+    if (!isModalDialogOpen(document)) openSettingsDialog();
     return;
   }
   if (isCommandPaletteShortcut(e, shortcuts)) {
     e.preventDefault();
     e.stopPropagation();
-    showCommandPalette.value = !showCommandPalette.value;
+    const toggle = resolveCommandPaletteToggle(showCommandPalette.value, isModalDialogOpen(document));
+    if (toggle !== "ignore") showCommandPalette.value = toggle === "open";
     return;
   }
   if (isFocusSearchShortcut(e, shortcuts)) {
@@ -865,7 +892,7 @@ function handleKeydown(e: KeyboardEvent) {
   if (isRefreshDataShortcut(e, shortcuts)) {
     e.preventDefault();
     e.stopPropagation();
-    contentAreaRef.value?.refreshData();
+    refreshActiveData();
     return;
   }
   if (isNewQueryShortcut(e, shortcuts)) {
@@ -877,14 +904,13 @@ function handleKeydown(e: KeyboardEvent) {
   if (isNewConnectionShortcut(e, shortcuts)) {
     e.preventDefault();
     e.stopPropagation();
-    connectionDialogPrefill.value = null;
-    showConnectionDialog.value = true;
+    openNewConnection();
     return;
   }
   if (isToggleSidebarShortcut(e, shortcuts)) {
     e.preventDefault();
     e.stopPropagation();
-    setSidebarOpen(!sidebarOpen.value);
+    toggleSidebar();
     return;
   }
   if (isCloseTabShortcut(e, shortcuts)) {
@@ -1101,14 +1127,14 @@ onUnmounted(() => {
           :checking-updates="checkingUpdates"
           :has-update-available="toolbarHasUpdateAvailable"
           :agent-driver-update-count="toolbarAgentDriverUpdateCount"
-          :has-connections="connectionStore.connections.length > 0"
+          :has-connections="hasConnections"
           :has-sql-file-connections="hasSqlFileConnections"
-          @new-connection="showConnectionDialog = true"
+          @new-connection="openNewConnection"
           @new-query="newQuery"
           @set-theme-mode="setThemeMode"
           @toggle-ai="toggleAiPanel"
           @toggle-history="showHistory = !showHistory"
-          @open-settings="showSettingsDialog = true"
+          @open-settings="openSettingsDialog"
           @open-driver-store="showDriverStore = !showDriverStore"
           @check-updates="checkUpdates()"
           @open-transfer="dialogs.showTransferDialog.value = true"
@@ -1253,10 +1279,10 @@ onUnmounted(() => {
                 :connected-ids="connectionStore.connectedIds"
                 :last-used-at="connectionStore.connectionLastUsedAt"
                 :app-version="appVersion"
-                :has-connections="connectionStore.connections.length > 0"
+                :has-connections="hasConnections"
                 :connections-loading="connectionStore.connectionsLoading"
                 @open-connection-query="openConnectionQuery"
-                @new-connection="showConnectionDialog = true"
+                @new-connection="openNewConnection"
                 @new-query="newQuery"
                 @show-history="showHistory = true"
                 @import-config="dialogs.onImportClick"

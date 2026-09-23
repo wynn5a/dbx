@@ -4,11 +4,17 @@ import { test } from "vitest";
 import {
   COMMAND_DEFINITIONS,
   clampPaletteSelection,
+  commandShortcutHint,
   filterCommands,
+  isCommandEnabled,
+  isModalDialogOpen,
   movePaletteSelection,
   registerCommand,
+  resolveCommandPaletteToggle,
+  runPaletteCommand,
   type CommandPaletteContext,
 } from "../../apps/desktop/src/lib/commandPalette.ts";
+import { SHORTCUT_DEFINITIONS } from "../../apps/desktop/src/lib/shortcutRegistry.ts";
 import en from "../../apps/desktop/src/i18n/locales/en.ts";
 import es from "../../apps/desktop/src/i18n/locales/es.ts";
 import it from "../../apps/desktop/src/i18n/locales/it.ts";
@@ -49,6 +55,11 @@ test("built-in manifest covers the plan's actions in registry order", () => {
       "queryHistory",
       "aiAssistant",
       "openSettings",
+      "formatSql",
+      "refreshData",
+      "toggleSidebar",
+      "nextTab",
+      "prevTab",
     ],
   );
 });
@@ -140,9 +151,16 @@ test("registerCommand is a one-line extension point and is filterable", () => {
   assert.equal(COMMAND_DEFINITIONS.length, before);
 });
 
-function recordingContext(): { context: CommandPaletteContext; calls: string[] } {
+const PREDICATES = ["hasConnections", "hasSqlFileConnections", "canFormatSql", "hasTabs", "canRefreshData"] as const;
+type PredicateName = (typeof PREDICATES)[number];
+
+function recordingContext(state: Partial<Record<PredicateName, boolean>> = {}): {
+  context: CommandPaletteContext;
+  calls: string[];
+} {
   const calls: string[] = [];
-  const context: Record<string, () => void> = {};
+  const context: Record<string, () => unknown> = {};
+  for (const name of PREDICATES) context[name] = () => state[name] ?? true;
   for (const name of [
     "newQuery",
     "newConnection",
@@ -155,6 +173,11 @@ function recordingContext(): { context: CommandPaletteContext; calls: string[] }
     "toggleQueryHistory",
     "toggleAiAssistant",
     "openSettings",
+    "formatSql",
+    "toggleSidebar",
+    "nextTab",
+    "prevTab",
+    "refreshData",
   ]) {
     context[name] = () => calls.push(name);
   }
@@ -174,7 +197,13 @@ test("each built-in command runs against exactly one context capability", () => 
     queryHistory: "toggleQueryHistory",
     aiAssistant: "toggleAiAssistant",
     openSettings: "openSettings",
+    formatSql: "formatSql",
+    refreshData: "refreshData",
+    toggleSidebar: "toggleSidebar",
+    nextTab: "nextTab",
+    prevTab: "prevTab",
   };
+  assert.deepEqual(Object.keys(expected).sort(), COMMAND_DEFINITIONS.map((command) => command.id).sort());
   for (const command of commandsByIds(Object.keys(expected))) {
     const { context, calls } = recordingContext();
     command.run(context);
@@ -191,8 +220,9 @@ test("every palette label, category and chrome string exists in all six locales"
     }
     for (const command of COMMAND_DEFINITIONS) {
       for (const key of [command.labelKey, command.categoryKey]) {
-        const name = key.split(".")[1];
-        assert.ok(typeof section[name] === "string" && section[name].length > 0, `${key} in locale ${locale}`);
+        const [sectionName, name] = key.split(".");
+        const value = messages[sectionName]?.[name];
+        assert.ok(typeof value === "string" && value.length > 0, `${key} in locale ${locale}`);
       }
     }
     const shortcutLabel = messages.settings?.shortcutCommandPalette;
@@ -201,6 +231,85 @@ test("every palette label, category and chrome string exists in all six locales"
       `settings.shortcutCommandPalette in locale ${locale}`,
     );
   }
+});
+
+test("with no connections the palette refuses what the toolbar disables", () => {
+  const { context, calls } = recordingContext({ hasConnections: false, hasSqlFileConnections: false });
+  const disabled = ["newQuery", "openSqlFile", "dataTransfer", "schemaDiff", "dataCompare"];
+  for (const command of commandsByIds(disabled)) {
+    assert.equal(isCommandEnabled(command, context), false, command.id);
+    assert.equal(runPaletteCommand(command, context), false, command.id);
+  }
+  assert.deepEqual(calls, [], "a disabled command must not reach the context");
+  // Actions the toolbar keeps enabled without connections stay runnable.
+  for (const command of commandsByIds(["newConnection", "driverStore", "openSettings", "aiAssistant"])) {
+    assert.equal(runPaletteCommand(command, context), true, command.id);
+  }
+  assert.deepEqual(calls, ["newConnection", "openDriverStore", "openSettings", "toggleAiAssistant"]);
+});
+
+test("Execute SQL File follows the SQL-file-capable connection rule on its own", () => {
+  const [openSqlFile, newQuery] = commandsByIds(["openSqlFile", "newQuery"]);
+  const { context } = recordingContext({ hasConnections: true, hasSqlFileConnections: false });
+  assert.equal(isCommandEnabled(openSqlFile, context), false);
+  assert.equal(isCommandEnabled(newQuery, context), true);
+});
+
+test("state-dependent registry actions are gated like their shortcuts", () => {
+  const { context, calls } = recordingContext({ canFormatSql: false, hasTabs: false, canRefreshData: false });
+  for (const command of commandsByIds(["formatSql", "nextTab", "prevTab", "refreshData"])) {
+    assert.equal(runPaletteCommand(command, context), false, command.id);
+  }
+  assert.deepEqual(calls, []);
+  assert.equal(runPaletteCommand(commandsByIds(["toggleSidebar"])[0], context), true);
+});
+
+test("palette commands that mirror a shortcut name a real registry action", () => {
+  const registry = new Set(SHORTCUT_DEFINITIONS.map((definition) => definition.id));
+  const mirrored = COMMAND_DEFINITIONS.filter((command) => command.shortcutId);
+  assert.deepEqual(
+    mirrored.map((command) => command.id),
+    ["newQuery", "newConnection", "openSettings", "formatSql", "refreshData", "toggleSidebar", "nextTab", "prevTab"],
+  );
+  for (const command of mirrored) assert.ok(registry.has(command.shortcutId!), command.id);
+});
+
+test("commandShortcutHint shows the user's binding with the settings formatter", () => {
+  const [newQuery, settings, transfer] = commandsByIds(["newQuery", "openSettings", "dataTransfer"]);
+  assert.equal(commandShortcutHint(newQuery, undefined, "MacIntel"), "Cmd+T");
+  assert.equal(commandShortcutHint(newQuery, undefined, "Win32"), "Ctrl+T");
+  assert.equal(commandShortcutHint(newQuery, { newQuery: "Mod+Shift+Q" }, "Win32"), "Ctrl+Shift+Q");
+  assert.equal(commandShortcutHint(settings, {}, "MacIntel"), "Cmd+,");
+  assert.equal(commandShortcutHint(transfer, undefined, "MacIntel"), null);
+});
+
+test("isModalDialogOpen matches open dialog/sheet/alert content but not popovers", () => {
+  const seen: string[] = [];
+  const root = (match: boolean) => ({
+    querySelector: (selector: string) => {
+      seen.push(selector);
+      return match ? ({} as Element) : null;
+    },
+  });
+  assert.equal(isModalDialogOpen(root(true)), true);
+  assert.equal(isModalDialogOpen(root(false)), false);
+  assert.equal(isModalDialogOpen(null), false);
+  const selector = seen[0];
+  assert.ok(selector.includes('[data-slot="dialog-content"][data-state="open"]'));
+  assert.ok(selector.includes('[data-slot="sheet-content"][data-state="open"]'));
+  assert.ok(selector.includes('[role="alertdialog"][data-state="open"]'));
+  assert.ok(
+    !/\[role="dialog"\]/.test(selector),
+    "popover content also has role=dialog, so the role alone must not match",
+  );
+});
+
+test("resolveCommandPaletteToggle closes an open palette and never stacks over another modal", () => {
+  assert.equal(resolveCommandPaletteToggle(false, false), "open");
+  assert.equal(resolveCommandPaletteToggle(false, true), "ignore");
+  // The open palette is itself a modal; Mod+K must still close it.
+  assert.equal(resolveCommandPaletteToggle(true, true), "close");
+  assert.equal(resolveCommandPaletteToggle(true, false), "close");
 });
 
 // ---------------------------------------------------------------------------
@@ -222,8 +331,8 @@ test("App.vue loads the palette asynchronously and toggles it on the Mod+K bindi
   );
   assert.match(
     source,
-    /isCommandPaletteShortcut\(e, shortcuts\)[\s\S]{0,200}showCommandPalette\.value = !showCommandPalette\.value/,
-    "the keydown path must toggle the palette on the binding",
+    /isCommandPaletteShortcut\(e, shortcuts\)[\s\S]{0,300}resolveCommandPaletteToggle\(showCommandPalette\.value, isModalDialogOpen\(document\)\)/,
+    "the keydown path must toggle the palette on the binding, guarded against other modals",
   );
   assert.ok(
     source.includes(
@@ -236,14 +345,10 @@ test("App.vue loads the palette asynchronously and toggles it on the Mod+K bindi
 test("App.vue routes each context capability to the same opener the toolbar uses", () => {
   const source = readSource("../../apps/desktop/src/App.vue");
   const wirings: [string, string][] = [
+    ["hasConnections", "hasConnections: () => hasConnections.value"],
+    ["hasSqlFileConnections", "hasSqlFileConnections: () => hasSqlFileConnections.value"],
     ["newQuery", "newQuery: () => void newQuery()"],
-    [
-      "newConnection",
-      `newConnection: () => {
-    connectionDialogPrefill.value = null;
-    showConnectionDialog.value = true;
-  }`,
-    ],
+    ["newConnection", "newConnection: openNewConnection"],
     ["openTransfer", "openTransfer: () => (dialogs.showTransferDialog.value = true)"],
     ["openSchemaDiff", "openSchemaDiff: () => (dialogs.showSchemaDiffDialog.value = true)"],
     ["openDataCompare", "openDataCompare: () => (dialogs.showDataCompareDialog.value = true)"],
@@ -252,12 +357,28 @@ test("App.vue routes each context capability to the same opener the toolbar uses
     ["openSqlFile", "openSqlFile: () => (dialogs.showSqlFileDialog.value = true)"],
     ["toggleQueryHistory", "toggleQueryHistory: () => (showHistory.value = !showHistory.value)"],
     ["toggleAiAssistant", "toggleAiAssistant: toggleAiPanel"],
-    ["openSettings", "openSettings: () => (showSettingsDialog.value = true)"],
+    ["openSettings", "openSettings: openSettingsDialog"],
+    ["formatSql", "formatSql: () => formatActiveSql()"],
+    ["toggleSidebar", "  toggleSidebar,\n"],
+    ["nextTab", 'nextTab: () => switchTab("next")'],
+    ["prevTab", 'prevTab: () => switchTab("prev")'],
+    ["refreshData", "refreshData: refreshActiveData"],
   ];
   for (const [name, snippet] of wirings) {
     assert.ok(source.includes(snippet), `context capability ${name} must be wired in App.vue`);
   }
-  assert.ok(/openSqlLibrary: \(\) => \{[\s\S]{0,120}setSidebarOpen\(true\)/.test(source), "must expand the sidebar first");
+  assert.ok(
+    /openSqlLibrary: \(\) => \{[\s\S]{0,120}setSidebarOpen\(true\)/.test(source),
+    "must expand the sidebar first",
+  );
+  // The keydown branches call the same shared handlers as the palette.
+  assert.match(source, /isNewConnectionShortcut\(e, shortcuts\)[\s\S]{0,120}openNewConnection\(\)/);
+  assert.match(source, /isToggleSidebarShortcut\(e, shortcuts\)[\s\S]{0,120}toggleSidebar\(\)/);
+  assert.match(source, /isRefreshDataShortcut\(e, shortcuts\)[\s\S]{0,120}refreshActiveData\(\)/);
+  assert.match(
+    source,
+    /isOpenSettingsShortcut\(e, shortcuts\)[\s\S]{0,200}if \(!isModalDialogOpen\(document\)\) openSettingsDialog\(\)/,
+  );
 });
 
 test("CommandPalette.vue wires the pure helpers, keyboard navigation and run-to-close", () => {
@@ -268,7 +389,23 @@ test("CommandPalette.vue wires the pure helpers, keyboard navigation and run-to-
   assert.match(source, /ArrowUp[\s\S]{0,200}?movePaletteSelection/, "ArrowUp must move the selection");
   assert.match(source, /"Enter"[\s\S]{0,200}?runSelected\(\)/, "Enter must run the selected command");
   assert.match(source, /open\.value = false/, "running a command must close the palette");
-  assert.match(source, /command\.run\(props\.context\)/, "commands must run against the injected context");
+  assert.match(
+    source,
+    /runPaletteCommand\(command, props\.context\)/,
+    "commands must run through the enabled-aware helper",
+  );
+  assert.match(
+    source,
+    /if \(!enabledFor\(command\)\) return;\s*open\.value = false/,
+    "a disabled row must not close or run",
+  );
+  assert.match(source, /:aria-disabled=/, "disabled rows must be marked for assistive tech");
+  assert.match(
+    source,
+    /commandShortcutHint\(command, settingsStore\.editorSettings\.shortcuts\)/,
+    "key hints use the live bindings",
+  );
+  assert.ok(!/watch\(open/.test(source), "the dead watch(open) must stay removed");
   assert.ok(source.includes("commandPalette.searchPlaceholder"), "the search input must be localized");
   assert.ok(source.includes("commandPalette.noResults"), "the empty state must be localized");
 });
