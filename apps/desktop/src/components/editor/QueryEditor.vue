@@ -35,7 +35,14 @@ import {
 } from "@/lib/sqlCompletion";
 import { buildReusableSqlCompletionResult } from "@/lib/sqlCompletionReuse";
 import { completionCacheInvalidationAffects } from "@/lib/completionCacheInvalidation";
-import { ensureSqlStatementReferences, getSqlStatementReferences, subscribeSqlReferences } from "@/lib/sqlReferences";
+import {
+  ensureSqlStatementReferences,
+  getSqlStatementReferences,
+  shouldRefreshCompletionForSettledReferences,
+  subscribeSqlReferences,
+  type SqlReferencesCompletionPass,
+  type SqlReferencesSettledEvent,
+} from "@/lib/sqlReferences";
 import {
   buildElasticsearchCompletionItemsFromContext,
   getElasticsearchCompletionContext,
@@ -89,6 +96,7 @@ import type {
   SqlCompletionItem,
   SqlCompletionObject,
   SqlCompletionReferencedTable,
+  SqlStatementReferences,
 } from "@/lib/sqlCompletion";
 import type { DatabaseType, ForeignKeyInfo, SqlTextSpan } from "@/types/database";
 
@@ -1006,6 +1014,13 @@ function unregisterTableReferenceDropListener() {
 }
 
 let completionEpoch = 0;
+// The last implicit (typing-triggered) completion pass and the references it
+// was served; a settled background reference analysis consults it to decide
+// whether to refresh the popup (see onSqlReferencesSettled).
+let referenceCompletionPass: SqlReferencesCompletionPass | null = null;
+// Set just before a reference-driven startCompletion so the pass it causes runs
+// as a plain (non-explicit) refresh instead of the debounced explicit flow.
+let referenceRefreshRequest: { position: number; docLength: number } | null = null;
 let completionDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 // Background metadata prefetch (tables/columns/objects) is debounced separately
 // from the explicit async-completion flow above. The local cache serves the
@@ -1152,23 +1167,41 @@ async function provideSqlCompletions(
   }
   const hasDatabase = props.database != null;
 
+  // A reference-settle refresh arrives through startCompletion (explicit), but
+  // only re-renders a popup the implicit gate already allowed: run it as an
+  // implicit pass with the gate skipped.
+  const refreshRequest = referenceRefreshRequest;
+  referenceRefreshRequest = null;
+  const isReferenceRefresh =
+    explicit &&
+    !!refreshRequest &&
+    refreshRequest.position === position &&
+    refreshRequest.docLength === currentState.doc.length;
+  if (isReferenceRefresh) explicit = false;
+
   const epoch = ++completionEpoch;
+  referenceCompletionPass = null;
 
   try {
-    if (!explicit && !shouldAutoOpenSqlCompletion(fullDoc, position, props.dialect)) return null;
+    if (!explicit && !isReferenceRefresh && !shouldAutoOpenSqlCompletion(fullDoc, position, props.dialect)) {
+      return null;
+    }
 
     // References come from the per-statement AST cache: exact hit serves
-    // synchronously, a statement change kicks the backend parse and serves the
-    // closest analyzed prefix (stale-while-revalidate); when the fresh analysis
-    // lands, the cache subscription retriggers this completion pass.
+    // synchronously; a statement change schedules a debounced backend parse and
+    // serves the closest analyzed prefix plus the regex fallback of the current
+    // text. When the analysis lands, onSqlReferencesSettled refreshes an open
+    // popup if the references changed.
     const referenceDialect = props.dialect ?? props.formatDialect ?? "generic";
     let statementAtCursor = "";
+    let servedReferences: SqlStatementReferences = { referencedTables: [] };
     const completionContext = getSqlCompletionContext(
       fullDoc,
       position,
       (statement) => {
         statementAtCursor = statement;
-        return getSqlStatementReferences(statement, referenceDialect);
+        servedReferences = getSqlStatementReferences(statement, referenceDialect);
+        return servedReferences;
       },
       { dialect: props.dialect },
     );
@@ -1176,6 +1209,20 @@ async function provideSqlCompletions(
     if (!hasDatabase) {
       return buildContextOnlyCompletionResult(completionContext, position);
     }
+
+    const recordImplicitPass = <T>(result: T): T => {
+      if (!explicit && statementAtCursor) {
+        referenceCompletionPass = {
+          epoch,
+          position,
+          statement: statementAtCursor,
+          dialect: referenceDialect,
+          served: servedReferences,
+          returnedResult: result != null,
+        };
+      }
+      return result;
+    };
 
     const needsAsyncData =
       completionContext.suggestTables ||
@@ -1187,14 +1234,14 @@ async function provideSqlCompletions(
       completionContext.referencedTables.length > 0;
 
     if (!needsAsyncData) {
-      return buildContextOnlyCompletionResult(completionContext, position);
+      return recordImplicitPass(buildContextOnlyCompletionResult(completionContext, position));
     }
 
     const localResult = buildLocalSqlCompletionResult(completionContext, position);
     if (localResult || !explicit) {
       scheduleCompletionMetadataRefresh(completionContext, epoch);
     }
-    if (!explicit) return localResult;
+    if (!explicit) return recordImplicitPass(localResult);
 
     // Cancel any pending debounced completion
     if (completionDebounceTimer) {
@@ -1858,11 +1905,34 @@ function handleEditorMouseDown(event: MouseEvent): boolean {
   return true;
 }
 
-// When a background reference analysis settles (statement text changed and the
-// backend AST parse just finished), re-run the completion pass so the fresh
-// table/CTE/derived references show up without waiting for the next keystroke —
-// the same retrigger contract as late-loading column metadata.
-const unsubscribeSqlReferences = subscribeSqlReferences(() => retriggerCompletionAfterMetadata(completionEpoch));
+// When a background reference analysis settles, refresh the completion popup
+// only if it changes what the latest implicit pass at this exact position was
+// served, and only for an open popup (or one the missing references kept from
+// auto-opening) — never reopen after Esc, inside strings, or after a space.
+function onSqlReferencesSettled(event: SqlReferencesSettledEvent) {
+  const pass = referenceCompletionPass;
+  const currentView = view.value;
+  if (!pass || !currentView || !currentView.hasFocus || !codeMirrorStartCompletion) return;
+  const state = currentView.state;
+  const head = state.selection.main.head;
+  let doc: string | null = null;
+  const currentDoc = () => (doc ??= state.doc.toString());
+  const refresh = shouldRefreshCompletionForSettledReferences({
+    pass,
+    settled: event,
+    currentEpoch: completionEpoch,
+    currentPosition: head,
+    popupActive: codeMirrorCompletionStatus?.(state) === "active",
+    currentStatement: () => extractSqlStatementAt(currentDoc(), head, props.dialect),
+    autoOpenAllowed: () => shouldAutoOpenSqlCompletion(currentDoc(), head, props.dialect),
+  });
+  if (!refresh) return;
+  referenceCompletionPass = null;
+  referenceRefreshRequest = { position: head, docLength: state.doc.length };
+  codeMirrorStartCompletion(currentView);
+}
+
+const unsubscribeSqlReferences = subscribeSqlReferences(onSqlReferencesSettled);
 
 onMounted(async () => {
   if (!editorRef.value) return;

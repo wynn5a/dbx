@@ -2346,6 +2346,386 @@ function detectInsertColumnListContext(beforeCursor: string): { table: string; s
   return { table: first! };
 }
 
+/**
+ * Regex reference extraction — the fallback for statements the backend AST
+ * cannot parse. Mid-typing statements at exactly the positions where column
+ * completion matters (`WHERE u.`, `JOIN o ON `, `SET `, `ORDER BY `, a trailing
+ * `AND `) are syntax errors to sqlparser, so an AST-only path resolves them to
+ * no tables. `sqlReferences.ts` uses this scanner only when the analysis fails
+ * (and to fill a cold cache miss synchronously); every statement that parses
+ * takes its references from the AST.
+ *
+ * The caller passes comment-stripped statement text; string-literal and
+ * dollar-quoted bodies are masked here so `'… from x …'` cannot register `x`.
+ */
+export function extractSqlReferencesFallback(statement: string): SqlStatementReferences {
+  const sql = maskSqlStringLiterals(statement);
+  const referencedTables = extractReferencedTables(sql);
+  for (const cte of extractCteDefinitions(sql)) {
+    const existing = referencedTables.find((rt) => rt.name.toLowerCase() === cte.name.toLowerCase());
+    if (!existing) {
+      referencedTables.push({ name: cte.name, columns: cte.columns });
+    } else if (!existing.columns) {
+      existing.columns = cte.columns;
+    }
+  }
+  for (const sq of extractSubqueryReferences(sql)) {
+    if (!referencedTables.some((rt) => rt.name.toLowerCase() === sq.name.toLowerCase() && rt.alias === sq.alias)) {
+      referencedTables.push(sq);
+    }
+  }
+  return { referencedTables };
+}
+
+// Same-length masking of `'…'` (with `''` escapes) and `$tag$…$tag$` bodies, so
+// offsets stay valid and literal text never reaches the reference regexes. An
+// unterminated literal (the cursor is inside it) masks to the end.
+function maskSqlStringLiterals(sql: string): string {
+  let out = "";
+  let i = 0;
+  while (i < sql.length) {
+    const ch = sql[i]!;
+    if (ch === "'") {
+      let j = i + 1;
+      while (j < sql.length) {
+        if (sql[j] === "'") {
+          if (sql[j + 1] === "'") {
+            j += 2;
+            continue;
+          }
+          break;
+        }
+        j += 1;
+      }
+      const closed = j < sql.length;
+      const end = closed ? j + 1 : sql.length;
+      out += `'${" ".repeat(end - i - (closed ? 2 : 1))}${closed ? "'" : ""}`;
+      i = end;
+      continue;
+    }
+    if (ch === "$" && !/[\w$]/.test(sql[i - 1] ?? "")) {
+      const tag = /^\$[A-Za-z_]*\$/.exec(sql.slice(i))?.[0];
+      if (tag) {
+        const close = sql.indexOf(tag, i + tag.length);
+        const end = close < 0 ? sql.length : close + tag.length;
+        out += " ".repeat(end - i);
+        i = end;
+        continue;
+      }
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
+function extractReferencedTables(sql: string): SqlCompletionReferencedTable[] {
+  // Keywords that should NOT be treated as table aliases
+  const ALIAS_BLACKLIST = new Set([
+    "where",
+    "group",
+    "order",
+    "having",
+    "limit",
+    "offset",
+    "union",
+    "intersect",
+    "except",
+    "and",
+    "or",
+    "not",
+    "is",
+    "like",
+    "in",
+    "between",
+    "exists",
+    "select",
+    "from",
+    "join",
+    "left",
+    "right",
+    "inner",
+    "outer",
+    "cross",
+    "apply",
+    "full",
+    "natural",
+    "on",
+    "as",
+    "set",
+    "insert",
+    "update",
+    "delete",
+    "create",
+    "drop",
+    "alter",
+    "into",
+    "values",
+    "returning",
+    "for",
+    "window",
+    "partition",
+    "over",
+    "with",
+    "recursive",
+    "lateral",
+    "when",
+    "then",
+    "else",
+    "end",
+    "case",
+    "cast",
+    "coalesce",
+    "null",
+    "true",
+    "false",
+    "distinct",
+    "all",
+    "primary",
+    "key",
+    "foreign",
+    "references",
+    "constraint",
+    "default",
+    "check",
+    "unique",
+    "index",
+    "table",
+    "view",
+    "database",
+    "schema",
+    "describe",
+    "explain",
+    "analyze",
+    "pivot",
+    "unpivot",
+    "asof",
+    "positional",
+    "anti",
+    "semi",
+    "sample",
+    "filter",
+    "qualify",
+    "offset",
+    "fetch",
+    "next",
+    "rows",
+    "only",
+    "preceding",
+    "following",
+    "current",
+    "unbounded",
+    "asc",
+    "desc",
+    "nulls",
+    "first",
+    "last",
+    "ignore",
+    "respect",
+  ]);
+
+  const pattern =
+    /\b(?:from|join|update|into|apply)\s+((?:"[^"]+"|`[^`]+`|[^\s,;()]+)(?:\.(?:"[^"]+"|`[^`]+`|[^\s,;()]+))?)(?:\s+(?:as\s+)?([A-Za-z_][\w$]*))?/gi;
+  const referenced: SqlCompletionReferencedTable[] = [];
+  for (const match of sql.matchAll(pattern)) {
+    const rawName = match[1];
+    const alias = match[2];
+    // Filter out SQL keywords that accidentally matched as aliases
+    const cleanAlias = alias && !ALIAS_BLACKLIST.has(alias.toLowerCase()) ? alias : undefined;
+    if (isElasticsearchStyleIndexName(rawName)) {
+      referenced.push({ name: unquoteIdentifier(rawName), alias: cleanAlias });
+      continue;
+    }
+    const [first, second] = splitQualifiedName(rawName);
+    if (!first) continue;
+    const table = second ? { schema: first, name: second, alias: cleanAlias } : { name: first, alias: cleanAlias };
+    referenced.push(table);
+  }
+  return referenced;
+}
+
+function isElasticsearchStyleIndexName(name: string | undefined): name is string {
+  if (!name) return false;
+  if ((name.startsWith('"') && name.endsWith('"')) || (name.startsWith("`") && name.endsWith("`"))) return false;
+  return /[-*]/.test(name);
+}
+
+function findMatchingParen(sql: string, openPos: number): number {
+  if (sql[openPos] !== "(") return -1;
+  let depth = 1;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  for (let i = openPos + 1; i < sql.length; i++) {
+    const ch = sql[i];
+    if (ch === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote;
+      continue;
+    }
+    if (ch === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote;
+      continue;
+    }
+    if (inSingleQuote || inDoubleQuote) continue;
+    if (ch === "(") depth++;
+    else if (ch === ")") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function extractSelectColumnNames(sql: string): string[] {
+  const selectList = extractSelectList(sql);
+  if (!selectList) return [];
+  const names: string[] = [];
+  for (const expression of splitTopLevel(selectList, ",")) {
+    const trimmed = expression.trim();
+    if (trimmed === "*") continue;
+    if (/^[A-Za-z_][\w$]*$/.test(trimmed)) {
+      names.push(trimmed);
+      continue;
+    }
+    const alias = /\bas\s+([A-Za-z_][\w$]*)$/i.exec(trimmed)?.[1];
+    if (alias) {
+      names.push(alias);
+      continue;
+    }
+    const lastId = /([A-Za-z_][\w$]*)$/.exec(trimmed)?.[1];
+    if (lastId) names.push(lastId);
+  }
+  return names;
+}
+
+function extractCteDefinitions(sql: string): Array<{ name: string; columns: string[] }> {
+  const ctes: Array<{ name: string; columns: string[] }> = [];
+  let lower = sql.toLowerCase();
+  const withMatch = /\bwith\b/.exec(lower);
+  if (!withMatch) return ctes;
+
+  let pos = withMatch.index + "with".length;
+  lower = lower.slice(pos);
+  const recursiveMatch = /^\s+recursive\b/.exec(lower);
+  if (recursiveMatch) {
+    pos += recursiveMatch[0].length;
+  }
+
+  while (pos < sql.length) {
+    while (pos < sql.length && /\s/.test(sql[pos])) pos++;
+    if (pos >= sql.length) break;
+    if (sql[pos] === "," || sql[pos] === ";") {
+      pos++;
+      continue;
+    }
+
+    const remaining = sql.slice(pos);
+    const nameMatch = /^([A-Za-z_][\w$]*)/.exec(remaining);
+    if (!nameMatch) break;
+    const cteName = nameMatch[1];
+    pos += nameMatch[0].length;
+
+    while (pos < sql.length && /\s/.test(sql[pos])) pos++;
+
+    let columns: string[] = [];
+    if (pos < sql.length && sql[pos] === "(") {
+      const colListEnd = findMatchingParen(sql, pos);
+      if (colListEnd !== -1) {
+        const colList = sql.slice(pos + 1, colListEnd).trim();
+        if (!/\bselect\b/i.test(colList)) {
+          columns = colList
+            .split(",")
+            .map((c) => c.trim())
+            .filter(Boolean);
+          pos = colListEnd + 1;
+          while (pos < sql.length && /\s/.test(sql[pos])) pos++;
+        }
+      }
+    }
+
+    while (pos < sql.length && /\s/.test(sql[pos])) pos++;
+    if (/\bas\b/i.test(sql.slice(pos, pos + 5))) {
+      pos += 2;
+      while (pos < sql.length && /\s/.test(sql[pos])) pos++;
+    }
+
+    if (pos >= sql.length || sql[pos] !== "(") break;
+    const bodyEnd = findMatchingParen(sql, pos);
+    if (bodyEnd === -1) break;
+
+    if (columns.length === 0) {
+      const body = sql.slice(pos + 1, bodyEnd);
+      columns = extractSelectColumnNames(body);
+    }
+
+    ctes.push({ name: cteName, columns });
+    pos = bodyEnd + 1;
+  }
+
+  return ctes;
+}
+
+function extractSubqueryReferences(sql: string): SqlCompletionReferencedTable[] {
+  const refs: SqlCompletionReferencedTable[] = [];
+  const pattern = /\b(?:from|join)\s*\(/gi;
+
+  for (const match of sql.matchAll(pattern)) {
+    const openParen = match.index! + match[0].length - 1;
+    const closeParen = findMatchingParen(sql, openParen);
+    if (closeParen === -1) continue;
+
+    // Extract alias after closing paren
+    let pos = closeParen + 1;
+    while (pos < sql.length && /\s/.test(sql[pos])) pos++;
+    if (/\bas\b/i.test(sql.slice(pos, pos + 4))) {
+      pos += 2;
+      while (pos < sql.length && /\s/.test(sql[pos])) pos++;
+    }
+    const aliasMatch = /^([A-Za-z_][\w$]*)/.exec(sql.slice(pos));
+    if (!aliasMatch) continue;
+    const alias = aliasMatch[1];
+    if (ALIAS_BLACKLIST_FOR_REF.has(alias.toLowerCase())) continue;
+
+    // Extract SELECT columns from subquery body
+    const body = sql.slice(openParen + 1, closeParen);
+    const columns = extractSelectColumnNames(body);
+
+    refs.push({ name: alias, alias, columns });
+  }
+
+  return refs;
+}
+
+const ALIAS_BLACKLIST_FOR_REF = new Set([
+  "where",
+  "group",
+  "order",
+  "having",
+  "limit",
+  "offset",
+  "union",
+  "intersect",
+  "except",
+  "and",
+  "or",
+  "not",
+  "is",
+  "like",
+  "in",
+  "between",
+  "exists",
+  "select",
+  "on",
+  "set",
+  "left",
+  "right",
+  "inner",
+  "outer",
+  "cross",
+  "full",
+  "natural",
+  "join",
+]);
+
 function extractSelectAliases(sql: string): string[] {
   const selectList = extractSelectList(sql);
   if (!selectList) return [];

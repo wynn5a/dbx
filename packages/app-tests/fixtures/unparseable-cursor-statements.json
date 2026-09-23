@@ -1,0 +1,104 @@
+{
+  "_comment": "Cursor-time statements that analyze_sql_references cannot parse in any listed dialect (pinned by the dbx-core test cursor_time_statements_do_not_parse). packages/app-tests/sqlReferences.test.ts checks completion still resolves `tables` for each through the parse-failure fallback. `cursor` (optional) is the text before the cursor; default is the whole statement.",
+  "dialects": [
+    "postgres",
+    "mysql",
+    "generic"
+  ],
+  "cases": [
+    {
+      "sql": "SELECT * FROM users u WHERE u.",
+      "qualifier": "u",
+      "tables": [
+        [
+          "users",
+          "u"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT u. FROM users u",
+      "cursor": "SELECT u.",
+      "qualifier": "u",
+      "tables": [
+        [
+          "users",
+          "u"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM users u WHERE ",
+      "tables": [
+        [
+          "users",
+          "u"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM users u JOIN orders o ON ",
+      "tables": [
+        [
+          "users",
+          "u"
+        ],
+        [
+          "orders",
+          "o"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM users u JOIN orders o ON o.",
+      "qualifier": "o",
+      "tables": [
+        [
+          "users",
+          "u"
+        ],
+        [
+          "orders",
+          "o"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM users u ORDER BY ",
+      "tables": [
+        [
+          "users",
+          "u"
+        ]
+      ]
+    },
+    {
+      "sql": "SELECT * FROM users u WHERE u.name = 'x' AND ",
+      "tables": [
+        [
+          "users",
+          "u"
+        ]
+      ]
+    },
+    {
+      "sql": "UPDATE users SET  WHERE id = 1",
+      "cursor": "UPDATE users SET ",
+      "tables": [
+        [
+          "users",
+          null
+        ]
+      ]
+    },
+    {
+      "sql": "UPDATE users SET ",
+      "tables": [
+        [
+          "users",
+          null
+        ]
+      ]
+    }
+  ]
+}

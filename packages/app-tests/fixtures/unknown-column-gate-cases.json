@@ -766,6 +766,441 @@
         "derived_tables": [],
         "opaque_sources": []
       }
+    },
+    {
+      "name": "postgres UPDATE SET/WHERE on known columns",
+      "dialect": "postgres",
+      "sql": "UPDATE users SET name = 'x' WHERE id = 1",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 8,
+              "end_line": 1,
+              "end_column": 13
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "name",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 18,
+              "end_line": 1,
+              "end_column": 22
+            }
+          },
+          {
+            "name": "id",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 35,
+              "end_line": 1,
+              "end_column": 37
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "control: postgres UPDATE SET-target typo is flagged",
+      "dialect": "postgres",
+      "sql": "UPDATE users SET nme = 'x' WHERE id = 1",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [
+        "nme"
+      ],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 8,
+              "end_line": 1,
+              "end_column": 13
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "nme",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 18,
+              "end_line": 1,
+              "end_column": 21
+            }
+          },
+          {
+            "name": "id",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 34,
+              "end_line": 1,
+              "end_column": 36
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "control: postgres DELETE WHERE typo is flagged",
+      "dialect": "postgres",
+      "sql": "DELETE FROM users WHERE nme = 'x'",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [
+        "nme"
+      ],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 13,
+              "end_line": 1,
+              "end_column": 18
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "nme",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 25,
+              "end_line": 1,
+              "end_column": 28
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "postgres DELETE on known columns",
+      "dialect": "postgres",
+      "sql": "DELETE FROM users WHERE id = 1",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 13,
+              "end_line": 1,
+              "end_column": 18
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "id",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 25,
+              "end_line": 1,
+              "end_column": 27
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "postgres UPDATE with system column in WHERE",
+      "dialect": "postgres",
+      "sql": "UPDATE users SET name = 'x' WHERE ctid = '(0,1)'",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 8,
+              "end_line": 1,
+              "end_column": 13
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "name",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 18,
+              "end_line": 1,
+              "end_column": 22
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "oracle DELETE with ROWNUM",
+      "dialect": "oracle",
+      "sql": "DELETE FROM users WHERE ROWNUM < 10",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 13,
+              "end_line": 1,
+              "end_column": 18
+            }
+          }
+        ],
+        "columns": [],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "sqlserver UPDATE with DATEDIFF date part",
+      "dialect": "sqlserver",
+      "sql": "UPDATE orders SET total = 0 WHERE DATEDIFF(day, created_at, GETDATE()) > 30",
+      "schema": {
+        "orders": [
+          "id",
+          "created_at",
+          "total"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "orders",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 8,
+              "end_line": 1,
+              "end_column": 14
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "total",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 19,
+              "end_line": 1,
+              "end_column": 24
+            }
+          },
+          {
+            "name": "created_at",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 49,
+              "end_line": 1,
+              "end_column": 59
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
+    },
+    {
+      "name": "postgres UPDATE … FROM second table: unqualified refs stay unflagged",
+      "dialect": "postgres",
+      "sql": "UPDATE users SET name = label FROM accounts WHERE users.id = accounts.id",
+      "schema": {
+        "users": [
+          "id",
+          "name",
+          "tags",
+          "data"
+        ],
+        "accounts": [
+          "id",
+          "label"
+        ]
+      },
+      "expectedUnknown": [],
+      "analysis": {
+        "tables": [
+          {
+            "name": "users",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 8,
+              "end_line": 1,
+              "end_column": 13
+            }
+          },
+          {
+            "name": "accounts",
+            "schema": null,
+            "alias": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 36,
+              "end_line": 1,
+              "end_column": 44
+            }
+          }
+        ],
+        "columns": [
+          {
+            "name": "name",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 18,
+              "end_line": 1,
+              "end_column": 22
+            }
+          },
+          {
+            "name": "label",
+            "qualifier": null,
+            "span": {
+              "start_line": 1,
+              "start_column": 25,
+              "end_line": 1,
+              "end_column": 30
+            }
+          },
+          {
+            "name": "id",
+            "qualifier": "users",
+            "span": {
+              "start_line": 1,
+              "start_column": 57,
+              "end_line": 1,
+              "end_column": 59
+            }
+          },
+          {
+            "name": "id",
+            "qualifier": "accounts",
+            "span": {
+              "start_line": 1,
+              "start_column": 71,
+              "end_line": 1,
+              "end_column": 73
+            }
+          }
+        ],
+        "select_aliases": [],
+        "alias_columns": [],
+        "cte_definitions": [],
+        "derived_tables": [],
+        "opaque_sources": []
+      }
     }
   ]
 }

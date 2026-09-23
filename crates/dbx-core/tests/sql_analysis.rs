@@ -288,3 +288,54 @@ fn date_part_keywords_and_pseudo_columns_are_not_column_references() {
     // Pseudo-columns are per dialect: `level` is an ordinary column on PG.
     assert_eq!(names("SELECT level FROM users", "postgres"), vec!["level"]);
 }
+
+// Completion must not rely on the AST alone: these mid-typing statements are
+// exactly where column/alias/JOIN completion matters, and none of them parse.
+// The frontend falls back to a regex scan for them (lib/sqlReferences.ts);
+// packages/app-tests/sqlReferences.test.ts runs the same fixture through it.
+#[test]
+fn cursor_time_statements_do_not_parse() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../packages/app-tests/fixtures/unparseable-cursor-statements.json");
+    let fixture: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("read fixture")).expect("parse fixture");
+    let dialects: Vec<&str> =
+        fixture["dialects"].as_array().expect("dialects").iter().map(|d| d.as_str().expect("dialect")).collect();
+    for case in fixture["cases"].as_array().expect("cases") {
+        let sql = case["sql"].as_str().expect("sql");
+        for dialect in &dialects {
+            assert!(
+                analyze_sql_references(sql, Some(dialect)).is_err(),
+                "{dialect}: {sql:?} now parses — drop it from the fixture or re-check the fallback"
+            );
+        }
+    }
+}
+
+// Cost of one background `analyze_sql_references` call (parse + JSON encode,
+// the IPC payload) on a large statement — the per-pause cost of the debounced
+// completion parse (lib/sqlReferences.ts). Manual measurement:
+// `cargo test -p dbx-core --release --test sql_analysis large_statement_analysis_cost -- --ignored --nocapture`
+#[test]
+#[ignore]
+fn large_statement_analysis_cost() {
+    let mut sql = String::from("SELECT ");
+    sql.push_str(&(0..400).map(|i| format!("t{}.col_{i} AS c{i}", i % 20)).collect::<Vec<_>>().join(", "));
+    sql.push_str(" FROM base t0");
+    for i in 1..20 {
+        sql.push_str(&format!(" LEFT JOIN table_{i} t{i} ON t{i}.id = t{}.ref_{i} AND t{i}.kind = 'k{i}'", i - 1));
+    }
+    sql.push_str(" WHERE ");
+    sql.push_str(&(0..200).map(|i| format!("t{}.col_{i} > {i}", i % 20)).collect::<Vec<_>>().join(" AND "));
+    let runs = 50;
+    let mut samples = Vec::with_capacity(runs);
+    for _ in 0..runs {
+        let started = std::time::Instant::now();
+        let analysis = analyze_sql_references(&sql, Some("postgres")).unwrap();
+        let payload = serde_json::to_string(&analysis).unwrap();
+        std::hint::black_box(payload);
+        samples.push(started.elapsed());
+    }
+    samples.sort();
+    println!("statement {} chars: median {:?}, p90 {:?}", sql.len(), samples[runs / 2], samples[runs * 9 / 10]);
+}
