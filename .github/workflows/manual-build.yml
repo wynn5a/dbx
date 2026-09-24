@@ -1,10 +1,17 @@
 name: Manual Build
 
 # Build release-mode installers on demand from any branch, without creating a
-# GitHub release. Installers are uploaded as workflow artifacts (Actions run
+# GitHub release. Pushes to app-only also build (all platforms), since
+# workflow_dispatch is only offered once this file exists on the default branch. Installers are uploaded as workflow artifacts (Actions run
 # page -> Artifacts). Run it from the Actions tab or:
 #   gh workflow run manual-build.yml --ref <branch> -f platforms=macos-arm64
 on:
+  push:
+    branches: [app-only]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'perf/**'
   workflow_dispatch:
     inputs:
       platforms:
@@ -22,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: manual-build-${{ github.ref }}-${{ inputs.platforms }}
+  group: manual-build-${{ github.ref }}-${{ inputs.platforms || 'all' }}
   cancel-in-progress: true
 
 jobs:
@@ -38,7 +45,7 @@ jobs:
       - name: Select platforms
         id: select
         env:
-          PLATFORMS: ${{ inputs.platforms }}
+          PLATFORMS: ${{ inputs.platforms || 'all' }}
         run: |
           # Runners + targets mirror release.yml (see the comments there,
           # notably the windows-2022 pin for DuckDB's bundled fmt).
