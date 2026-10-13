@@ -665,24 +665,39 @@ test("canvas renderer: pinned cells keep their x across scroll positions; unpinn
 
 test("DataGrid renders pinned columns as a sticky prefix with opaque backgrounds", () => {
   // One combined render list; the before-spacer renders inline before the
-  // first unpinned column.
+  // window's first column. Keying it to the first unpinned column dropped the
+  // spacer once that column scrolled out of the window, shifting the header
+  // (and DOM rows) left of the canvas body.
   assert.match(DATA_GRID_SOURCE, /renderedGridColumnsWithPinned/);
-  assert.match(DATA_GRID_SOURCE, /v-if="col\.visibleColIdx === pinnedVisibleColumnCount"/);
+  assert.match(DATA_GRID_SOURCE, /v-if="col\.visibleColIdx === horizontalColumnWindow\.start"/);
+  assert.doesNotMatch(DATA_GRID_SOURCE, /v-if="col\.visibleColIdx === pinnedVisibleColumnCount"/);
   assert.match(DATA_GRID_SOURCE, /'sticky z-10 data-grid-pinned-cell': isPinnedGridColumn\(col\)/);
   assert.match(DATA_GRID_SOURCE, /'sticky z-10 data-grid-pinned-header': isPinnedGridColumn\(col\)/);
   assert.match(DATA_GRID_SOURCE, /data-grid-pinned-header-active/);
   // Sticky left comes from content offsets only — no scrollLeft term.
-  assert.match(DATA_GRID_SOURCE, /function pinnedColumnStickyLeft\(visibleColIdx: number\): number \{\n  return columnContentOffsetLeft\(visibleColIdx\);\n\}/);
+  assert.match(
+    DATA_GRID_SOURCE,
+    /function pinnedColumnStickyLeft\(visibleColIdx: number\): number \{\n  return columnContentOffsetLeft\(visibleColIdx\);\n\}/,
+  );
   // Scoped CSS keeps pinned cells opaque and layers translucent tints on top.
   assert.match(DATA_GRID_SOURCE, /\.data-grid-pinned-header \{\n  background-color: var\(--ds-bg-elevated\);/);
-  assert.match(DATA_GRID_SOURCE, /\.data-grid-pinned-cell \{\n  background-color: var\(--background\);\n  background-image: linear-gradient/);
+  assert.match(
+    DATA_GRID_SOURCE,
+    /\.data-grid-pinned-cell \{\n  background-color: var\(--background\);\n  background-image: linear-gradient/,
+  );
 });
 
 test("DataGrid wires the header drag and applies reorder + width permutation", () => {
   assert.match(DATA_GRID_SOURCE, /@mousedown="onColumnDragStart\(col\.visibleColIdx, \$event\)"/);
   assert.match(DATA_GRID_SOURCE, /columnDropTargetAtClientX\(\{/);
-  assert.match(DATA_GRID_SOURCE, /function applyColumnReorder\(fromPos: number, targetPos: number, placeBefore: boolean\)/);
-  assert.match(DATA_GRID_SOURCE, /applyWidthPermutation\(permutationFromOrders\(before, visibleColumnIndexes\.value\)\)/);
+  assert.match(
+    DATA_GRID_SOURCE,
+    /function applyColumnReorder\(fromPos: number, targetPos: number, placeBefore: boolean\)/,
+  );
+  assert.match(
+    DATA_GRID_SOURCE,
+    /applyWidthPermutation\(permutationFromOrders\(before, visibleColumnIndexes\.value\)\)/,
+  );
   assert.match(DATA_GRID_SOURCE, /columnDropIndicatorFor\(col\) === 'before'/);
   assert.match(DATA_GRID_SOURCE, /columnDropIndicatorFor\(col\) === 'after'/);
   // A completed drag swallows the trailing click (no accidental column select).
@@ -692,9 +707,15 @@ test("DataGrid wires the header drag and applies reorder + width permutation", (
 });
 
 test("DataGrid exposes pin/unpin via header context menu and compact header dropdown", () => {
-  assert.match(DATA_GRID_SOURCE, /isContextHeaderColumnPinned\.value \? t\("grid\.unpinColumn"\) : t\("grid\.pinColumn"\)/);
+  assert.match(
+    DATA_GRID_SOURCE,
+    /isContextHeaderColumnPinned\.value \? t\("grid\.unpinColumn"\) : t\("grid\.pinColumn"\)/,
+  );
   assert.match(DATA_GRID_SOURCE, /action: toggleContextHeaderPin/);
-  assert.match(DATA_GRID_SOURCE, /isColumnNamePinned\(col\.name\) \? t\("grid\.unpinColumn"\) : t\("grid\.pinColumn"\)/);
+  assert.match(
+    DATA_GRID_SOURCE,
+    /isColumnNamePinned\(col\.name\) \? t\("grid\.unpinColumn"\) : t\("grid\.pinColumn"\)/,
+  );
   assert.match(DATA_GRID_SOURCE, /@select\.prevent="toggleColumnPinWithWidths\(col\.actualColIdx\)"/);
   // Pinning keeps at least one unpinned column behind — menus use the same
   // visible-only guard the pin action applies (hidden pinned names don't count).
@@ -718,7 +739,10 @@ test("canvas renderer source keeps the two-pass pinned overlay", () => {
   assert.match(RENDERER_SOURCE, /Pass 1: horizontally scrolling \(unpinned\) columns/);
   assert.match(RENDERER_SOURCE, /Pass 2: pinned overlay/);
   assert.match(RENDERER_SOURCE, /const pinnedClipX = rowNumberWidth \+ \(offsets\[pinnedCount\] \?\? 0\);/);
-  assert.match(RENDERER_SOURCE, /const firstCol = Math\.max\(pinnedCount, firstVisibleColumn\(offsets, contentStart\)\);/);
+  assert.match(
+    RENDERER_SOURCE,
+    /const firstCol = Math\.max\(pinnedCount, firstVisibleColumn\(offsets, contentStart\)\);/,
+  );
 });
 
 test("closing a tab clears its column layouts next to the pending snapshots", () => {
@@ -726,7 +750,10 @@ test("closing a tab clears its column layouts next to the pending snapshots", ()
   const layoutCalls = QUERY_STORE_SOURCE.match(/clearDataGridColumnLayoutsForTab\(/g)?.length ?? 0;
   // One import line + one call per pending-snapshot call site.
   assert.equal(layoutCalls, snapshotCalls);
-  assert.match(QUERY_STORE_SOURCE, /clearDataGridPendingSnapshotsForTab\(id\);\n    clearDataGridColumnLayoutsForTab\(id\);/);
+  assert.match(
+    QUERY_STORE_SOURCE,
+    /clearDataGridPendingSnapshotsForTab\(id\);\n    clearDataGridColumnLayoutsForTab\(id\);/,
+  );
 });
 
 test("pin/unpin copy exists in all six locales", () => {

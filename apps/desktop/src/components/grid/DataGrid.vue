@@ -1939,7 +1939,9 @@ const renderedPinnedColumns = computed<RenderedGridColumn[]>(() => {
 /**
  * Header/body render list: the sticky pinned prefix first, then the
  * horizontally virtualized window. The before-spacer is rendered inline right
- * before the first unpinned column so flow positions line up.
+ * before the window's first column (`horizontalColumnWindow.start`, not the
+ * first unpinned column — that one leaves the window once scrolled past) so
+ * flow positions line up.
  */
 const renderedGridColumnsWithPinned = computed<RenderedGridColumn[]>(() => [
   ...renderedPinnedColumns.value,
@@ -3876,12 +3878,25 @@ function canvasScrollerElement(): HTMLElement | null {
   return null;
 }
 
+function applyCanvasOverlaySize() {
+  const overlay = canvasOverlayRef.value;
+  if (!overlay) return;
+  const width = `${canvasViewportWidth.value}px`;
+  const height = `${canvasViewportHeight.value}px`;
+  if (overlay.style.width !== width) overlay.style.width = width;
+  if (overlay.style.height !== height) {
+    overlay.style.height = height;
+    overlay.style.marginTop = `-${height}`;
+  }
+}
+
 function syncCanvasViewport() {
   if (!dataGridIsActive) return;
   const scroller = canvasScrollerElement();
   if (!scroller) return;
   canvasViewportWidth.value = scroller.clientWidth;
   canvasViewportHeight.value = scroller.clientHeight;
+  applyCanvasOverlaySize();
   canvasScrollTop.value = scroller.scrollTop;
   updateGridScrollbarGutter(scroller);
   updateGridHorizontalViewport(scroller);
@@ -4005,6 +4020,7 @@ function onCanvasScroll(event: Event) {
   if (canvasScrollTop.value !== scrollTop) canvasScrollTop.value = scrollTop;
   if (canvasViewportWidth.value !== viewportWidth) canvasViewportWidth.value = viewportWidth;
   if (canvasViewportHeight.value !== viewportHeight) canvasViewportHeight.value = viewportHeight;
+  applyCanvasOverlaySize();
   if (gridHorizontalScrollLeft.value !== scrollLeft || gridViewportWidth.value !== viewportWidth) {
     updateGridHorizontalViewport(scroller);
   }
@@ -7303,7 +7319,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                   </div>
                   <template v-for="col in renderedGridColumnsWithPinned" :key="`${col.name}-${col.actualColIdx}`">
                     <div
-                      v-if="col.visibleColIdx === pinnedVisibleColumnCount"
+                      v-if="col.visibleColIdx === horizontalColumnWindow.start"
                       class="shrink-0"
                       :style="{ width: `${horizontalColumnWindow.beforeWidth}px` }"
                     />
@@ -7843,10 +7859,12 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                 @wheel="onCanvasWheel"
               >
                 <div class="relative" :style="{ width: `${totalWidth}px`, height: `${canvasContentHeight}px` }">
+                  <!-- Canvas and overlay viewport sizes are applied imperatively
+                       (drawCanvasDataGrid / applyCanvasOverlaySize): binding them
+                       here re-rendered the whole grid on every resize frame. -->
                   <canvas
                     ref="canvasRef"
                     class="canvas-grid-surface sticky left-0 top-0 z-0 block text-xs font-mono font-normal"
-                    :style="{ width: `${canvasViewportWidth}px`, height: `${canvasViewportHeight}px` }"
                     @mousemove="onCanvasMouseMove"
                     @mouseleave="onCanvasMouseLeave"
                     @mousedown="onCanvasMouseDown"
@@ -7854,15 +7872,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     @contextmenu="onCanvasContext"
                     @dblclick="onCanvasDblClick"
                   />
-                  <div
-                    ref="canvasOverlayRef"
-                    class="canvas-grid-overlay sticky left-0 top-0 z-10 overflow-hidden"
-                    :style="{
-                      width: `${canvasViewportWidth}px`,
-                      height: `${canvasViewportHeight}px`,
-                      marginTop: `-${canvasViewportHeight}px`,
-                    }"
-                  >
+                  <div ref="canvasOverlayRef" class="canvas-grid-overlay sticky left-0 top-0 z-10 overflow-hidden">
                     <div
                       v-if="canvasEditingCell"
                       class="absolute pointer-events-auto z-20"
@@ -8002,7 +8012,7 @@ const gridContextMenuItems = computed<ContextMenuItem[]>(() => {
                     </div>
                     <template v-for="col in renderedGridColumnsWithPinned" :key="col.actualColIdx">
                       <div
-                        v-if="col.visibleColIdx === pinnedVisibleColumnCount"
+                        v-if="col.visibleColIdx === horizontalColumnWindow.start"
                         class="shrink-0"
                         :style="{ width: `${horizontalColumnWindow.beforeWidth}px` }"
                       />
