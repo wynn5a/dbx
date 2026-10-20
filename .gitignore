@@ -19,6 +19,11 @@ plugins/jdbc/lib/*.jar
 plugins/jdbc/dist/
 src-tauri/*.dylib
 
+# grid-bench artifacts (sources in perf/grid-bench are tracked)
+perf/grid-bench/shots/
+perf/grid-bench/*.cpuprofile
+perf/grid-bench/results.json
+
 # OS files
 .DS_Store
 Thumbs.db
