@@ -226,6 +226,8 @@ const CANVAS_OPS = [
   ["scrollVertical", "window.__bench.scrollVertical()"],
   ["scrollHorizontal", "window.__bench.scrollHorizontal()"],
   ["searchNarrow", "window.__bench.search()"],
+  ["searchWarmPrefix", "window.__bench.searchWarmPrefix()"],
+  ["searchWarmFull", "window.__bench.searchWarmFull()"],
   ["clearSearch", "window.__bench.clearSearch()"],
   ["searchBroad", "window.__bench.searchBroad()"],
   ["clearSearch2", "window.__bench.clearSearch()"],
@@ -237,6 +239,8 @@ const CANVAS_OPS = [
 const DOM_OPS = [
   ["scrollVertical", "window.__bench.scrollVertical()"],
   ["searchNarrow", "window.__bench.search()"],
+  ["searchWarmPrefix", "window.__bench.searchWarmPrefix()"],
+  ["searchWarmFull", "window.__bench.searchWarmFull()"],
   ["clearSearch", "window.__bench.clearSearch()"],
   ["searchBroad", "window.__bench.searchBroad()"],
   ["clearSearch2", "window.__bench.clearSearch()"],

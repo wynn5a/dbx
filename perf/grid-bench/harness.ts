@@ -456,6 +456,12 @@ const firstFrame = await firstFrameMs();
   scrollVertical: () => scrollVertical(2000),
   scrollHorizontal: () => scrollHorizontal(1200),
   search: () => search("user-000042"),
+  // Hot-typing path: extends the current query, so the scan re-checks only the
+  // previous matches (display strings already materialized).
+  searchWarmPrefix: () => search("user-0000421"),
+  // Second, different word without clearing: full rescan over warm display
+  // strings — the per-keystroke floor once the first search has run.
+  searchWarmFull: () => search("user-0004"),
   // ~1% of rows per name column (values 000400-000499) — a real subset.
   searchBroad: () => search("user-0004"),
   clearSearch,
