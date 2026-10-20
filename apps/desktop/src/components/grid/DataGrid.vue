@@ -2549,10 +2549,21 @@ function canEditCellItem(item: RowItem | undefined, columnIndex: number): boolea
   return true;
 }
 
+// Pre-indexed case-insensitive lookup for table meta columns, rebuilt only when tableMeta changes.
+// Keeps the first match per lowercased name to stay equivalent to the previous Array.find semantics.
+const tableColumnByNameLower = computed(() => {
+  const map = new Map<string, ColumnInfo>();
+  for (const column of props.tableMeta?.columns ?? []) {
+    const key = column.name.toLowerCase();
+    if (!map.has(key)) map.set(key, column);
+  }
+  return map;
+});
+
 function tableColumnForGridColumn(columnIndex: number): ColumnInfo | undefined {
   const columnName = props.sourceColumns?.[columnIndex] ?? props.result.columns[columnIndex];
   if (!columnName) return undefined;
-  return props.tableMeta?.columns.find((column) => column.name.toLowerCase() === columnName.toLowerCase());
+  return tableColumnByNameLower.value.get(columnName.toLowerCase());
 }
 
 function coerceDetailCellValue(value: string, oldValue: CellValue | undefined, columnIndex: number): CellValue {
