@@ -2646,24 +2646,49 @@ function formatCellLowerCached(value: CellValue, columnIndex: number): string {
 
 // When the search query extends the previous one over the same base row set,
 // every match is a subset of the previous matches — rescan only those instead
-// of the full table.
+// of the full table. Kept until G4 materializes per-row display strings:
+// without it every keystroke reformats the whole table at 100k rows.
 let searchScanCache: { q: string; base: readonly number[]; matched: number[] } | null = null;
+
+// Hit columns for every row returned by the scan above, keyed by source row
+// index. The scan is the only full-formatting pass over the table, so this
+// lets searchMatches map display rows to hit columns without re-running the
+// format chain. Rebuilt on every scan — a prefix-extension hit rescans only
+// the candidate subset, which is exactly the set the new match list can draw
+// from. Columns reflect raw source data; edited rows are matched against
+// their edited data separately by searchRowCache.
+let searchScanColumns: Map<number, readonly number[]> | null = null;
 
 const sortedRows = computed(() => {
   const indices = localFilteredRows.value;
   const q = deferredClientSearchText.value;
   if (!q) {
     searchScanCache = null;
+    searchScanColumns = null;
     return indices;
   }
   const rows = props.result.rows;
   const cache = searchScanCache;
   const candidates = cache && cache.base === indices && q.startsWith(cache.q) ? cache.matched : indices;
-  const matched = candidates.filter((sourceIndex) => {
+  const matched: number[] = [];
+  const columnsByRow = new Map<number, readonly number[]>();
+  for (const sourceIndex of candidates) {
     const data = rows[sourceIndex];
-    return data.some((cell, columnIndex) => cell !== null && formatCellLowerCached(cell, columnIndex).includes(q));
-  });
+    // Collect every hit column instead of stopping at the first one: this is
+    // the same formatting work the old second pass (searchMatches) did per
+    // display row, now folded into this single pass.
+    const hits: number[] = [];
+    for (let c = 0; c < data.length; c++) {
+      const cell = data[c];
+      if (cell !== null && formatCellLowerCached(cell, c).includes(q)) hits.push(c);
+    }
+    if (hits.length > 0) {
+      matched.push(sourceIndex);
+      columnsByRow.set(sourceIndex, hits);
+    }
+  }
   searchScanCache = { q, base: indices, matched };
+  searchScanColumns = columnsByRow;
   return matched;
 });
 
@@ -2784,8 +2809,10 @@ interface SearchMatch {
   col: number;
 }
 
-// Search scans raw row data (via the item cache) one row at a time; a cell
-// commit only rescans the row whose content changed instead of the whole grid.
+// Incremental per-row search, now only for rows the full scan cannot cover:
+// new rows never took part in it, and edited rows must match against their
+// edited data while the scan reads raw source data. A cell commit rebuilds
+// only the touched row's item, so only that row is rescanned.
 const searchRowCache = createGridRowSearchCache<RowItem>((item, q) => {
   const matches: number[] = [];
   const data = item.data;
@@ -2807,26 +2834,41 @@ watch(
   },
 );
 
-const searchMatches = computed<SearchMatch[]>(() => {
+interface SearchMatchResults {
+  matches: SearchMatch[];
+  keys: Set<string>;
+}
+
+// Single mapping pass over the display rows: it flattens per-row hit columns
+// into matches and cell keys and never formats a cell. Clean (and deleted)
+// rows read the columns recorded by the sortedRows scan — their display data
+// is the raw row that scan already formatted; new and edited rows keep the
+// per-row incremental cache above.
+const searchMatchResults = computed<SearchMatchResults>(() => {
   const q = deferredClientSearchText.value;
-  if (!q) return [];
+  if (!q) return { matches: [], keys: new Set() };
   const refs = displayRowRefs.value;
+  const scanned = searchScanColumns;
   const matches: SearchMatch[] = [];
+  const keys = new Set<string>();
   for (let r = 0; r < refs.length; r++) {
     const ref = refs[r];
-    const columns = searchRowCache.matchesFor(ref, displayItemCache.get(ref), q);
-    for (const col of columns) matches.push({ displayRow: r, col });
+    const columns =
+      scanned && !ref.isNew && !dirtyRows.value.has(ref.sourceIndex)
+        ? scanned.get(ref.sourceIndex)
+        : searchRowCache.matchesFor(ref, displayItemCache.get(ref), q);
+    if (!columns) continue;
+    for (const col of columns) {
+      matches.push({ displayRow: r, col });
+      keys.add(`${r}:${col}`);
+    }
   }
-  return matches;
+  return { matches, keys };
 });
 
-const searchMatchSet = computed(() => {
-  const set = new Set<string>();
-  for (const m of searchMatches.value) {
-    set.add(`${m.displayRow}:${m.col}`);
-  }
-  return set;
-});
+const searchMatches = computed<SearchMatch[]>(() => searchMatchResults.value.matches);
+
+const searchMatchSet = computed(() => searchMatchResults.value.keys);
 
 const currentSearchMatch = computed(() => {
   const idx = currentMatchIndex.value;
