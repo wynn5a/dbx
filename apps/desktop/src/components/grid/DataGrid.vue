@@ -2622,8 +2622,10 @@ function addRow() {
 }
 
 // Lowered display strings, bucketed per column and keyed by the raw cell
-// value. Database columns repeat values heavily, so this avoids a
-// toLowerCase() allocation per cell on every search rescan. Keying by the raw
+// value, for the incremental per-row search path (new and edited rows — the
+// full-table scan reads the materialized row displays instead). Database
+// columns repeat values heavily, so this avoids a
+// toLowerCase() allocation per cell on every row rescan. Keying by the raw
 // value (SameValueZero) means a hit needs no key building and no display
 // probe first; bucketing per column is required because the same raw value
 // can format differently under different column formatters. A raw-value key
@@ -2646,18 +2648,45 @@ function formatCellLowerCached(value: CellValue, columnIndex: number): string {
 
 // When the search query extends the previous one over the same base row set,
 // every match is a subset of the previous matches — rescan only those instead
-// of the full table. Kept until G4 materializes per-row display strings:
-// without it every keystroke reformats the whole table at 100k rows.
+// of the full table. The per-row display store below already caps formatting
+// at once per row, but the prefix hit still avoids an O(table) includes()
+// pass per keystroke while a query is being narrowed.
 let searchScanCache: { q: string; base: readonly number[]; matched: number[] } | null = null;
 
 // Hit columns for every row returned by the scan above, keyed by source row
-// index. The scan is the only full-formatting pass over the table, so this
-// lets searchMatches map display rows to hit columns without re-running the
-// format chain. Rebuilt on every scan — a prefix-extension hit rescans only
-// the candidate subset, which is exactly the set the new match list can draw
+// index. The scan is the only pass that reads every row's display strings, so
+// this lets searchMatches map display rows to hit columns without a second
+// pass. Rebuilt on every scan — a prefix-extension hit rescans only the
+// candidate subset, which is exactly the set the new match list can draw
 // from. Columns reflect raw source data; edited rows are matched against
 // their edited data separately by searchRowCache.
 let searchScanColumns: Map<number, readonly number[]> | null = null;
+
+// Row-level display materialization: lowercased display strings per source
+// row, built lazily the first time a search scan touches the row. This caps
+// the formatting cost of high-cardinality columns (which thrash any per-value
+// format cache) at one format per row per result set, no matter how many
+// queries run. Built strictly from the raw props.result.rows[sourceIndex] —
+// never from dirty or new rows — so the scan's filter eligibility keeps
+// judging committed data only, exactly as before. Cleared when the rows array
+// is replaced, when rowsRevision bumps (a save rewrites raw rows in place),
+// when the query empties, and by clearCellFormatCache (a formatter change
+// stales the displays).
+let searchDisplayBySourceRow: (string[] | undefined)[] = [];
+let searchDisplayRowsRevision = rowsRevision.value;
+
+function searchDisplayForSourceRow(sourceIndex: number): string[] {
+  const row = props.result.rows[sourceIndex] ?? [];
+  const display = new Array<string>(row.length);
+  for (let c = 0; c < row.length; c++) {
+    const cell = row[c];
+    // Null cells never take part in matching (the scan checks the raw value
+    // first), so skip formatting them instead of storing a "null" string.
+    display[c] = cell === null ? "" : formatCell(cell, c).toLowerCase();
+  }
+  searchDisplayBySourceRow[sourceIndex] = display;
+  return display;
+}
 
 const sortedRows = computed(() => {
   const indices = localFilteredRows.value;
@@ -2665,7 +2694,15 @@ const sortedRows = computed(() => {
   if (!q) {
     searchScanCache = null;
     searchScanColumns = null;
+    searchDisplayBySourceRow = [];
     return indices;
+  }
+  // A save writes committed cell values into the raw rows in place and bumps
+  // rowsRevision without changing the array identity, so the rows watcher
+  // never fires for it — drop displays built from the pre-save rows here.
+  if (searchDisplayRowsRevision !== rowsRevision.value) {
+    searchDisplayBySourceRow = [];
+    searchDisplayRowsRevision = rowsRevision.value;
   }
   const rows = props.result.rows;
   const cache = searchScanCache;
@@ -2674,13 +2711,15 @@ const sortedRows = computed(() => {
   const columnsByRow = new Map<number, readonly number[]>();
   for (const sourceIndex of candidates) {
     const data = rows[sourceIndex];
+    const display = searchDisplayBySourceRow[sourceIndex] ?? searchDisplayForSourceRow(sourceIndex);
     // Collect every hit column instead of stopping at the first one: this is
-    // the same formatting work the old second pass (searchMatches) did per
-    // display row, now folded into this single pass.
+    // the same work the old second pass (searchMatches) did per display row,
+    // now folded into this single pass. The raw null check keeps null cells
+    // out of matching even though formatCell would render text for them.
     const hits: number[] = [];
     for (let c = 0; c < data.length; c++) {
       const cell = data[c];
-      if (cell !== null && formatCellLowerCached(cell, c).includes(q)) hits.push(c);
+      if (cell !== null && display[c].includes(q)) hits.push(c);
     }
     if (hits.length > 0) {
       matched.push(sourceIndex);
@@ -2831,6 +2870,7 @@ watch(
     displayItemCache.clear();
     visibleProjectionCache.clear();
     searchRowCache.clear();
+    searchDisplayBySourceRow = [];
   },
 );
 
@@ -3812,6 +3852,7 @@ function clearCellFormatCache() {
   primitiveCellFormatCache.clear();
   cellLowerCache.clear();
   objectCellFormatCache = new WeakMap<object, Map<number, string>>();
+  searchDisplayBySourceRow = [];
 }
 
 function cellFormatColumnBucket(
