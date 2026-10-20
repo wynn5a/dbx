@@ -2610,19 +2610,26 @@ function addRow() {
   focusAppendedTransposeRecord();
 }
 
-// Lowered display strings, keyed by the (already cached) formatted string.
-// Database columns repeat values heavily, so this avoids a toLowerCase()
-// allocation per cell on every search rescan. Value-keyed, so entries never
-// go stale; the cap just bounds memory.
-const cellLowerCache = new Map<string, string>();
+// Lowered display strings, bucketed per column and keyed by the raw cell
+// value. Database columns repeat values heavily, so this avoids a
+// toLowerCase() allocation per cell on every search rescan. Keying by the raw
+// value (SameValueZero) means a hit needs no key building and no display
+// probe first; bucketing per column is required because the same raw value
+// can format differently under different column formatters. A raw-value key
+// can go stale when a formatter changes, so this is cleared by
+// clearCellFormatCache alongside the display caches.
+const cellLowerCache = new Map<number, Map<CellValue, string>>();
 function formatCellLowerCached(value: CellValue, columnIndex: number): string {
-  const display = formatCellCached(value, columnIndex);
-  let lower = cellLowerCache.get(display);
-  if (lower === undefined) {
-    if (cellLowerCache.size >= 65536) cellLowerCache.clear();
-    lower = display.toLowerCase();
-    cellLowerCache.set(display, lower);
+  let columnCache = cellLowerCache.get(columnIndex);
+  const cached = columnCache?.get(value);
+  if (cached !== undefined) return cached;
+  const lower = formatCellCached(value, columnIndex).toLowerCase();
+  if (!columnCache) {
+    columnCache = new Map<CellValue, string>();
+    cellLowerCache.set(columnIndex, columnCache);
   }
+  if (columnCache.size >= CELL_FORMAT_CACHE_COLUMN_LIMIT) columnCache.clear();
+  columnCache.set(value, lower);
   return lower;
 }
 
@@ -3721,14 +3728,27 @@ async function applyWhereFilter() {
 }
 
 const CELL_DISPLAY_MAX_LENGTH = 256;
-const CELL_FORMAT_CACHE_LIMIT = 20_000;
-const CELL_FORMAT_CACHE_PRUNE_COUNT = 5_000;
+// Per-column cap on cached raw cell values. Low-cardinality columns (the only
+// ones this cache actually helps) stay far below it, while high-cardinality
+// columns thrash any cap during a full-table search — the win here is
+// eliminating per-cell key building, not raising the hit rate, so a crude
+// clear-the-bucket eviction beats LRU bookkeeping on the hot path. Worst-case
+// memory is 4k entries per column, the same order as the old global 20k cache
+// for typical grid widths.
+const CELL_FORMAT_CACHE_COLUMN_LIMIT = 4_096;
 
 const resolvedColumnFormatters = computed(() =>
   props.result.columns.map((_, columnIndex) => columnFormatter(columnIndex)),
 );
 const columnFormatterSignatures = computed(() => resolvedColumnFormatters.value.map(formatterSignature));
-const primitiveCellFormatCache = new Map<string, string>();
+// Display strings keyed by the raw primitive value, bucketed per column. JS
+// Map keys compare with SameValueZero, so 1/"1"/true/null/NaN stay distinct
+// with zero key building — the old `${col}\0${typeof}\0${String(value)}`
+// string key cost more self-time than the cache saved on full-table searches.
+// Per-column buckets are required because the same raw value can format
+// differently under different column formatters; the undefined-column case
+// shares the -1 bucket.
+const primitiveCellFormatCache = new Map<number, Map<CellValue, string>>();
 let objectCellFormatCache = new WeakMap<object, Map<number, string>>();
 
 function formatterSignature(formatter: ColumnFormatterConfig | undefined): string {
@@ -3737,24 +3757,27 @@ function formatterSignature(formatter: ColumnFormatterConfig | undefined): strin
 
 function clearCellFormatCache() {
   primitiveCellFormatCache.clear();
+  cellLowerCache.clear();
   objectCellFormatCache = new WeakMap<object, Map<number, string>>();
 }
 
-function rememberPrimitiveCellFormat(key: string, display: string): string {
-  primitiveCellFormatCache.set(key, display);
-  if (primitiveCellFormatCache.size > CELL_FORMAT_CACHE_LIMIT) {
-    let removed = 0;
-    for (const cacheKey of primitiveCellFormatCache.keys()) {
-      primitiveCellFormatCache.delete(cacheKey);
-      removed++;
-      if (removed >= CELL_FORMAT_CACHE_PRUNE_COUNT) break;
-    }
+function cellFormatColumnBucket(
+  cache: Map<number, Map<CellValue, string>>,
+  columnIndex: number,
+): Map<CellValue, string> {
+  let columnCache = cache.get(columnIndex);
+  if (!columnCache) {
+    columnCache = new Map<CellValue, string>();
+    cache.set(columnIndex, columnCache);
   }
-  return display;
+  return columnCache;
 }
 
-function primitiveCellFormatKey(value: CellValue, columnIndex?: number): string {
-  return `${columnIndex ?? -1}\u0000${typeof value}\u0000${String(value)}`;
+function rememberPrimitiveCellFormat(columnIndex: number, value: CellValue, display: string): string {
+  const columnCache = cellFormatColumnBucket(primitiveCellFormatCache, columnIndex);
+  if (columnCache.size >= CELL_FORMAT_CACHE_COLUMN_LIMIT) columnCache.clear();
+  columnCache.set(value, display);
+  return display;
 }
 
 function formatCell(value: CellValue, columnIndex?: number): string {
@@ -3793,10 +3816,10 @@ function formatCellCached(value: CellValue, columnIndex?: number): string {
     return display;
   }
 
-  const key = primitiveCellFormatKey(value, columnIndex);
-  const cached = primitiveCellFormatCache.get(key);
+  const bucket = columnIndex ?? -1;
+  const cached = primitiveCellFormatCache.get(bucket)?.get(value);
   if (cached !== undefined) return cached;
-  return rememberPrimitiveCellFormat(key, formatCell(value, columnIndex));
+  return rememberPrimitiveCellFormat(bucket, value, formatCell(value, columnIndex));
 }
 
 watch(
